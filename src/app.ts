@@ -6,6 +6,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { AdapterRegistry } from "./adapters/registry.js";
 import { createBearerAuthMiddleware } from "./auth/bearer.js";
 import { CimdResolver } from "./auth/cimd.js";
+import { EmailOtpService, type EmailSender } from "./auth/email-otp.js";
 import { detectLang } from "./auth/pages.js";
 import { createOAuthRouter } from "./auth/router.js";
 import { consumeUserToolQuota } from "./billing/quota.js";
@@ -23,6 +24,8 @@ export interface CreateAppDeps {
   store: StorageBackend;
   registry?: AdapterRegistry;
   cimdResolver?: CimdResolver;
+  emailSender?: EmailSender;
+  otpService?: EmailOtpService;
 }
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
@@ -82,6 +85,9 @@ export function createApp(deps: CreateAppDeps): Express {
   const { config, store } = deps;
   const registry = deps.registry ?? new AdapterRegistry();
   const cimdResolver = deps.cimdResolver ?? new CimdResolver();
+  const otpService =
+    deps.otpService ??
+    new EmailOtpService({ config, store, emailSender: deps.emailSender });
 
   const app = express();
   app.disable("x-powered-by");
@@ -225,8 +231,8 @@ export function createApp(deps: CreateAppDeps): Express {
     });
   });
 
-  // 6. OAuth 2.1 Discovery + Authorize + Register + Token + Revoke
-  app.use(createOAuthRouter(config, store, cimdResolver));
+  // 6. OAuth 2.1 Discovery + Authorize + Register + Token + Revoke + Magic Link
+  app.use(createOAuthRouter(config, store, cimdResolver, otpService));
 
   // 7. Stateless Streamable HTTP MCP endpoint (/mcp) with RFC 6750 §3.1 Bearer Guard
   const requireBearer = createBearerAuthMiddleware(config, store);
@@ -319,7 +325,7 @@ export function createApp(deps: CreateAppDeps): Express {
   });
 
   app.use(createGuidesRouter(config));
-  app.use(createBillingRouter(config, store));
+  app.use(createBillingRouter(config, store, otpService));
 
   // 404 fallback
   app.use((_req, res) => {

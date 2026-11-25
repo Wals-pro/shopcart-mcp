@@ -77,7 +77,7 @@ Support &amp; Datenschutzanfragen: <a href="mailto:support@wals.pro">support@wal
 
 <h2>2. Datenkategorien &amp; Zwecke</h2>
 <ul>
-  <li><strong>Konto &amp; OAuth-2.1-Authentifizierung:</strong> E-Mail-Adresse, gesalzener Passwort-Hash (<code>scrypt</code>) sowie kryptografische Hashes (<code>SHA-256</code>) von OAuth-Access-/Refresh-Tokens (niemals Klartext-Tokens), um Verbindungen mit KI-Clients (z. B. Claude, ChatGPT, Cursor) abzusichern.</li>
+  <li><strong>Konto &amp; OAuth-2.1-Authentifizierung:</strong> Passwortloser E-Mail-Login per einmaligem 6-stelligen Code und Magic Link (ausschließlich als <code>HMAC-SHA-256</code>-Hash mit 10 Minuten TTL gespeichert, keine Passwörter) sowie kryptografische Hashes (<code>SHA-256</code>) von OAuth-Access-/Refresh-Tokens (niemals Klartext-Tokens), um Verbindungen mit KI-Clients (z. B. Claude, ChatGPT, Cursor) abzusichern.</li>
   <li><strong>Tool-Eingaben &amp; -Ausgaben:</strong> Vom Nutzer übergebene öffentliche Shop-URLs, Suchbegriffe, Produkthandles und Varianten-IDs werden in Echtzeit per HTTPS-GET an den jeweils angefragten öffentlichen Online-Shop weitergeleitet, um Katalogdaten zu normalisieren und Warenkorb-Links zu erzeugen. Wir speichern <strong>keine</strong> Chat-Verläufe, keine Lieferadressen, keine Shop-Logins und keine Zahlungsdaten.</li>
   <li><strong>Nutzungszähler &amp; Billing:</strong> Pro Konto wird ein rein numerischer Tageszähler (<code>tool_calls</code> pro Tag) zur Einhaltung des Free-/Pro-Tageskontingents geführt. Bei Abschluss eines Pro-Abos erfolgt die Zahlungsabwicklung ausschließlich über <strong>Stripe</strong>; bei Wals.pro werden lediglich die Stripe-Customer-ID, Subscription-ID und der Abo-Status gespeichert (keine Kreditkarten- oder Bankdaten).</li>
   <li><strong>Lokaler Open-Source-Modus (<code>npx -y shopcart-mcp</code>):</strong> Läuft zu 100 % lokal über <code>stdio</code> auf dem Gerät des Nutzers — <strong>null Datenübertragung an Wals.pro, null Telemetrie, kein Konto erforderlich</strong>.</li>
@@ -96,7 +96,8 @@ Support &amp; Datenschutzanfragen: <a href="mailto:support@wals.pro">support@wal
   <li>OAuth Refresh Tokens: <strong>30 Tage</strong> (Single-Use-Rotation, sofortige Family-Revocation bei Replay).</li>
   <li>OAuth Authorization Codes: <strong>5 Minuten</strong> (einmalige Verwendung).</li>
   <li>Dynamisch registrierte OAuth-Clients (DCR): <strong>30 Tage</strong> unaktiviert / <strong>90 Tage</strong> nach Aktivierung.</li>
-  <li>Kontodaten (E-Mail, Passwort-Hash, Kontingentstatus): Bis zur Löschung durch den Nutzer.</li>
+  <li>E-Mail-Einmal-Codes &amp; Magic Links: <strong>10 Minuten</strong> (einmalige Verwendung, automatische Firestore-TTL-Löschung).</li>
+  <li>Kontodaten (E-Mail, Kontingentstatus): Bis zur Löschung durch den Nutzer.</li>
 </ul>
 
 <h2>5. Nutzerkontrolle &amp; DSGVO-Rechte (Art. 15–21 DSGVO)</h2>
@@ -114,7 +115,7 @@ Support &amp; privacy requests: <a href="mailto:support@wals.pro">support@wals.p
 
 <h2>2. Data Categories &amp; Purposes</h2>
 <ul>
-  <li><strong>Account &amp; OAuth 2.1 Authentication:</strong> Email address, per-user salted password hash (<code>scrypt</code>), and cryptographic hashes (<code>SHA-256</code>) of OAuth access/refresh tokens (never plaintext tokens) used strictly to authenticate your AI clients (such as Claude, ChatGPT, or Cursor).</li>
+  <li><strong>Account &amp; OAuth 2.1 Authentication:</strong> Passwordless email sign-in via single-use 6-digit code and Magic Link (stored strictly as <code>HMAC-SHA-256</code> hashes with a 10-minute TTL — zero passwords stored), plus cryptographic hashes (<code>SHA-256</code>) of OAuth access/refresh tokens (never plaintext tokens) used strictly to authenticate your AI clients (such as Claude, ChatGPT, or Cursor).</li>
   <li><strong>Tool Inputs &amp; Outputs:</strong> Public store URLs, search keywords, product handles, and variant IDs you pass to tools are forwarded live over HTTPS GET to the requested public online store to normalize catalog metadata and build browser cart links. We do <strong>not</strong> store chat transcripts, shipping addresses, merchant store logins, or payment credentials.</li>
   <li><strong>Usage Counters &amp; Billing:</strong> A numeric daily tool-call counter per account is stored to enforce Free/Pro daily quotas. If you upgrade to Pro, payment processing is handled solely by <strong>Stripe</strong>; Wals.pro stores only your Stripe Customer ID, Subscription ID, and subscription status (zero credit card or bank details).</li>
   <li><strong>Local Open-Source Mode (<code>npx -y shopcart-mcp</code>):</strong> Runs 100% locally over <code>stdio</code> on your machine — <strong>zero data sent to Wals.pro, zero telemetry, no account required</strong>.</li>
@@ -133,7 +134,8 @@ Support &amp; privacy requests: <a href="mailto:support@wals.pro">support@wals.p
   <li>OAuth Refresh Tokens: <strong>30 days</strong> (single-use rotation with automatic family revocation on replay).</li>
   <li>OAuth Authorization Codes: <strong>5 minutes</strong> (single-use).</li>
   <li>Dynamic OAuth Clients (DCR): <strong>30 days</strong> if unactivated / <strong>90 days</strong> once activated.</li>
-  <li>Account records (email, password hash, plan status): Retained until you request account deletion.</li>
+  <li>Email one-time codes &amp; Magic Links: <strong>10 minutes</strong> (single-use, automatic Firestore TTL expiration).</li>
+  <li>Account records (email, plan status): Retained until you request account deletion.</li>
 </ul>
 
 <h2>5. User Controls &amp; GDPR Rights (Articles 15–21)</h2>

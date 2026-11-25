@@ -63,6 +63,44 @@ export interface WebSessionRecord {
   expiresAt: Date;
 }
 
+export interface OAuthChallengeParams {
+  clientId: string;
+  clientName: string;
+  redirectUri: string;
+  codeChallenge: string;
+  codeChallengeMethod: "S256";
+  resource: string;
+  scope: string;
+  state: string;
+}
+
+export type EmailChallengePurpose = "oauth" | "billing";
+
+export interface EmailAuthChallengeRecord {
+  challengeId: string;
+  email: string;
+  purpose: EmailChallengePurpose;
+  lang: "de" | "en";
+  otpHash: string;
+  magicTokenHash: string;
+  browserBindHash: string | null;
+  oauthParams: OAuthChallengeParams | null;
+  attempts: number;
+  maxAttempts: number;
+  used: boolean;
+  createdAt: Date;
+  expiresAt: Date;
+}
+
+export type EmailChallengeVerifyResult =
+  | { status: "ok"; challenge: EmailAuthChallengeRecord }
+  | { status: "invalid_code"; remainingAttempts: number }
+  | { status: "locked" }
+  | { status: "expired" }
+  | { status: "used" }
+  | { status: "not_found" }
+  | { status: "browser_mismatch"; challenge: EmailAuthChallengeRecord };
+
 export type RefreshRotationResult =
   | { status: "ok"; record: OAuthTokenRecord }
   | { status: "replayed"; familyId: string }
@@ -98,6 +136,21 @@ export interface StorageBackend {
   saveWebSession(session: WebSessionRecord): Promise<void>;
   getWebSession(sessionHash: string): Promise<WebSessionRecord | null>;
   deleteWebSession(sessionHash: string): Promise<void>;
+
+  // Passwordless Email Auth Challenges (OTP + Magic Link)
+  saveEmailAuthChallenge(challenge: EmailAuthChallengeRecord): Promise<void>;
+  getEmailAuthChallenge(challengeId: string): Promise<EmailAuthChallengeRecord | null>;
+  verifyAndConsumeEmailOtp(
+    challengeId: string,
+    expectedOtpHash: string,
+    now?: Date
+  ): Promise<EmailChallengeVerifyResult>;
+  verifyAndConsumeEmailMagicLink(
+    challengeId: string,
+    expectedMagicTokenHash: string,
+    browserBindHash: string | null,
+    now?: Date
+  ): Promise<EmailChallengeVerifyResult>;
 
   // Daily Usage Quota
   getDailyUsage(userId: string, dayKey: string): Promise<number>;
