@@ -34,6 +34,28 @@ const STATIC_ICONS: Array<{ route: string; file: string; contentType: string }> 
   { route: "/icon-512.png", file: "icon-512.png", contentType: "image/png" }
 ];
 
+const STATIC_LANDING_ASSETS: Array<{ route: string; file: string; contentType: string }> = [
+  { route: "/assets/landing.css", file: "assets/landing.css", contentType: "text/css; charset=utf-8" },
+  {
+    route: "/assets/hero-flow.js",
+    file: "assets/hero-flow.js",
+    contentType: "application/javascript; charset=utf-8"
+  }
+];
+
+const LANDING_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "img-src 'self' data: https:",
+  "media-src 'self' https:",
+  "frame-src https://www.youtube-nocookie.com https://www.youtube.com https://player.vimeo.com https://www.tiktok.com",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "frame-ancestors 'none'"
+].join("; ");
+
 function corsMiddleware(req: Request, res: Response, next: NextFunction): void {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
@@ -107,7 +129,7 @@ export function createApp(deps: CreateAppDeps): Express {
     });
   });
 
-  // 3. Static Icons (unauthenticated, required for Claude Connectors Directory, OpenAI, and server.json)
+  // 3. Static Icons & Landing Assets (same-origin, strict CSP friendly)
   for (const icon of STATIC_ICONS) {
     const filePath = path.join(PUBLIC_DIR, icon.file);
     const cachedBuffer = fs.existsSync(filePath) ? fs.readFileSync(filePath) : null;
@@ -118,6 +140,21 @@ export function createApp(deps: CreateAppDeps): Express {
       }
       res.setHeader("Content-Type", icon.contentType);
       res.setHeader("Cache-Control", "public, max-age=86400");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.status(200).send(cachedBuffer);
+    });
+  }
+
+  for (const asset of STATIC_LANDING_ASSETS) {
+    const filePath = path.join(PUBLIC_DIR, asset.file);
+    const cachedBuffer = fs.existsSync(filePath) ? fs.readFileSync(filePath) : null;
+    app.get(asset.route, (_req, res) => {
+      if (!cachedBuffer) {
+        res.status(404).end();
+        return;
+      }
+      res.setHeader("Content-Type", asset.contentType);
+      res.setHeader("Cache-Control", "public, max-age=300");
       res.setHeader("X-Content-Type-Options", "nosniff");
       res.status(200).send(cachedBuffer);
     });
@@ -251,6 +288,7 @@ export function createApp(deps: CreateAppDeps): Express {
   // 8. Landing Page (DE/EN), Product-specific Legal Routes, & Account/Billing Portal
   app.get("/", (req, res) => {
     const lang = detectLang(req.query.lang, req.headers["accept-language"]);
+    res.setHeader("Content-Security-Policy", LANDING_CSP);
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");

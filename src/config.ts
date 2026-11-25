@@ -14,6 +14,9 @@ export interface AppConfig {
   stripeProPriceId: string | undefined;
   openaiAppsChallenge: string | undefined;
   mcpRegistryAuth: string | undefined;
+  demoVideoUrl: string | undefined;
+  demoVideoUrlDe: string | undefined;
+  demoVideoUrlEn: string | undefined;
   sessionSecret: string;
   appName: string;
   repoUrl: string;
@@ -35,6 +38,21 @@ function parseOptionalDate(raw: string | undefined, fallback?: string): Date | n
   const d = new Date(val);
   if (Number.isNaN(d.getTime())) return null;
   return d;
+}
+
+function parseOptionalVideoUrl(raw: string | undefined): string | undefined {
+  const val = raw?.trim();
+  if (!val) return undefined;
+  if (val.startsWith("/") && !val.startsWith("//")) return val;
+  try {
+    const parsed = new URL(val);
+    if (parsed.protocol === "https:" || parsed.protocol === "http:") {
+      return parsed.toString();
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -81,6 +99,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     stripeProPriceId: env.STRIPE_PRO_PRICE_ID?.trim() || undefined,
     openaiAppsChallenge: env.OPENAI_APPS_CHALLENGE?.trim() || undefined,
     mcpRegistryAuth: env.MCP_REGISTRY_AUTH?.trim() || undefined,
+    demoVideoUrl: parseOptionalVideoUrl(env.DEMO_VIDEO_URL),
+    demoVideoUrlDe: parseOptionalVideoUrl(env.DEMO_VIDEO_URL_DE),
+    demoVideoUrlEn: parseOptionalVideoUrl(env.DEMO_VIDEO_URL_EN),
     sessionSecret,
     appName: "shopcart-mcp",
     repoUrl: "https://github.com/Wals-pro/shopcart-mcp",
