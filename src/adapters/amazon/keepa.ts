@@ -163,6 +163,12 @@ export function mapKeepaProductDetail(
   };
 }
 
+function redactKeepaKey(message: string, apiKey: string): string {
+  if (!apiKey) return message;
+  const encoded = encodeURIComponent(apiKey);
+  return message.split(apiKey).join("[REDACTED]").split(encoded).join("[REDACTED]");
+}
+
 export async function keepaSearchProducts(params: {
   marketplace: AmazonMarketplace;
   query: string;
@@ -183,13 +189,20 @@ export async function keepaSearchProducts(params: {
     stats: "90"
   });
   const url = `${KEEPA_API_ORIGIN}/search?${qs.toString()}`;
-  const res = await fetcher(url, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-    timeoutMs: 8000,
-    maxBytes: 2_097_152,
-    concurrencyKey: params.concurrencyKey
-  });
+  let res;
+  try {
+    res = await fetcher(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      timeoutMs: 8000,
+      maxBytes: 2_097_152,
+      maxRedirects: 0,
+      concurrencyKey: params.concurrencyKey
+    });
+  } catch (err) {
+    const safeMsg = redactKeepaKey(err instanceof Error ? err.message : String(err), params.apiKey);
+    throw new Error(`Keepa search request failed: ${sanitizeText(safeMsg, 200)}`);
+  }
 
   let parsed: KeepaApiResponse | null = null;
   try {
@@ -199,11 +212,15 @@ export async function keepaSearchProducts(params: {
   }
 
   if (res.status !== 200 || !parsed) {
-    const errMsg = parsed?.error?.message ?? `HTTP ${res.status}`;
+    const errMsg = parsed?.error?.message
+      ? sanitizeText(redactKeepaKey(parsed.error.message, params.apiKey), 200)
+      : `HTTP ${res.status}`;
     throw new Error(`Keepa search failed: ${errMsg}`);
   }
   if (parsed.error?.message) {
-    throw new Error(`Keepa search error: ${parsed.error.message}`);
+    throw new Error(
+      `Keepa search error: ${sanitizeText(redactKeepaKey(parsed.error.message, params.apiKey), 200)}`
+    );
   }
 
   return (parsed.products ?? [])
@@ -232,13 +249,20 @@ export async function keepaGetProduct(params: {
     rating: "1"
   });
   const url = `${KEEPA_API_ORIGIN}/product?${qs.toString()}`;
-  const res = await fetcher(url, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-    timeoutMs: 8000,
-    maxBytes: 2_097_152,
-    concurrencyKey: params.concurrencyKey
-  });
+  let res;
+  try {
+    res = await fetcher(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      timeoutMs: 8000,
+      maxBytes: 2_097_152,
+      maxRedirects: 0,
+      concurrencyKey: params.concurrencyKey
+    });
+  } catch (err) {
+    const safeMsg = redactKeepaKey(err instanceof Error ? err.message : String(err), params.apiKey);
+    throw new Error(`Keepa product lookup request failed: ${sanitizeText(safeMsg, 200)}`);
+  }
 
   let parsed: KeepaApiResponse | null = null;
   try {
@@ -248,11 +272,15 @@ export async function keepaGetProduct(params: {
   }
 
   if (res.status !== 200 || !parsed) {
-    const errMsg = parsed?.error?.message ?? `HTTP ${res.status}`;
+    const errMsg = parsed?.error?.message
+      ? sanitizeText(redactKeepaKey(parsed.error.message, params.apiKey), 200)
+      : `HTTP ${res.status}`;
     throw new Error(`Keepa product lookup failed: ${errMsg}`);
   }
   if (parsed.error?.message) {
-    throw new Error(`Keepa product error: ${parsed.error.message}`);
+    throw new Error(
+      `Keepa product error: ${sanitizeText(redactKeepaKey(parsed.error.message, params.apiKey), 200)}`
+    );
   }
 
   const first = parsed.products?.[0];

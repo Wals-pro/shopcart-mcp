@@ -34,24 +34,242 @@ const NAMED_ENTITIES: Record<string, string> = {
   trade: "™"
 };
 
+const MAX_SAFE_URL_LENGTH = 2048;
+
+const DANGEROUS_HTML_TAGS = [
+  "script",
+  "style",
+  "iframe",
+  "noscript",
+  "svg",
+  "object",
+  "embed"
+] as const;
+
+const HIDDEN_STYLE_TAGS = new Set(["div", "span", "p", "section"]);
+const HIDDEN_CSS_PATTERN =
+  /(?:display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0(?![0-9.])|font-size\s*:\s*0(?:px|em|rem|%)?(?![0-9.]))/i;
+
+function isValidUnicodeScalar(code: number): boolean {
+  return Number.isFinite(code) && code > 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff);
+}
+
 function decodeEntities(input: string): string {
   return input.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, (full, entity: string) => {
     if (entity.startsWith("#x") || entity.startsWith("#X")) {
       const code = Number.parseInt(entity.slice(2), 16);
-      if (Number.isFinite(code) && code > 0 && code <= 0x10ffff) {
+      if (isValidUnicodeScalar(code)) {
         return String.fromCodePoint(code);
       }
       return full;
     }
     if (entity.startsWith("#")) {
       const code = Number.parseInt(entity.slice(1), 10);
-      if (Number.isFinite(code) && code > 0 && code <= 0x10ffff) {
+      if (isValidUnicodeScalar(code)) {
         return String.fromCodePoint(code);
       }
       return full;
     }
-    return NAMED_ENTITIES[entity.toLowerCase()] ?? full;
+    const lower = entity.toLowerCase();
+    return Object.hasOwn(NAMED_ENTITIES, lower) ? NAMED_ENTITIES[lower]! : full;
   });
+}
+
+function isTagNameBoundary(ch: string | undefined): boolean {
+  return ch === undefined || ch === ">" || ch === "/" || /\s/.test(ch);
+}
+
+/**
+ * Linear-time O(N) HTML comment remover without regex backtracking.
+ */
+export function stripHtmlCommentsLinear(html: string): string {
+  if (!html || !html.includes("<!--")) return html;
+  let out = "";
+  let pos = 0;
+  const len = html.length;
+  while (pos < len) {
+    const start = html.indexOf("<!--", pos);
+    if (start === -1) {
+      out += html.slice(pos);
+      break;
+    }
+    out += html.slice(pos, start);
+    out += " ";
+    const end = html.indexOf("-->", start + 4);
+    if (end === -1) {
+      // Unclosed comment: discard remainder in O(1) without rescanning
+      break;
+    }
+    pos = end + 3;
+  }
+  return out;
+}
+
+/**
+ * Linear-time O(N) HTML block tag stripper (e.g. script, style, nav, svg).
+ * Scans forward on a single lowercased copy and never backtracks across unclosed tags.
+ */
+export function stripTagBlocksLinear(html: string, tagNames: readonly string[]): string {
+  if (!html || !html.includes("<")) return html;
+  const tagSet = new Set(tagNames.map((t) => t.toLowerCase()));
+  const noCloseTag = new Set<string>();
+  const lower = html.toLowerCase();
+  const len = html.length;
+  let out = "";
+  let pos = 0;
+
+  while (pos < len) {
+    const lt = lower.indexOf("<", pos);
+    if (lt === -1) {
+      out += html.slice(pos);
+      break;
+    }
+
+    // Parse ASCII tag name immediately following '<'
+    let nameEnd = lt + 1;
+    while (nameEnd < len) {
+      const c = lower.charCodeAt(nameEnd);
+      if ((c >= 97 && c <= 122) || (c >= 48 && c <= 57)) {
+        nameEnd++;
+      } else {
+        break;
+      }
+    }
+
+    const tagName = lower.slice(lt + 1, nameEnd);
+    if (tagName && tagSet.has(tagName) && isTagNameBoundary(lower[nameEnd])) {
+      const openEnd = lower.indexOf(">", nameEnd);
+      if (openEnd === -1) {
+        // Unclosed opening tag: strip tag marker and stop rescanning
+        out += html.slice(pos, lt);
+        out += " ";
+        break;
+      }
+
+      // Self-closing tag (e.g. <svg/>)
+      if (lower[openEnd - 1] === "/") {
+        out += html.slice(pos, lt);
+        out += " ";
+        pos = openEnd + 1;
+        continue;
+      }
+
+      if (!noCloseTag.has(tagName)) {
+        const closeNeedle = `</${tagName}`;
+        let closeIdx = lower.indexOf(closeNeedle, openEnd + 1);
+        while (closeIdx !== -1 && !isTagNameBoundary(lower[closeIdx + closeNeedle.length])) {
+          closeIdx = lower.indexOf(closeNeedle, closeIdx + closeNeedle.length);
+        }
+
+        if (closeIdx !== -1) {
+          const closeEnd = lower.indexOf(">", closeIdx + closeNeedle.length);
+          out += html.slice(pos, lt);
+          out += " ";
+          pos = closeEnd === -1 ? len : closeEnd + 1;
+          continue;
+        }
+
+        // Memoize absence of closing tag so subsequent unclosed tags run in O(1)
+        noCloseTag.add(tagName);
+      }
+
+      out += html.slice(pos, lt);
+      out += " ";
+      pos = openEnd + 1;
+      continue;
+    }
+
+    out += html.slice(pos, lt + 1);
+    pos = lt + 1;
+  }
+
+  return out;
+}
+
+/**
+ * Linear-time O(N) stripper for inline-hidden HTML blocks (display:none, visibility:hidden,
+ * opacity:0, font-size:0) used to hide prompt-injection payloads on storefront pages.
+ */
+export function stripHiddenStyleBlocksLinear(html: string): string {
+  if (!html || !html.includes("<") || !html.toLowerCase().includes("style")) return html;
+  const noCloseTag = new Set<string>();
+  const lower = html.toLowerCase();
+  const len = html.length;
+  let out = "";
+  let pos = 0;
+
+  while (pos < len) {
+    const lt = lower.indexOf("<", pos);
+    if (lt === -1) {
+      out += html.slice(pos);
+      break;
+    }
+
+    let nameEnd = lt + 1;
+    while (nameEnd < len) {
+      const c = lower.charCodeAt(nameEnd);
+      if (c >= 97 && c <= 122) {
+        nameEnd++;
+      } else {
+        break;
+      }
+    }
+
+    const tagName = lower.slice(lt + 1, nameEnd);
+    if (tagName && HIDDEN_STYLE_TAGS.has(tagName) && isTagNameBoundary(lower[nameEnd])) {
+      // Bound '>' search to single tag window (<= 1024 chars) to prevent scanning to EOF on unclosed tags
+      const searchEnd = Math.min(len, nameEnd + 1024);
+      const windowSlice = lower.slice(nameEnd, searchEnd);
+      const relOpenEnd = windowSlice.indexOf(">");
+      const relNextLt = windowSlice.indexOf("<");
+      if (relOpenEnd !== -1 && (relNextLt === -1 || relOpenEnd < relNextLt)) {
+        const openEnd = nameEnd + relOpenEnd;
+        const attrSlice = windowSlice.slice(0, relOpenEnd);
+        const styleIdx = attrSlice.indexOf("style");
+        if (styleIdx !== -1 && HIDDEN_CSS_PATTERN.test(attrSlice.slice(styleIdx))) {
+          let closeIdx = -1;
+          if (!noCloseTag.has(tagName)) {
+            const closeNeedle = `</${tagName}`;
+            closeIdx = lower.indexOf(closeNeedle, openEnd + 1);
+            while (closeIdx !== -1 && !isTagNameBoundary(lower[closeIdx + closeNeedle.length])) {
+              closeIdx = lower.indexOf(closeNeedle, closeIdx + closeNeedle.length);
+            }
+            if (closeIdx === -1) {
+              noCloseTag.add(tagName);
+            }
+          }
+          out += html.slice(pos, lt);
+          out += " ";
+          if (closeIdx !== -1) {
+            const closeEnd = lower.indexOf(">", closeIdx + tagName.length + 2);
+            pos = closeEnd === -1 ? len : closeEnd + 1;
+          } else {
+            pos = openEnd + 1;
+          }
+          continue;
+        }
+      }
+    }
+
+    out += html.slice(pos, lt + 1);
+    pos = lt + 1;
+  }
+
+  return out;
+}
+
+export function isSameStoreSite(originA: string, originB: string): boolean {
+  if (originA === originB) return true;
+  try {
+    const a = new URL(originA);
+    const b = new URL(originB);
+    if (a.protocol !== b.protocol) return false;
+    const hostA = a.hostname.toLowerCase();
+    const hostB = b.hostname.toLowerCase();
+    return hostA === hostB || hostA === `www.${hostB}` || `www.${hostA}` === hostB;
+  } catch {
+    return false;
+  }
 }
 
 export function stripControlAndInvisible(input: string): string {
@@ -68,7 +286,11 @@ export function stripControlAndInvisible(input: string): string {
 
 export function sanitizeText(input: string | null | undefined, maxLen: number): string {
   if (!input) return "";
-  const cleaned = stripControlAndInvisible(String(input))
+  const raw = String(input);
+  const bounded = raw.length > Math.max(maxLen * 8, 16_384)
+    ? raw.slice(0, Math.max(maxLen * 8, 16_384))
+    : raw;
+  const cleaned = stripControlAndInvisible(bounded)
     .replace(/[\r\n\t]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -89,12 +311,15 @@ export function stripHtmlToText(
   maxLen = 1500
 ): string {
   if (!html) return "";
-  const noDangerous = String(html)
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<(script|style|iframe|noscript|svg|object|embed)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
+  const raw = String(html);
+  const maxRaw = Math.max(maxLen * 16, 65_536);
+  const bounded = raw.length > maxRaw ? raw.slice(0, maxRaw) : raw;
+
+  const noComments = stripHtmlCommentsLinear(bounded);
+  const noDangerous = stripTagBlocksLinear(noComments, DANGEROUS_HTML_TAGS)
     .replace(/<(br|hr)\s*\/?>/gi, "\n")
     .replace(/<\/(p|div|li|tr|h[1-6]|section|article)>/gi, "\n")
-    .replace(/<[^>]+>/g, " ");
+    .replace(/<[^<>]+>/g, " ");
 
   const decoded = decodeEntities(noDangerous);
   const cleaned = stripControlAndInvisible(decoded)
@@ -115,7 +340,7 @@ export function sanitizeSafeUrl(
 ): string | null {
   if (!rawUrl || typeof rawUrl !== "string") return null;
   let trimmed = stripControlAndInvisible(rawUrl).trim();
-  if (!trimmed) return null;
+  if (!trimmed || trimmed.length > MAX_SAFE_URL_LENGTH) return null;
 
   if (trimmed.startsWith("//")) {
     trimmed = `https:${trimmed}`;
@@ -131,6 +356,7 @@ export function sanitizeSafeUrl(
   }
 
   if (parsed.protocol !== "https:") return null;
+  if (parsed.port !== "" && parsed.port !== "443") return null;
   if (parsed.username || parsed.password) return null;
 
   const storeHost = new URL(storeOrigin).hostname.toLowerCase();
@@ -152,5 +378,7 @@ export function sanitizeSafeUrl(
     }
   }
 
-  return parsed.toString();
+  const finalUrl = parsed.toString();
+  if (finalUrl.length > MAX_SAFE_URL_LENGTH) return null;
+  return finalUrl;
 }

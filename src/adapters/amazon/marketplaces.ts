@@ -214,13 +214,13 @@ export function resolveAmazonMarketplace(originOrHost: string): AmazonMarketplac
   }
 
   hostname = hostname.replace(/\.$/, "");
-  if (AMAZON_DOMAINS[hostname]) {
+  if (Object.hasOwn(AMAZON_DOMAINS, hostname)) {
     return AMAZON_DOMAINS[hostname]!;
   }
 
   // Handle mobile/smile subdomains like m.amazon.de or smile.amazon.com
   const subStripped = hostname.replace(/^(?:m|smile)\./, "");
-  if (subStripped !== hostname && AMAZON_DOMAINS[subStripped]) {
+  if (subStripped !== hostname && Object.hasOwn(AMAZON_DOMAINS, subStripped)) {
     return AMAZON_DOMAINS[subStripped]!;
   }
 
@@ -265,7 +265,7 @@ export function tryExtractAsin(input: string): string | null {
       return null;
     }
     pathname = parsed.pathname;
-  } else if (trimmed.startsWith("/")) {
+  } else if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
     pathname = trimmed.split(/[?#]/, 1)[0] ?? "";
   } else if (/^(?:(?:www|m|smile)\.)?amazon\./i.test(trimmed)) {
     try {

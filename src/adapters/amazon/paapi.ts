@@ -315,6 +315,7 @@ export async function paApiSearchItems(params: {
     body: signed.body,
     timeoutMs: 8000,
     maxBytes: 1_048_576,
+    maxRedirects: 0,
     concurrencyKey: params.concurrencyKey
   });
 
@@ -326,7 +327,12 @@ export async function paApiSearchItems(params: {
   }
 
   if (res.status !== 200 || !parsed) {
-    const errMsg = parsed?.Errors?.[0]?.Message ?? `HTTP ${res.status}`;
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(`Amazon PA-API SearchItems authentication failed (HTTP ${res.status})`);
+    }
+    const errMsg = parsed?.Errors?.[0]?.Message
+      ? sanitizeText(parsed.Errors[0].Message, 200)
+      : `HTTP ${res.status}`;
     throw new Error(`Amazon PA-API SearchItems failed: ${errMsg}`);
   }
 
@@ -375,6 +381,7 @@ export async function paApiGetItem(params: {
     body: signed.body,
     timeoutMs: 8000,
     maxBytes: 1_048_576,
+    maxRedirects: 0,
     concurrencyKey: params.concurrencyKey
   });
 
@@ -386,7 +393,12 @@ export async function paApiGetItem(params: {
   }
 
   if (res.status !== 200 || !parsed) {
-    const errMsg = parsed?.Errors?.[0]?.Message ?? `HTTP ${res.status}`;
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(`Amazon PA-API GetItems authentication failed (HTTP ${res.status})`);
+    }
+    const errMsg = parsed?.Errors?.[0]?.Message
+      ? sanitizeText(parsed.Errors[0].Message, 200)
+      : `HTTP ${res.status}`;
     throw new Error(`Amazon PA-API GetItems failed: ${errMsg}`);
   }
 

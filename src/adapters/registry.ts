@@ -1,3 +1,4 @@
+import { isSameStoreSite } from "../security/sanitize.js";
 import { AmazonAdapter } from "./amazon/adapter.js";
 import { ShopifyAdapter } from "./shopify/adapter.js";
 import { WooCommerceAdapter } from "./woocommerce/adapter.js";
@@ -10,6 +11,7 @@ interface CachedResolution {
 }
 
 const REGISTRY_CACHE_TTL_MS = 15 * 60 * 1000;
+const MAX_CACHE_ENTRIES = 2000;
 
 export class AdapterRegistry {
   private readonly adapters: StoreAdapter[];
@@ -37,6 +39,36 @@ export class AdapterRegistry {
     this.cache.clear();
   }
 
+  private setCacheEntry(key: string, entry: CachedResolution, now: number): void {
+    if (this.cache.size >= MAX_CACHE_ENTRIES && !this.cache.has(key)) {
+      for (const [k, v] of this.cache) {
+        if (v.expiresAt <= now) {
+          this.cache.delete(k);
+        }
+      }
+      while (this.cache.size >= MAX_CACHE_ENTRIES) {
+        const oldest = this.cache.keys().next().value;
+        if (oldest === undefined) break;
+        this.cache.delete(oldest);
+      }
+    }
+    this.cache.set(key, entry);
+  }
+
+  private cacheResolution(origin: string, adapter: StoreAdapter, store: StoreInfo, now: number): void {
+    const entry: CachedResolution = {
+      adapter,
+      store,
+      expiresAt: now + REGISTRY_CACHE_TTL_MS
+    };
+    this.setCacheEntry(origin, entry, now);
+    // Only alias the canonical origin cache key if it belongs to the same storefront site (apex <-> www)
+    // to prevent cross-origin cache poisoning across unrelated domains.
+    if (store.origin !== origin && isSameStoreSite(origin, store.origin)) {
+      this.setCacheEntry(store.origin, entry, now);
+    }
+  }
+
   async resolve(
     origin: string,
     concurrencyKey?: string
@@ -45,15 +77,7 @@ export class AdapterRegistry {
     for (const adapter of this.adapters) {
       const store = await adapter.detect(origin, concurrencyKey);
       if (store) {
-        const entry: CachedResolution = {
-          adapter,
-          store,
-          expiresAt: now + REGISTRY_CACHE_TTL_MS
-        };
-        this.cache.set(origin, entry);
-        if (store.origin !== origin) {
-          this.cache.set(store.origin, entry);
-        }
+        this.cacheResolution(origin, adapter, store, now);
         return { adapter, store };
       }
     }
@@ -75,15 +99,7 @@ export class AdapterRegistry {
       }
       const store = await adapter.detect(origin, concurrencyKey);
       if (store) {
-        const entry: CachedResolution = {
-          adapter,
-          store,
-          expiresAt: now + REGISTRY_CACHE_TTL_MS
-        };
-        this.cache.set(origin, entry);
-        if (store.origin !== origin) {
-          this.cache.set(store.origin, entry);
-        }
+        this.cacheResolution(origin, adapter, store, now);
         return adapter;
       }
     }

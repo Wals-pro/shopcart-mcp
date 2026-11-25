@@ -2,7 +2,10 @@ import {
   sanitizeOptionalText,
   sanitizeSafeUrl,
   sanitizeText,
-  stripHtmlToText
+  stripHiddenStyleBlocksLinear,
+  stripHtmlCommentsLinear,
+  stripHtmlToText,
+  stripTagBlocksLinear
 } from "../../security/sanitize.js";
 import { SsrfError } from "../../security/ssrf.js";
 import type {
@@ -143,32 +146,63 @@ const DEAL_TAG_PRIORITY: Record<string, number> = {
   bestseller: 4
 };
 
+const POLICY_CHROME_TAGS = [
+  "head",
+  "header",
+  "nav",
+  "footer",
+  "aside",
+  "template",
+  "script",
+  "style",
+  "iframe",
+  "noscript",
+  "svg",
+  "object",
+  "embed"
+] as const;
+
+const POLICY_HTML_SCAN_MAX_CHARS = 131_072;
+
 function extractPolicyHtmlToCleanText(html: string, maxLen = POLICY_EXCERPT_MAX_CHARS): string {
   if (!html) return "";
-  // Strip document chrome, scripts, styles, comments, and inline-hidden prompt-injection blocks
-  let cleaned = String(html)
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<(head|header|nav|footer|aside|template|script|style|iframe|noscript|svg|object|embed)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
-    .replace(
-      /<(div|span|p|section)\b[^>]*style\s*=\s*["'][^"']*(?:display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0\b|font-size\s*:\s*0(?:px|em|rem|%)?\b)[^"']*["'][^>]*>[\s\S]*?<\/\1>/gi,
-      " "
-    );
+  const raw = String(html);
+  const lowerRaw = raw.toLowerCase();
 
-  // Focus on <main> or Shopify's standard policy container when present
-  const mainMatch = cleaned.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i);
-  if (mainMatch?.[1]) {
-    cleaned = mainMatch[1];
+  // Locate <main> or Shopify's standard policy container in O(N) using indexOf before slicing
+  let slice = raw;
+  const mainStart = lowerRaw.indexOf("<main");
+  if (mainStart !== -1) {
+    const mainTagEnd = lowerRaw.indexOf(">", mainStart + 5);
+    const mainClose = mainTagEnd !== -1 ? lowerRaw.indexOf("</main>", mainTagEnd + 1) : -1;
+    if (mainTagEnd !== -1 && mainClose !== -1) {
+      slice = raw.slice(mainTagEnd + 1, mainClose);
+    } else if (mainTagEnd !== -1) {
+      slice = raw.slice(mainTagEnd + 1);
+    }
   } else {
-    const policyContainerIdx = cleaned.search(/class\s*=\s*["'][^"']*shopify-policy__(?:body|container)[^"']*["']/i);
-    if (policyContainerIdx !== -1) {
-      const openTagStart = cleaned.lastIndexOf("<", policyContainerIdx);
+    const policyMarker =
+      lowerRaw.indexOf("shopify-policy__body") !== -1
+        ? lowerRaw.indexOf("shopify-policy__body")
+        : lowerRaw.indexOf("shopify-policy__container");
+    if (policyMarker !== -1) {
+      const openTagStart = raw.lastIndexOf("<", policyMarker);
       if (openTagStart !== -1) {
-        cleaned = cleaned.slice(openTagStart);
+        slice = raw.slice(openTagStart);
       }
     }
   }
 
-  return stripHtmlToText(cleaned, maxLen);
+  if (slice.length > POLICY_HTML_SCAN_MAX_CHARS) {
+    slice = slice.slice(0, POLICY_HTML_SCAN_MAX_CHARS);
+  }
+
+  // Strip comments, document chrome, scripts/styles, and inline-hidden blocks in strictly linear O(N) time
+  const noComments = stripHtmlCommentsLinear(slice);
+  const noChrome = stripTagBlocksLinear(noComments, POLICY_CHROME_TAGS);
+  const noHidden = stripHiddenStyleBlocksLinear(noChrome);
+
+  return stripHtmlToText(noHidden, maxLen);
 }
 
 function parseMcpPolicyPayload(rawText: string): {
@@ -188,7 +222,7 @@ function parseMcpPolicyPayload(rawText: string): {
   const collectRecord = (item: unknown): void => {
     if (!item) return;
     if (typeof item === "string") {
-      const clean = stripHtmlToText(item, POLICY_EXCERPT_MAX_CHARS);
+      const clean = stripHtmlToText(stripHiddenStyleBlocksLinear(item), POLICY_EXCERPT_MAX_CHARS);
       if (clean) parts.push(clean);
       return;
     }
@@ -199,7 +233,7 @@ function parseMcpPolicyPayload(rawText: string): {
     if (typeof item === "object") {
       const obj = item as Record<string, unknown>;
       const q = typeof obj.question === "string" ? sanitizeText(obj.question, 240) : null;
-      const a = typeof obj.answer === "string" ? stripHtmlToText(obj.answer, 1200) : null;
+      const a = typeof obj.answer === "string" ? stripHtmlToText(stripHiddenStyleBlocksLinear(obj.answer), 1200) : null;
       if (q && a) {
         parts.push(`Q: ${q}\nA: ${a}`);
       } else if (a) {
@@ -218,7 +252,7 @@ function parseMcpPolicyPayload(rawText: string): {
               : null;
 
       if (rawBody) {
-        const cleanBody = stripHtmlToText(rawBody, POLICY_EXCERPT_MAX_CHARS);
+        const cleanBody = stripHtmlToText(stripHiddenStyleBlocksLinear(rawBody), POLICY_EXCERPT_MAX_CHARS);
         if (cleanBody) {
           if (rawType.includes("ship")) {
             shippingBody = shippingBody ?? cleanBody;
@@ -484,7 +518,7 @@ export class ShopifyAdapter implements StoreAdapter {
     }
 
     const mapped: CollectionSummary[] = [];
-    for (const raw of res.data.collections) {
+    for (const raw of res.data.collections.slice(0, limit)) {
       const handle = sanitizeText(raw.handle, 200);
       const title = sanitizeText(raw.title, 200);
       if (!handle || !title) continue;
@@ -494,7 +528,7 @@ export class ShopifyAdapter implements StoreAdapter {
           : null;
       const { isDeal, tags } = classifyDealCollection(handle, title);
       mapped.push({
-        id: String(raw.id ?? handle),
+        id: sanitizeText(raw.id != null ? String(raw.id) : handle, 64) || handle,
         handle,
         title,
         products_count: productsCount,
@@ -744,7 +778,7 @@ export class ShopifyAdapter implements StoreAdapter {
     const imageUrl = sanitizeSafeUrl(imageRaw, origin, { allowShopifyCdn: true });
 
     return {
-      id: String(raw.id ?? handle),
+      id: sanitizeText(raw.id != null ? String(raw.id) : handle, 64) || handle,
       handle,
       title,
       vendor: sanitizeOptionalText(raw.vendor, 100),
@@ -850,7 +884,7 @@ export class ShopifyAdapter implements StoreAdapter {
       const available = variants.length > 0 ? variants.some((v) => v.available !== false) : true;
 
       products.push({
-        id: String(raw.id ?? handle),
+        id: sanitizeText(raw.id != null ? String(raw.id) : handle, 64) || handle,
         handle,
         title,
         vendor: sanitizeOptionalText(raw.vendor, 100),
@@ -953,7 +987,7 @@ export class ShopifyAdapter implements StoreAdapter {
       const { discount_percent, savings } = computeDiscount(price, compareAt);
 
       return {
-        id: String(v.id ?? ""),
+        id: sanitizeText(v.id != null ? String(v.id) : "", 64),
         title: sanitizeText(v.title, 120) || "Default",
         sku: sanitizeOptionalText(v.sku, 80),
         available: v.available !== false,
@@ -991,7 +1025,7 @@ export class ShopifyAdapter implements StoreAdapter {
       .slice(0, 10);
 
     return {
-      id: String(raw.id ?? handle),
+      id: sanitizeText(raw.id != null ? String(raw.id) : handle, 64) || handle,
       handle,
       title: sanitizeText(raw.title, 200),
       vendor: sanitizeOptionalText(raw.vendor, 100),
@@ -1023,7 +1057,7 @@ export class ShopifyAdapter implements StoreAdapter {
       const compareAt = moneyFromDecimalString(v.compare_at_price, currency, true);
       const { discount_percent, savings } = computeDiscount(price, compareAt);
       return {
-        id: String(v.id ?? ""),
+        id: sanitizeText(v.id != null ? String(v.id) : "", 64),
         title: sanitizeText(v.title, 120) || "Default",
         sku: sanitizeOptionalText(v.sku, 80),
         available: v.available !== false,
@@ -1049,7 +1083,7 @@ export class ShopifyAdapter implements StoreAdapter {
       .slice(0, 10);
 
     return {
-      id: String(raw.id ?? handle),
+      id: sanitizeText(raw.id != null ? String(raw.id) : handle, 64) || handle,
       handle,
       title: sanitizeText(raw.title, 200),
       vendor: sanitizeOptionalText(raw.vendor, 100),

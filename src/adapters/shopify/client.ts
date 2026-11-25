@@ -4,7 +4,7 @@ import {
   type SafeFetchOptions,
   type SafeFetchResponse
 } from "../../security/ssrf.js";
-import { sanitizeOptionalText } from "../../security/sanitize.js";
+import { isSameStoreSite, sanitizeOptionalText } from "../../security/sanitize.js";
 import { normalizeCurrency } from "./normalize.js";
 
 export interface DomainMetadata {
@@ -36,6 +36,21 @@ export type FetcherFn = (url: string, opts?: SafeFetchOptions) => Promise<SafeFe
 
 const DEFAULT_UA = "Mozilla/5.0 (compatible; shopcart-mcp/0.1; +https://shopcart.wals.pro)";
 const META_CACHE_TTL_MS = 15 * 60 * 1000;
+const MAX_CACHE_ENTRIES = 2000;
+
+function hasExpectedPathSuffix(rawUrl: string | undefined, suffix: string): boolean {
+  if (!rawUrl) return true;
+  try {
+    const parsed = new URL(rawUrl);
+    return parsed.pathname.toLowerCase().endsWith(suffix);
+  } catch {
+    return false;
+  }
+}
+
+function isShopifyMetaPayload(data: MetaJsonPayload): boolean {
+  return Boolean(data.currency || data.myshopify_domain || data.shop_id);
+}
 
 function isInternalOrCheckoutHost(hostname: string): boolean {
   const lower = hostname.toLowerCase();
@@ -197,6 +212,22 @@ export class ShopifyClient {
     }
   }
 
+  private setCacheEntry(key: string, meta: DomainMetadata, now: number): void {
+    if (this.cache.size >= MAX_CACHE_ENTRIES && !this.cache.has(key)) {
+      for (const [k, v] of this.cache) {
+        if (v.expiresAt <= now) {
+          this.cache.delete(k);
+        }
+      }
+      while (this.cache.size >= MAX_CACHE_ENTRIES) {
+        const oldest = this.cache.keys().next().value;
+        if (oldest === undefined) break;
+        this.cache.delete(oldest);
+      }
+    }
+    this.cache.set(key, meta);
+  }
+
   private applyMetaJsonPayload(
     data: MetaJsonPayload,
     state: {
@@ -207,7 +238,7 @@ export class ShopifyClient {
       detectedShopify: boolean;
     }
   ): void {
-    if (data.currency || data.myshopify_domain || data.shop_id || data.id) {
+    if (isShopifyMetaPayload(data)) {
       state.detectedShopify = true;
     }
     const nextName = sanitizeOptionalText(data.name, 120);
@@ -245,7 +276,12 @@ export class ShopifyClient {
         concurrencyKey: opts.concurrencyKey
       });
 
-      if (metaRes.status === 200 && metaRes.data && typeof metaRes.data === "object") {
+      if (
+        metaRes.status === 200 &&
+        metaRes.data &&
+        typeof metaRes.data === "object" &&
+        hasExpectedPathSuffix(metaRes.url, "/meta.json")
+      ) {
         this.applyMetaJsonPayload(metaRes.data, state);
 
         // 1a. Capture HTTP redirect target (e.g. 301 apex -> www. or legacy domain -> new domain)
@@ -267,14 +303,19 @@ export class ShopifyClient {
               canonicalMetaRes.status === 200 &&
               canonicalMetaRes.data &&
               typeof canonicalMetaRes.data === "object" &&
-              (canonicalMetaRes.data.currency ||
-                canonicalMetaRes.data.myshopify_domain ||
-                canonicalMetaRes.data.shop_id ||
-                canonicalMetaRes.data.id)
+              hasExpectedPathSuffix(canonicalMetaRes.url, "/meta.json") &&
+              isShopifyMetaPayload(canonicalMetaRes.data)
             ) {
               const verifiedOrigin =
                 extractCanonicalStoreOrigin(canonicalMetaRes.url) ?? declaredOrigin;
               canonicalOrigin = verifiedOrigin;
+              // Reset state before applying verified canonical payload so fields from the initial
+              // origin cannot bleed into the verified canonical metadata.
+              state.name = null;
+              state.currency = null;
+              state.country = null;
+              state.myshopifyDomain = null;
+              state.detectedShopify = false;
               this.applyMetaJsonPayload(canonicalMetaRes.data, state);
             }
           } catch {
@@ -301,6 +342,7 @@ export class ShopifyClient {
           cartRes.status === 200 &&
           cartRes.data &&
           typeof cartRes.data === "object" &&
+          hasExpectedPathSuffix(cartRes.url, "/cart.js") &&
           typeof cartRes.data.currency === "string" &&
           Array.isArray(cartRes.data.items)
         ) {
@@ -330,9 +372,11 @@ export class ShopifyClient {
       expiresAt: now + META_CACHE_TTL_MS
     };
 
-    this.cache.set(origin, meta);
-    if (canonicalOrigin !== origin) {
-      this.cache.set(canonicalOrigin, meta);
+    this.setCacheEntry(origin, meta, now);
+    // Only alias canonicalOrigin into the shared cache when it is same-site (apex <-> www)
+    // so an attacker domain cannot poison cached metadata for an unrelated store origin.
+    if (canonicalOrigin !== origin && isSameStoreSite(origin, canonicalOrigin)) {
+      this.setCacheEntry(canonicalOrigin, meta, now);
     }
     return meta;
   }

@@ -1,4 +1,9 @@
-import { sanitizeOptionalText, sanitizeText, stripHtmlToText } from "../../security/sanitize.js";
+import {
+  sanitizeOptionalText,
+  sanitizeText,
+  stripHtmlToText,
+  stripTagBlocksLinear
+} from "../../security/sanitize.js";
 import type { Money } from "../types.js";
 
 export interface WooPricesRaw {
@@ -142,31 +147,50 @@ const WOO_NAMED_ENTITIES: Record<string, string> = {
   szlig: "ß"
 };
 
+const WOO_DANGEROUS_TAGS = [
+  "script",
+  "style",
+  "iframe",
+  "noscript",
+  "svg",
+  "object",
+  "embed"
+] as const;
+
+function isValidUnicodeScalar(code: number): boolean {
+  return Number.isFinite(code) && code > 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff);
+}
+
 export function decodeWooEntities(input: string): string {
   return input.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, (full, entity: string) => {
     if (entity.startsWith("#x") || entity.startsWith("#X")) {
       const code = Number.parseInt(entity.slice(2), 16);
-      if (Number.isFinite(code) && code > 0 && code <= 0x10ffff) {
+      if (isValidUnicodeScalar(code)) {
         return String.fromCodePoint(code);
       }
       return full;
     }
     if (entity.startsWith("#")) {
       const code = Number.parseInt(entity.slice(1), 10);
-      if (Number.isFinite(code) && code > 0 && code <= 0x10ffff) {
+      if (isValidUnicodeScalar(code)) {
         return String.fromCodePoint(code);
       }
       return full;
     }
-    return WOO_NAMED_ENTITIES[entity] ?? WOO_NAMED_ENTITIES[entity.toLowerCase()] ?? full;
+    if (Object.hasOwn(WOO_NAMED_ENTITIES, entity)) {
+      return WOO_NAMED_ENTITIES[entity]!;
+    }
+    const lower = entity.toLowerCase();
+    return Object.hasOwn(WOO_NAMED_ENTITIES, lower) ? WOO_NAMED_ENTITIES[lower]! : full;
   });
 }
 
 export function sanitizeWooText(input: string | null | undefined, maxLen: number): string {
   if (!input) return "";
-  const noTags = String(input)
-    .replace(/<(script|style|iframe|noscript|svg|object|embed)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<[^>]+>/g, " ");
+  const raw = String(input);
+  const maxRaw = Math.max(maxLen * 16, 32_768);
+  const bounded = raw.length > maxRaw ? raw.slice(0, maxRaw) : raw;
+  const noTags = stripTagBlocksLinear(bounded, WOO_DANGEROUS_TAGS).replace(/<[^<>]+>/g, " ");
   return sanitizeText(decodeWooEntities(noTags), maxLen);
 }
 
@@ -185,12 +209,16 @@ export function sanitizeWooDescription(
 ): string {
   const stripShortcodes = (html: string | null | undefined): string => {
     if (!html) return "";
-    // Remove common WordPress page-builder shortcodes (WPBakery, Divi, Avada, Elementor)
-    const withoutShortcodes = String(html).replace(
-      /\[\/?(?:vc_|et_pb_|fusion_|elementor-)[^\]]*\]/gi,
+    const raw = String(html);
+    const maxRaw = Math.max(maxLen * 16, 65_536);
+    const bounded = raw.length > maxRaw ? raw.slice(0, maxRaw) : raw;
+    // Remove common WordPress page-builder shortcodes in linear time (disjoint character class)
+    const withoutShortcodes = bounded.replace(
+      /\[\/?(?:vc_|et_pb_|fusion_|elementor-)[^\[\]]*\]/gi,
       " "
     );
-    return stripHtmlToText(decodeWooEntities(withoutShortcodes), maxLen);
+    const stripped = stripHtmlToText(withoutShortcodes, maxLen);
+    return sanitizeText(decodeWooEntities(stripped), maxLen);
   };
 
   const mainText = stripShortcodes(description);

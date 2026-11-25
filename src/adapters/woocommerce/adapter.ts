@@ -1,4 +1,4 @@
-import { sanitizeSafeUrl } from "../../security/sanitize.js";
+import { isSameStoreSite, sanitizeSafeUrl } from "../../security/sanitize.js";
 import {
   safeFetch,
   SsrfError,
@@ -54,6 +54,7 @@ interface WooDomainMetadata {
 
 const DEFAULT_UA = "Mozilla/5.0 (compatible; shopcart-mcp/0.1; +https://shopcart.wals.pro)";
 const META_CACHE_TTL_MS = 15 * 60 * 1000;
+const MAX_CACHE_ENTRIES = 2000;
 const MAX_VARIATIONS_TO_FETCH = 15;
 const VARIATION_FALLBACK_BATCH_SIZE = 4;
 const HARD_SSRF_CODES = new Set(["INVALID_URL", "BLOCKED_HOST", "BLOCKED_IP", "CONCURRENCY_LIMIT"]);
@@ -303,11 +304,28 @@ export class WooCommerceAdapter implements StoreAdapter {
       expiresAt: now + META_CACHE_TTL_MS
     };
 
-    this.cache.set(origin, meta);
-    if (redirectedOrigin !== origin) {
-      this.cache.set(redirectedOrigin, meta);
+    this.setCacheEntry(origin, meta, now);
+    // Only alias redirectedOrigin in shared cache when same-site (apex <-> www)
+    if (redirectedOrigin !== origin && isSameStoreSite(origin, redirectedOrigin)) {
+      this.setCacheEntry(redirectedOrigin, meta, now);
     }
     return meta;
+  }
+
+  private setCacheEntry(key: string, meta: WooDomainMetadata, now: number): void {
+    if (this.cache.size >= MAX_CACHE_ENTRIES && !this.cache.has(key)) {
+      for (const [k, v] of this.cache) {
+        if (v.expiresAt <= now) {
+          this.cache.delete(k);
+        }
+      }
+      while (this.cache.size >= MAX_CACHE_ENTRIES) {
+        const oldest = this.cache.keys().next().value;
+        if (oldest === undefined) break;
+        this.cache.delete(oldest);
+      }
+    }
+    this.cache.set(key, meta);
   }
 
   async detect(origin: string, concurrencyKey?: string): Promise<StoreInfo | null> {
