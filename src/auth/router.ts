@@ -1,19 +1,23 @@
 import express, { type Request, type Response, type Router } from "express";
 import type { AppConfig } from "../config.js";
-import type { ClientAuthMethod, OAuthClientRecord, StorageBackend, UserRecord } from "../store/types.js";
+import type { ClientAuthMethod, OAuthClientRecord, StorageBackend } from "../store/types.js";
 import { isPromoFreeProActive } from "../billing/quota.js";
 import { CimdResolver, isCimdClientId, type ResolvedOAuthClient } from "./cimd.js";
 import {
   createCsrfPair,
-  hashPassword,
   parseCookies,
   randomToken,
   sha256Hex,
   timingSafeEqualStr,
-  verifyCsrfPair,
-  verifyPassword
+  verifyCsrfPair
 } from "./crypto.js";
-import { detectLang, renderAuthorizePage } from "./pages.js";
+import {
+  EmailOtpService,
+  OTP_BIND_COOKIE,
+  ensureUserByEmail,
+  normalizeEmail
+} from "./email-otp.js";
+import { detectLang, renderAuthorizePage, renderMagicLinkResultPage } from "./pages.js";
 import {
   filterDcrRedirectUris,
   matchRedirectUri,
@@ -63,7 +67,7 @@ function getClientIp(req: Request): string {
 function setSecurityHeadersForHtml(res: Response): void {
   res.setHeader(
     "Content-Security-Policy",
-    "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+    "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
   );
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
@@ -117,7 +121,8 @@ function parseBasicAuthHeader(
 export function createOAuthRouter(
   config: AppConfig,
   store: StorageBackend,
-  cimdResolver = new CimdResolver()
+  cimdResolver = new CimdResolver(),
+  otpService = new EmailOtpService({ config, store })
 ): Router {
   const router = express.Router();
   const rateLimiter = new SimpleRateLimiter();
@@ -279,7 +284,68 @@ export function createOAuthRouter(
     });
   });
 
-  // 3. Authorization endpoint (GET renders DE/EN Login+Register+Consent; POST authenticates & issues code)
+  async function completeOAuthAuthorization(params: {
+    res: Response;
+    email: string;
+    client: ResolvedOAuthClient;
+    redirectUri: string;
+    codeChallenge: string;
+    resource: string;
+    scopeStr: string;
+    state: string;
+  }): Promise<void> {
+    const user = await ensureUserByEmail(store, params.email);
+
+    if (!params.client.isCimd) {
+      await store.activateOAuthClient(
+        params.client.clientId,
+        new Date(Date.now() + DCR_ACTIVATED_TTL_MS)
+      );
+    }
+
+    const rawCode = `sc_code_${randomToken(32)}`;
+    const now = new Date();
+    await store.saveOAuthCode({
+      codeHash: sha256Hex(rawCode),
+      userId: user.id,
+      clientId: params.client.clientId,
+      redirectUri: params.redirectUri,
+      codeChallenge: params.codeChallenge,
+      codeChallengeMethod: "S256",
+      resource: params.resource,
+      scopes: normalizeScopes(params.scopeStr),
+      used: false,
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + AUTH_CODE_TTL_SECONDS * 1000)
+    });
+
+    const rawSession = `sc_ws_${randomToken(32)}`;
+    await store.saveWebSession({
+      sessionHash: sha256Hex(rawSession),
+      userId: user.id,
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + WEB_SESSION_TTL_MS)
+    });
+
+    params.res.setHeader("Set-Cookie", [
+      formatCookie(CSRF_COOKIE, "", { maxAge: 0, secure: isHttps }),
+      formatCookie(OTP_BIND_COOKIE, "", { maxAge: 0, secure: isHttps }),
+      formatCookie(SESSION_COOKIE, rawSession, {
+        maxAge: Math.floor(WEB_SESSION_TTL_MS / 1000),
+        secure: isHttps
+      })
+    ]);
+
+    // RFC 9207: include exact issuer (no trailing slash) as `iss`
+    const callback = new URL(params.redirectUri);
+    callback.searchParams.set("code", rawCode);
+    if (params.state) callback.searchParams.set("state", params.state);
+    callback.searchParams.set("iss", issuer);
+
+    params.res.redirect(303, callback.toString());
+  }
+
+  // 3. Authorization endpoint (Passwordless 2-step DE/EN Email OTP + Magic Link)
   router.get("/oauth/authorize", async (req, res) => {
     const responseType = String(req.query.response_type ?? "");
     const clientId = String(req.query.client_id ?? "").trim();
@@ -289,7 +355,6 @@ export function createOAuthRouter(
     const state = String(req.query.state ?? "");
     const rawResource = typeof req.query.resource === "string" ? req.query.resource : undefined;
     const rawScope = typeof req.query.scope === "string" ? req.query.scope : "";
-    const mode = req.query.mode === "login" ? "login" : "register";
     const lang = detectLang(req.query.lang, req.headers["accept-language"]);
 
     if (responseType !== "code") {
@@ -351,7 +416,7 @@ export function createOAuthRouter(
         state,
         csrfToken: csrf.token,
         promoActive: isPromoFreeProActive(config),
-        mode
+        step: "email"
       })
     );
   });
@@ -363,7 +428,7 @@ export function createOAuthRouter(
       const body = (req.body ?? {}) as Record<string, string | undefined>;
       const lang = detectLang(body.lang, req.headers["accept-language"]);
       const de = lang === "de";
-      const mode: "login" | "register" = body.mode === "login" ? "login" : "register";
+      const step: "email" | "verify" = body.step === "verify" ? "verify" : "email";
       const clientId = (body.client_id ?? "").trim();
       const redirectUri = (body.redirect_uri ?? "").trim();
       const codeChallenge = (body.code_challenge ?? "").trim();
@@ -371,8 +436,9 @@ export function createOAuthRouter(
       const rawResource = body.resource;
       const scopeStr = normalizeScopes(body.scope).join(" ");
       const state = body.state ?? "";
-      const email = (body.email ?? "").trim().toLowerCase();
-      const password = body.password ?? "";
+      const email = normalizeEmail(body.email ?? "");
+      const challengeId = (body.challenge_id ?? "").trim();
+      const otpCode = body.code ?? "";
       const honeypot = (body.website ?? "").trim();
 
       const client = await resolveClient(clientId);
@@ -392,14 +458,22 @@ export function createOAuthRouter(
         return;
       }
 
-      const rerenderError = (errorMsg: string, statusCode = 400) => {
+      const renderStep = (opts: {
+        renderStep: "email" | "verify";
+        statusCode?: number;
+        error?: string;
+        info?: string;
+        challengeId?: string;
+        extraCookies?: string[];
+      }) => {
         const freshCsrf = createCsrfPair(config.sessionSecret);
-        res.setHeader(
-          "Set-Cookie",
-          formatCookie(CSRF_COOKIE, freshCsrf.cookieValue, { maxAge: 1800, secure: isHttps })
-        );
+        const cookiesToSet = [
+          formatCookie(CSRF_COOKIE, freshCsrf.cookieValue, { maxAge: 1800, secure: isHttps }),
+          ...(opts.extraCookies ?? [])
+        ];
+        res.setHeader("Set-Cookie", cookiesToSet);
         setSecurityHeadersForHtml(res);
-        res.status(statusCode).type("html").send(
+        res.status(opts.statusCode ?? 200).type("html").send(
           renderAuthorizePage({
             lang,
             clientName: client.clientName,
@@ -413,133 +487,263 @@ export function createOAuthRouter(
             state,
             csrfToken: freshCsrf.token,
             promoActive: isPromoFreeProActive(config),
-            mode,
+            step: opts.renderStep,
+            challengeId: opts.challengeId,
             email,
-            error: errorMsg
+            error: opts.error,
+            info: opts.info
           })
         );
       };
 
       // Honeypot check
       if (honeypot.length > 0) {
-        rerenderError(de ? "Anfrage abgelehnt." : "Request rejected.", 400);
+        renderStep({
+          renderStep: "email",
+          statusCode: 400,
+          error: de ? "Anfrage abgelehnt." : "Request rejected."
+        });
         return;
       }
 
       // CSRF verification
       const cookies = parseCookies(req.headers.cookie);
       if (!verifyCsrfPair(config.sessionSecret, cookies[CSRF_COOKIE], body._csrf)) {
-        rerenderError(
-          de
+        renderStep({
+          renderStep: step === "verify" && challengeId ? "verify" : "email",
+          challengeId: step === "verify" ? challengeId : undefined,
+          statusCode: 403,
+          error: de
             ? "Sitzung abgelaufen. Bitte erneut absenden."
-            : "Form session expired. Please try again.",
-          403
-        );
+            : "Form session expired. Please try again."
+        });
         return;
       }
 
-      // Rate limit per IP + email
       const ip = getClientIp(req);
-      if (
-        !rateLimiter.check(`auth:ip:${ip}`, 25, 10 * 60 * 1000) ||
-        !rateLimiter.check(`auth:email:${email}`, 12, 10 * 60 * 1000)
-      ) {
-        rerenderError(
-          de
-            ? "Zu viele Versuche. Bitte warte ein paar Minuten."
-            : "Too many attempts. Please wait a few minutes.",
-          429
-        );
-        return;
-      }
 
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
-        rerenderError(de ? "Bitte eine gültige E-Mail-Adresse eingeben." : "Please enter a valid email address.");
-        return;
-      }
-      if (password.length < 8 || password.length > 128) {
-        rerenderError(
-          de
-            ? "Das Passwort muss mindestens 8 Zeichen lang sein."
-            : "Password must be at least 8 characters long."
-        );
-        return;
-      }
-
-      let user: UserRecord | null = null;
-      if (mode === "register") {
-        const existing = await store.getUserByEmail(email);
-        if (existing) {
-          rerenderError(
-            de
-              ? "Diese E-Mail ist bereits registriert. Bitte wechsle auf 'Anmelden'."
-              : "This email is already registered. Please switch to 'Sign in'."
-          );
-          return;
-        }
-        const { hash, salt } = await hashPassword(password);
-        const now = new Date();
-        const newUser: UserRecord = {
-          id: sha256Hex(email),
+      if (step === "email") {
+        const requested = await otpService.requestChallenge({
           email,
-          passwordHash: hash,
-          passwordSalt: salt,
-          plan: "free",
-          status: "active",
-          stripeCustomerId: null,
-          stripeSubscriptionId: null,
-          currentPeriodEnd: null,
-          createdAt: now,
-          updatedAt: now
-        };
-        const created = await store.createUser(newUser);
-        if (!created) {
-          rerenderError(
-            de
-              ? "Diese E-Mail ist bereits registriert. Bitte wechsle auf 'Anmelden'."
-              : "This email is already registered. Please switch to 'Sign in'."
-          );
+          ip,
+          purpose: "oauth",
+          lang,
+          oauthParams: {
+            clientId: client.clientId,
+            clientName: client.clientName,
+            redirectUri,
+            codeChallenge,
+            codeChallengeMethod: "S256",
+            resource: resolvedRes.resource,
+            scope: scopeStr,
+            state
+          }
+        });
+
+        if (!requested.ok) {
+          if (requested.error === "invalid_email") {
+            renderStep({
+              renderStep: "email",
+              statusCode: 400,
+              error: de
+                ? "Bitte eine gültige E-Mail-Adresse eingeben."
+                : "Please enter a valid email address."
+            });
+            return;
+          }
+          if (requested.error === "rate_limited") {
+            renderStep({
+              renderStep: "email",
+              statusCode: 429,
+              error: de
+                ? "Zu viele Code-Anfragen. Bitte warte einige Minuten."
+                : "Too many code requests. Please wait a few minutes."
+            });
+            return;
+          }
+          renderStep({
+            renderStep: "email",
+            statusCode: 503,
+            error: de
+              ? "Der E-Mail-Versand ist gerade nicht erreichbar. Bitte versuche es gleich erneut."
+              : "Email delivery is temporarily unavailable. Please try again shortly."
+          });
           return;
         }
-        user = newUser;
-      } else {
-        const existing = await store.getUserByEmail(email);
-        if (!existing || !(await verifyPassword(password, existing.passwordHash, existing.passwordSalt))) {
-          rerenderError(
-            de ? "E-Mail oder Passwort ungültig." : "Invalid email or password.",
-            401
-          );
-          return;
-        }
-        user = existing;
+
+        renderStep({
+          renderStep: "verify",
+          statusCode: 200,
+          challengeId: requested.challengeId,
+          extraCookies: [
+            formatCookie(OTP_BIND_COOKIE, requested.browserBindCookieValue, {
+              maxAge: 900,
+              secure: isHttps
+            })
+          ]
+        });
+        return;
       }
 
-      // Activate DCR client if applicable
-      if (!client.isCimd) {
-        await store.activateOAuthClient(
-          client.clientId,
-          new Date(Date.now() + DCR_ACTIVATED_TTL_MS)
-        );
+      // Step 2: Verify 6-digit OTP
+      if (!rateLimiter.check(`otp-verify:ip:${ip}`, 30, 10 * 60 * 1000)) {
+        renderStep({
+          renderStep: "verify",
+          challengeId,
+          statusCode: 429,
+          error: de
+            ? "Zu viele Versuche. Bitte warte einige Minuten."
+            : "Too many attempts. Please wait a few minutes."
+        });
+        return;
       }
 
-      // Issue single-use authorization code
-      const rawCode = `sc_code_${randomToken(32)}`;
-      const now = new Date();
-      await store.saveOAuthCode({
-        codeHash: sha256Hex(rawCode),
-        userId: user.id,
-        clientId: client.clientId,
+      const verified = await otpService.verifyOtp({ challengeId, code: otpCode });
+
+      if (verified.status === "invalid_format") {
+        renderStep({
+          renderStep: "verify",
+          challengeId,
+          statusCode: 400,
+          error: de
+            ? "Bitte gib den 6-stelligen Zahlencode aus deiner E-Mail ein."
+            : "Please enter the 6-digit numeric code from your email."
+        });
+        return;
+      }
+
+      if (verified.status === "invalid_code") {
+        renderStep({
+          renderStep: "verify",
+          challengeId,
+          statusCode: 401,
+          error: de
+            ? `Ungültiger Code. Noch ${verified.remainingAttempts} ${verified.remainingAttempts === 1 ? "Versuch" : "Versuche"}.`
+            : `Invalid code. ${verified.remainingAttempts} ${verified.remainingAttempts === 1 ? "attempt" : "attempts"} remaining.`
+        });
+        return;
+      }
+
+      if (verified.status === "locked") {
+        renderStep({
+          renderStep: "email",
+          statusCode: 429,
+          error: de
+            ? "Zu viele Fehlversuche — dieser Code wurde gesperrt. Bitte fordere einen neuen Code an."
+            : "Too many failed attempts — this code has been locked. Please request a new code."
+        });
+        return;
+      }
+
+      if (verified.status === "expired") {
+        renderStep({
+          renderStep: "email",
+          statusCode: 410,
+          error: de
+            ? "Der Code ist abgelaufen (10 Minuten). Bitte fordere einen neuen Code an."
+            : "This code has expired (10 minutes). Please request a new code."
+        });
+        return;
+      }
+
+      if (verified.status !== "ok") {
+        renderStep({
+          renderStep: "email",
+          statusCode: 400,
+          error: de
+            ? "Dieser Code wurde bereits verwendet oder ist ungültig. Bitte fordere einen neuen Code an."
+            : "This code has already been used or is invalid. Please request a new code."
+        });
+        return;
+      }
+
+      const ch = verified.challenge;
+      if (
+        ch.purpose !== "oauth" ||
+        !ch.oauthParams ||
+        ch.oauthParams.clientId !== client.clientId ||
+        ch.oauthParams.redirectUri !== redirectUri ||
+        ch.oauthParams.codeChallenge !== codeChallenge ||
+        ch.oauthParams.resource !== resolvedRes.resource
+      ) {
+        renderStep({
+          renderStep: "email",
+          statusCode: 400,
+          error: de
+            ? "Anmelde-Sitzung passt nicht zur Anfrage. Bitte starte erneut."
+            : "Sign-in challenge does not match this request. Please start again."
+        });
+        return;
+      }
+
+      await completeOAuthAuthorization({
+        res,
+        email: ch.email,
+        client,
         redirectUri,
         codeChallenge,
-        codeChallengeMethod: "S256",
         resource: resolvedRes.resource,
-        scopes: normalizeScopes(scopeStr),
-        used: false,
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + AUTH_CODE_TTL_SECONDS * 1000)
+        scopeStr,
+        state
       });
+    }
+  );
 
-      // Set convenient web session cookie for /billing
+  // 3b. Magic Link endpoint (1-click convenience for desktop browser & /billing)
+  router.head("/auth/magic", (_req, res) => {
+    // Do NOT consume single-use magic tokens on HEAD prefetchers (e.g. email scanners)
+    res.setHeader("Cache-Control", "no-store");
+    res.status(200).end();
+  });
+
+  router.get("/auth/magic", async (req, res) => {
+    setSecurityHeadersForHtml(res);
+    const rawToken = typeof req.query.token === "string" ? req.query.token : undefined;
+    const cookies = parseCookies(req.headers.cookie);
+    const fallbackLang = detectLang(req.query.lang, req.headers["accept-language"]);
+
+    const verified = await otpService.verifyMagicLink({
+      rawToken,
+      browserBindCookie: cookies[OTP_BIND_COOKIE]
+    });
+
+    if (verified.status === "browser_mismatch") {
+      res.status(200).type("html").send(
+        renderMagicLinkResultPage({
+          lang: verified.challenge.lang,
+          kind: "browser_mismatch",
+          email: verified.challenge.email,
+          clientName: verified.challenge.oauthParams?.clientName
+        })
+      );
+      return;
+    }
+
+    if (verified.status === "expired") {
+      res.status(410).type("html").send(
+        renderMagicLinkResultPage({ lang: fallbackLang, kind: "expired" })
+      );
+      return;
+    }
+
+    if (verified.status === "used") {
+      res.status(410).type("html").send(
+        renderMagicLinkResultPage({ lang: fallbackLang, kind: "used" })
+      );
+      return;
+    }
+
+    if (verified.status !== "ok") {
+      res.status(400).type("html").send(
+        renderMagicLinkResultPage({ lang: fallbackLang, kind: "invalid" })
+      );
+      return;
+    }
+
+    const ch = verified.challenge;
+    if (ch.purpose === "billing") {
+      const user = await ensureUserByEmail(store, ch.email);
+      const now = new Date();
       const rawSession = `sc_ws_${randomToken(32)}`;
       await store.saveWebSession({
         sessionHash: sha256Hex(rawSession),
@@ -547,24 +751,45 @@ export function createOAuthRouter(
         createdAt: now,
         expiresAt: new Date(now.getTime() + WEB_SESSION_TTL_MS)
       });
-
       res.setHeader("Set-Cookie", [
-        formatCookie(CSRF_COOKIE, "", { maxAge: 0, secure: isHttps }),
+        formatCookie(OTP_BIND_COOKIE, "", { maxAge: 0, secure: isHttps }),
         formatCookie(SESSION_COOKIE, rawSession, {
           maxAge: Math.floor(WEB_SESSION_TTL_MS / 1000),
           secure: isHttps
         })
       ]);
-
-      // RFC 9207: include exact issuer (no trailing slash) as `iss`
-      const callback = new URL(redirectUri);
-      callback.searchParams.set("code", rawCode);
-      if (state) callback.searchParams.set("state", state);
-      callback.searchParams.set("iss", issuer);
-
-      res.redirect(303, callback.toString());
+      res.redirect(303, `/billing?lang=${ch.lang}`);
+      return;
     }
-  );
+
+    // OAuth Magic Link in the same browser -> complete OAuth flow in 1 click!
+    const oauthParams = ch.oauthParams;
+    if (!oauthParams) {
+      res.status(400).type("html").send(
+        renderMagicLinkResultPage({ lang: ch.lang, kind: "invalid" })
+      );
+      return;
+    }
+
+    const client = await resolveClient(oauthParams.clientId);
+    if (!client || !matchRedirectUri(oauthParams.redirectUri, client.redirectUris)) {
+      res.status(400).type("html").send(
+        renderMagicLinkResultPage({ lang: ch.lang, kind: "invalid" })
+      );
+      return;
+    }
+
+    await completeOAuthAuthorization({
+      res,
+      email: ch.email,
+      client,
+      redirectUri: oauthParams.redirectUri,
+      codeChallenge: oauthParams.codeChallenge,
+      resource: oauthParams.resource,
+      scopeStr: oauthParams.scope,
+      state: oauthParams.state
+    });
+  });
 
   // 4. Token endpoint (authorization_code + refresh_token with rotation & replay family revocation)
   router.post(

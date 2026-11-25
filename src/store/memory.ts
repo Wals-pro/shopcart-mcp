@@ -1,4 +1,7 @@
+import { timingSafeEqualStr } from "../auth/crypto.js";
 import type {
+  EmailAuthChallengeRecord,
+  EmailChallengeVerifyResult,
   OAuthClientRecord,
   OAuthCodeRecord,
   OAuthTokenRecord,
@@ -14,6 +17,7 @@ export class MemoryStore implements StorageBackend {
   private readonly codes = new Map<string, OAuthCodeRecord>();
   private readonly tokens = new Map<string, OAuthTokenRecord>();
   private readonly sessions = new Map<string, WebSessionRecord>();
+  private readonly emailChallenges = new Map<string, EmailAuthChallengeRecord>();
   private readonly usage = new Map<string, number>();
   private readonly stripeEvents = new Set<string>();
 
@@ -145,6 +149,99 @@ export class MemoryStore implements StorageBackend {
 
   async deleteWebSession(sessionHash: string): Promise<void> {
     this.sessions.delete(sessionHash);
+  }
+
+  async saveEmailAuthChallenge(challenge: EmailAuthChallengeRecord): Promise<void> {
+    this.emailChallenges.set(challenge.challengeId, {
+      ...challenge,
+      oauthParams: challenge.oauthParams ? { ...challenge.oauthParams } : null
+    });
+  }
+
+  async getEmailAuthChallenge(challengeId: string): Promise<EmailAuthChallengeRecord | null> {
+    const rec = this.emailChallenges.get(challengeId);
+    if (!rec) return null;
+    return {
+      ...rec,
+      oauthParams: rec.oauthParams ? { ...rec.oauthParams } : null
+    };
+  }
+
+  async verifyAndConsumeEmailOtp(
+    challengeId: string,
+    expectedOtpHash: string,
+    now = new Date()
+  ): Promise<EmailChallengeVerifyResult> {
+    const rec = this.emailChallenges.get(challengeId);
+    if (!rec) return { status: "not_found" };
+    if (rec.used) return { status: "used" };
+    if (rec.expiresAt.getTime() <= now.getTime()) return { status: "expired" };
+    if (rec.attempts >= rec.maxAttempts) return { status: "locked" };
+
+    if (!timingSafeEqualStr(rec.otpHash, expectedOtpHash)) {
+      rec.attempts += 1;
+      if (rec.attempts >= rec.maxAttempts) {
+        return { status: "locked" };
+      }
+      return {
+        status: "invalid_code",
+        remainingAttempts: rec.maxAttempts - rec.attempts
+      };
+    }
+
+    rec.used = true;
+    return {
+      status: "ok",
+      challenge: {
+        ...rec,
+        oauthParams: rec.oauthParams ? { ...rec.oauthParams } : null
+      }
+    };
+  }
+
+  async verifyAndConsumeEmailMagicLink(
+    challengeId: string,
+    expectedMagicTokenHash: string,
+    browserBindHash: string | null,
+    now = new Date()
+  ): Promise<EmailChallengeVerifyResult> {
+    const rec = this.emailChallenges.get(challengeId);
+    if (!rec) return { status: "not_found" };
+    if (rec.used) return { status: "used" };
+    if (rec.expiresAt.getTime() <= now.getTime()) return { status: "expired" };
+    if (rec.attempts >= rec.maxAttempts) return { status: "locked" };
+
+    if (!timingSafeEqualStr(rec.magicTokenHash, expectedMagicTokenHash)) {
+      rec.attempts += 1;
+      if (rec.attempts >= rec.maxAttempts) {
+        return { status: "locked" };
+      }
+      return {
+        status: "invalid_code",
+        remainingAttempts: rec.maxAttempts - rec.attempts
+      };
+    }
+
+    if (rec.purpose === "oauth" && rec.browserBindHash) {
+      if (!browserBindHash || !timingSafeEqualStr(rec.browserBindHash, browserBindHash)) {
+        return {
+          status: "browser_mismatch",
+          challenge: {
+            ...rec,
+            oauthParams: rec.oauthParams ? { ...rec.oauthParams } : null
+          }
+        };
+      }
+    }
+
+    rec.used = true;
+    return {
+      status: "ok",
+      challenge: {
+        ...rec,
+        oauthParams: rec.oauthParams ? { ...rec.oauthParams } : null
+      }
+    };
   }
 
   async getDailyUsage(userId: string, dayKey: string): Promise<number> {
