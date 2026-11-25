@@ -88,24 +88,51 @@ export function moneyFromMinorUnits(
   return formatMoney(amount, currency);
 }
 
-export function extractProductHandle(handleOrUrl: string): string {
+export interface ProductPathInfo {
+  handle: string;
+  localePrefix: string | null;
+}
+
+const LOCALE_PREFIX_RE = /^\/([a-z]{2}(?:-[a-z]{2,4})?)(?=\/(?:products|collections)\/)/i;
+
+export function extractProductPathInfo(handleOrUrl: string): ProductPathInfo {
   const trimmed = handleOrUrl.trim();
   if (!trimmed) {
     throw new Error("handle_or_url is required");
   }
 
   let candidate = trimmed;
-  if (/^https?:\/\//i.test(trimmed) || trimmed.includes("/products/")) {
+  let localePrefix: string | null = null;
+
+  const isFullUrl = /^https?:\/\//i.test(trimmed);
+  const looksLikeProductPath =
+    isFullUrl ||
+    trimmed.includes("/products/") ||
+    /^products\/[^/?#]+/i.test(trimmed);
+
+  if (looksLikeProductPath) {
     let pathname = trimmed;
-    if (/^https?:\/\//i.test(trimmed)) {
+    if (isFullUrl) {
       const parsed = new URL(trimmed);
       pathname = parsed.pathname;
+    } else if (!pathname.startsWith("/")) {
+      pathname = `/${pathname}`;
     }
+
+    const localeMatch = pathname.match(LOCALE_PREFIX_RE);
+    if (localeMatch?.[1]) {
+      localePrefix = `/${localeMatch[1].toLowerCase()}`;
+    }
+
     const match = pathname.match(/\/products\/([^/?#]+)/i);
     if (!match?.[1]) {
       throw new Error(`Could not extract product handle from URL: ${trimmed}`);
     }
-    candidate = decodeURIComponent(match[1]);
+    try {
+      candidate = decodeURIComponent(match[1]);
+    } catch {
+      throw new Error(`Invalid percent-encoding in product handle: ${match[1]}`);
+    }
   }
 
   // Remove optional .js / .json suffix
@@ -122,5 +149,64 @@ export function extractProductHandle(handleOrUrl: string): string {
     throw new Error(`Invalid product handle: ${candidate}`);
   }
 
-  return candidate;
+  return { handle: candidate, localePrefix };
+}
+
+export function extractProductHandle(handleOrUrl: string): string {
+  return extractProductPathInfo(handleOrUrl).handle;
+}
+
+export function foldSearchText(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function extractTokens(text: string): string[] {
+  const all = text
+    .split(/[^\p{L}\p{N}]+/u)
+    .map((t) => t.trim())
+    .filter(Boolean);
+  const longTokens = all.filter((t) => t.length >= 2);
+  return longTokens.length > 0 ? longTokens : all;
+}
+
+export function matchesSearchQuery(haystack: string, query: string): boolean {
+  const rawQuery = query.trim().toLowerCase();
+  if (!rawQuery) return false;
+
+  const rawTokens = extractTokens(rawQuery);
+  if (rawTokens.length === 0) return false;
+
+  const lowerHaystack = haystack.toLowerCase();
+  if (rawTokens.every((tok) => lowerHaystack.includes(tok))) {
+    return true;
+  }
+
+  const foldedHaystack = foldSearchText(haystack);
+  const foldedTokens = extractTokens(foldSearchText(rawQuery));
+  return foldedTokens.length > 0 && foldedTokens.every((tok) => foldedHaystack.includes(tok));
+}
+
+export function simplifySearchQueryForRetry(query: string): string | null {
+  const trimmed = query.trim();
+  if (!trimmed) return null;
+  const cleaned = trimmed
+    .replace(/[®™©]/g, "")
+    .replace(/[^\p{L}\p{N}\s-]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (cleaned && cleaned.toLowerCase() !== trimmed.toLowerCase()) {
+    return cleaned;
+  }
+  const folded = foldSearchText(trimmed).replace(/\s+/g, " ").trim();
+  if (folded && folded !== trimmed.toLowerCase()) {
+    return folded;
+  }
+  return null;
 }
