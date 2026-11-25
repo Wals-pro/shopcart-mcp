@@ -653,6 +653,7 @@ ${
       <a class="hide-sm" href="#examples">${de ? "Beispiele" : "Examples"}</a>
       <a class="hide-sm" href="#pricing">${de ? "Preise" : "Pricing"}</a>
       <a class="hide-sm" href="#faq">FAQ</a>
+      <a class="hide-md" href="/guides?lang=${lang}">${de ? "Ratgeber" : "Guides"}</a>
       <a class="hide-md" href="#developers">${de ? "Für Entwickler" : "Developers"}</a>
       <div class="nav-actions">
         <a class="btn-nav" href="/billing?lang=${lang}">${de ? "Konto" : "Account"}</a>
@@ -1166,6 +1167,7 @@ ${
         <span><strong>ShopCart</strong> · by <a href="https://wals.pro" target="_blank" rel="noopener noreferrer">wals.pro</a></span>
       </div>
       <div class="foot-links">
+        <a href="/guides?lang=${lang}">${de ? "Ratgeber" : "Guides"}</a>
         <a href="/billing?lang=${lang}">${de ? "Konto &amp; Abo" : "Account &amp; billing"}</a>
         <a href="${escapeHtml(config.repoUrl)}" target="_blank" rel="noopener noreferrer">GitHub</a>
         <a href="/privacy?lang=${lang}">${de ? "Datenschutz" : "Privacy"}</a>

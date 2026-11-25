@@ -349,7 +349,7 @@ export function getFaq(config: AppConfig, lang: Lang): FaqItem[] {
       },
       {
         q: "Welche Daten speichert ShopCart über meine Einkäufe?",
-        a: "ShopCart speichert weder deine Chat-Verläufe noch Lieferadressen, Shop-Logins oder Zahlungsdaten. Für den gehosteten Dienst in der EU werden nur deine Konto-E-Mail, gehashte Anmeldedaten und ein täglicher Nutzungszähler gespeichert. Wenn du die Open-Source-Version lokal ausführst, werden überhaupt keine Daten an wals.pro übertragen."
+        a: "ShopCart speichert weder deine Chat-Verläufe noch Lieferadressen, Shop-Logins oder Zahlungsdaten. Für den gehosteten Dienst in der EU werden nur deine Konto-E-Mail, kurzlebige gehashte Anmeldecodes (kein Passwort) und ein täglicher Nutzungszähler gespeichert. Wenn du die Open-Source-Version lokal ausführst, werden überhaupt keine Daten an wals.pro übertragen."
       },
       {
         q: "Was unterscheidet ShopCart von normalem ChatGPT Shopping oder einer KI-Suche?",
@@ -381,7 +381,7 @@ export function getFaq(config: AppConfig, lang: Lang): FaqItem[] {
     },
     {
       q: "What data does ShopCart store about my shopping?",
-      a: "ShopCart never stores your chat transcripts, shipping addresses, store logins, or payment details. Hosted accounts run in the EU and store only your account email, hashed credentials, and a numeric daily usage counter. If you run the open-source version locally, zero data is sent to wals.pro."
+      a: "ShopCart never stores your chat transcripts, shipping addresses, store logins, or payment details. Hosted accounts run in the EU and store only your account email, short-lived hashed sign-in codes (no password), and a numeric daily usage counter. If you run the open-source version locally, zero data is sent to wals.pro."
     },
     {
       q: "How is ShopCart different from regular ChatGPT shopping or AI web search?",

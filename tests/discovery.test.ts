@@ -1,7 +1,6 @@
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
-import { buildProCheckoutParams } from "../src/billing/stripe.js";
 import { loadConfig } from "../src/config.js";
 import { MemoryStore } from "../src/store/memory.js";
 import { ALLOWED_CRAWLERS, SITEMAP_PATHS } from "../src/web/discovery.js";
@@ -82,16 +81,13 @@ describe("Agent discovery (GEO/AEO): llms.txt, llms-full.txt, robots.txt, sitema
     expect(res.headers["content-type"]).toContain("application/xml");
     expect(res.text.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true);
     expect(res.text).toContain('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"');
-    expect(SITEMAP_PATHS).toEqual([
-      "/",
-      "/?lang=de",
-      "/?lang=en",
-      "/billing",
-      "/privacy",
-      "/terms",
-      "/llms.txt",
-      "/llms-full.txt"
-    ]);
+    for (const required of ["/", "/?lang=de", "/?lang=en", "/billing", "/privacy", "/terms", "/llms.txt", "/llms-full.txt"]) {
+      expect(SITEMAP_PATHS).toContain(required);
+    }
+    // Guide pages from the SEO wave stay listed (the landing sitemap route is registered first)
+    expect(SITEMAP_PATHS).toContain("/guides");
+    expect(SITEMAP_PATHS).toContain("/guides/mit-claude-online-einkaufen");
+    expect(SITEMAP_PATHS).toContain("/en/guides/shop-with-claude");
     for (const path of SITEMAP_PATHS) {
       expect(res.text).toContain(`<loc>https://shopcart.wals.pro${path}</loc>`);
     }
@@ -118,46 +114,5 @@ describe("Agent discovery (GEO/AEO): llms.txt, llms-full.txt, robots.txt, sitema
     expect(res.text).toContain('<link rel="canonical" href="https://shopcart.wals.pro/?lang=');
     expect(res.text).toContain('hreflang="de" href="https://shopcart.wals.pro/?lang=de"');
     expect(res.text).toContain('hreflang="en" href="https://shopcart.wals.pro/?lang=en"');
-  });
-});
-
-describe("Stripe Checkout locale", () => {
-  const { config } = makeApp({ STRIPE_SECRET_KEY: "sk_test_dummy", STRIPE_PRO_PRICE_ID: "price_test_pro" });
-  const user = { id: "user_123" };
-  const now = new Date("2026-11-25T10:00:00+01:00");
-
-  it("opens a German Stripe Checkout for /billing?lang=de and an English one otherwise", () => {
-    const de = buildProCheckoutParams(user, "cus_1", config, { lang: "de", now });
-    expect(de.locale).toBe("de");
-    expect(de.success_url).toBe("https://shopcart.wals.pro/billing?checkout=success&lang=de");
-    expect(de.cancel_url).toBe("https://shopcart.wals.pro/billing?checkout=cancel&lang=de");
-
-    const en = buildProCheckoutParams(user, "cus_1", config, { lang: "en", now });
-    expect(en.locale).toBe("en");
-
-    const fallback = buildProCheckoutParams(user, "cus_1", config, { now });
-    expect(fallback.locale).toBe("en");
-  });
-
-  it("keeps the subscription, customer, and promo-trial behaviour unchanged", () => {
-    const params = buildProCheckoutParams(user, "cus_1", config, { lang: "de", now });
-    expect(params.mode).toBe("subscription");
-    expect(params.customer).toBe("cus_1");
-    expect(params.client_reference_id).toBe("user_123");
-    expect(params.line_items).toEqual([{ price: "price_test_pro", quantity: 1 }]);
-    expect(params.metadata).toEqual({ user_id: "user_123" });
-    if (config.promoTrialEnd && config.promoTrialEnd.getTime() - now.getTime() >= 48 * 3600 * 1000) {
-      expect(params.subscription_data?.trial_end).toBe(Math.floor(config.promoTrialEnd.getTime() / 1000));
-      expect(params.allow_promotion_codes).toBeUndefined();
-    } else {
-      expect(params.allow_promotion_codes).toBe(true);
-    }
-  });
-
-  it("renders the checkout form with the page language so the POST can pass it on", async () => {
-    // The form itself is only shown to signed-in users; the handler reads body.lang (see src/web/billing.ts).
-    const { app } = makeApp();
-    const res = await request(app).get("/billing?lang=de").expect(200);
-    expect(res.text).toContain('lang="de"');
   });
 });

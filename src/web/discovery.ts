@@ -1,6 +1,7 @@
 import { isPromoFreeProActive } from "../billing/quota.js";
 import type { AppConfig } from "../config.js";
 import { getFaq } from "./content.js";
+import { GUIDE_DEFINITIONS } from "./guides.js";
 
 /**
  * Agent discovery & crawler files (GEO / AEO):
@@ -75,7 +76,9 @@ Users arrive from ${origin} with a prompt like "Connect ShopCart (${mcpUrl}) for
 
 ## Documentation & Links
 - [Full Agent Reference](${origin}/llms-full.txt): Supported store types, DE/EN shopping use cases, security & read-only architecture.
-- [Homepage & Setup](${origin}): Consumer overview, 1-click AI start links, and pricing.
+- [Homepage & Setup](${origin}): Consumer overview, connect buttons, AI start links, and pricing.
+- [Shopping Guides](${origin}/guides): Step-by-step guides in German and English.
+${GUIDE_DEFINITIONS.map((g) => `  - [${g.title}](${origin}${g.path}) (${g.lang})`).join("\n")}
 - [MCP Server Card](${origin}/.well-known/mcp.json): Machine-readable endpoint and OAuth metadata.
 - [GitHub Repository (MIT)](${config.repoUrl}): Source code, \`server.json\`, and local \`stdio\` CLI.
 - [Privacy Policy](${origin}/privacy) | [Terms of Use](${origin}/terms)
@@ -184,7 +187,7 @@ All 4 tools carry MCP annotations \`readOnlyHint: true\`, \`destructiveHint: fal
 - **Strictly Read-Only + Browser Cart Permalink:** ShopCart MCP never places orders, never submits forms, never stores shipping addresses, never accesses merchant accounts, and never touches payment details. Checkout always happens directly in the user's browser on the merchant's own domain.
 - **SSRF Protection:** HTTPS-only requests; blocks private/reserved IPv4 and IPv6 ranges (including cloud metadata IPs), IP literals, localhost, \`.internal\`, and unsafe redirects using DNS-pinned fetches, timeouts, and strict response size limits.
 - **Prompt-Injection Sanitization:** Strips HTML, \`<script>\`, \`<style>\`, \`<iframe>\`, control characters, BiDi overrides, and invisible Unicode tag blocks (\`U+E0000–U+E007F\`) from third-party merchant catalog text, enforces field length caps, and attaches untrusted-data notices (\`source_notice\`) so AI agents treat store text strictly as catalog facts.
-- **Privacy & GDPR (EU Hosted):** Hosted in Google Cloud \`europe-west1\` (EU) by Wals Professional Services GmbH (Vienna, Austria). Only the account email, hashed credentials, SHA-256 token hashes, and a numeric daily call counter are stored for hosted accounts. Chat transcripts are never stored. Paid Pro billing is processed solely by Stripe. Local \`stdio\` mode sends zero data to wals.pro.
+- **Privacy & GDPR (EU Hosted):** Hosted in Google Cloud \`europe-west1\` (EU) by Wals Professional Services GmbH (Vienna, Austria). Only the account email, short-lived hashed sign-in codes (passwordless login), SHA-256 token hashes, and a numeric daily call counter are stored for hosted accounts. Chat transcripts are never stored. Paid Pro billing is processed solely by Stripe. Local \`stdio\` mode sends zero data to wals.pro.
 - **Security Contact:** \`security@wals.pro\` | **Support:** \`support@wals.pro\`
 
 ---
@@ -233,16 +236,18 @@ Sitemap: ${config.appOrigin}/sitemap.xml
 `;
 }
 
-export const SITEMAP_PATHS = [
+export const SITEMAP_PATHS: readonly string[] = [
   "/",
   "/?lang=de",
   "/?lang=en",
+  "/guides",
+  ...GUIDE_DEFINITIONS.map((g) => g.path),
   "/billing",
   "/privacy",
   "/terms",
   "/llms.txt",
   "/llms-full.txt"
-] as const;
+];
 
 function escapeXml(raw: string): string {
   return raw
@@ -257,7 +262,9 @@ export function renderSitemapXml(config: AppConfig): string {
   const priorities: Record<string, string> = {
     "/": "1.0",
     "/?lang=de": "0.9",
-    "/?lang=en": "0.9"
+    "/?lang=en": "0.9",
+    "/guides": "0.9",
+    ...Object.fromEntries(GUIDE_DEFINITIONS.map((g) => [g.path, "0.8"]))
   };
   const urls = SITEMAP_PATHS.map((p) => {
     const loc = escapeXml(`${config.appOrigin}${p}`);

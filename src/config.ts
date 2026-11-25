@@ -17,6 +17,11 @@ export interface AppConfig {
   demoVideoUrl: string | undefined;
   demoVideoUrlDe: string | undefined;
   demoVideoUrlEn: string | undefined;
+  smtpUrl: string | undefined;
+  smtpSenderEmail: string;
+  smtpSenderName: string;
+  reviewerTestEmail: string | undefined;
+  reviewerTestCode: string | undefined;
   sessionSecret: string;
   appName: string;
   repoUrl: string;
@@ -85,6 +90,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       ? env.SESSION_SECRET.trim()
       : crypto.randomBytes(32).toString("hex");
 
+  const rawReviewerEmail = env.REVIEWER_TEST_EMAIL?.trim().toLowerCase() || undefined;
+  const rawReviewerCode = env.REVIEWER_TEST_CODE?.replace(/[\s\-]/g, "").trim() || undefined;
+  const reviewerEnabled = Boolean(
+    rawReviewerEmail && rawReviewerCode && /^\d{6}$/.test(rawReviewerCode)
+  );
+
   return {
     port,
     appOrigin,
@@ -102,6 +113,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     demoVideoUrl: parseOptionalVideoUrl(env.DEMO_VIDEO_URL),
     demoVideoUrlDe: parseOptionalVideoUrl(env.DEMO_VIDEO_URL_DE),
     demoVideoUrlEn: parseOptionalVideoUrl(env.DEMO_VIDEO_URL_EN),
+    smtpUrl: env.SMTP_URL?.trim() || undefined,
+    smtpSenderEmail: env.SMTP_SENDER_EMAIL?.trim() || "support@notify.wals.pro",
+    smtpSenderName: env.SMTP_SENDER_NAME?.trim() || "ShopCart by wals.pro",
+    reviewerTestEmail: reviewerEnabled ? rawReviewerEmail : undefined,
+    reviewerTestCode: reviewerEnabled ? rawReviewerCode : undefined,
     sessionSecret,
     appName: "shopcart-mcp",
     repoUrl: "https://github.com/Wals-pro/shopcart-mcp",

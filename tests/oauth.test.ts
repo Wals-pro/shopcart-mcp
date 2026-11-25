@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { CimdResolver, parseAndProjectCimdDocument } from "../src/auth/cimd.js";
 import { sha256Base64Url } from "../src/auth/crypto.js";
+import { MemoryEmailSender } from "../src/auth/email-otp.js";
 import { matchRedirectUri } from "../src/auth/validation.js";
 import { loadConfig } from "../src/config.js";
 import { MemoryStore } from "../src/store/memory.js";
@@ -16,6 +17,7 @@ function makeTestApp(cimdMap: Record<string, { status?: number; body: unknown; c
     PROMO_FREE_PRO_UNTIL: "2026-12-06T23:59:59+01:00"
   });
   const store = new MemoryStore();
+  const emailSender = new MemoryEmailSender();
   let cimdFetches = 0;
   const cimdResolver = new CimdResolver(async (url): Promise<SafeFetchResponse> => {
     cimdFetches++;
@@ -36,8 +38,8 @@ function makeTestApp(cimdMap: Record<string, { status?: number; body: unknown; c
       bodyText: text
     };
   });
-  const app = createApp({ config, store, cimdResolver });
-  return { app, store, config, getCimdFetches: () => cimdFetches };
+  const app = createApp({ config, store, cimdResolver, emailSender });
+  return { app, store, config, emailSender, getCimdFetches: () => cimdFetches };
 }
 
 describe("OAuth 2.1 compliance & MCP auth", () => {
@@ -151,8 +153,8 @@ describe("OAuth 2.1 compliance & MCP auth", () => {
     expect(matchRedirectUri("http://127.0.0.1:8999/other", ["http://127.0.0.1/callback"])).toBe(false);
   });
 
-  it("drops cursor:// in DCR, forces loopback to 'none', and runs full PKCE S256 + refresh rotation + replay revocation + /mcp tools/list", async () => {
-    const { app } = makeTestApp();
+  it("drops cursor:// in DCR, forces loopback to 'none', and runs full PKCE S256 + passwordless OTP + refresh rotation + replay revocation + /mcp tools/list", async () => {
+    const { app, emailSender } = makeTestApp();
 
     // 1. DCR with Cursor-style redirect_uris + empty scope
     const reg = await request(app)
@@ -191,20 +193,52 @@ describe("OAuth 2.1 compliance & MCP auth", () => {
       })
       .expect(200);
 
+    expect(authGet.text).not.toContain('type="password"');
     const csrfMatch = authGet.text.match(/name="_csrf" value="([^"]+)"/);
     expect(csrfMatch?.[1]).toBeTruthy();
     const csrfToken = csrfMatch![1]!;
     const setCookies = authGet.headers["set-cookie"] as unknown as string[];
     const cookieHeader = setCookies.map((c) => c.split(";")[0]).join("; ");
 
-    // 3. POST /oauth/authorize to register user & obtain code + RFC 9207 iss
-    const authPost = await request(app)
+    // 3a. POST /oauth/authorize (step=email) -> sends 6-digit OTP + Magic Link email
+    const step1Post = await request(app)
       .post("/oauth/authorize")
       .set("Cookie", cookieHeader)
       .type("form")
       .send({
         _csrf: csrfToken,
-        mode: "register",
+        step: "email",
+        lang: "en",
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+        resource: "https://shopcart.wals.pro/mcp",
+        scope: "mcp:read",
+        state: "st_999",
+        email: "alice@example.com"
+      })
+      .expect(200);
+
+    const sentMail = emailSender.lastFor("alice@example.com");
+    expect(sentMail).toBeDefined();
+    expect(sentMail!.code).toMatch(/^\d{6}$/);
+
+    const csrf2 = step1Post.text.match(/name="_csrf" value="([^"]+)"/)![1]!;
+    const challengeId = step1Post.text.match(/name="challenge_id" value="([^"]+)"/)![1]!;
+    const step2Cookies = (step1Post.headers["set-cookie"] as unknown as string[])
+      .map((c) => c.split(";")[0])
+      .join("; ");
+
+    // 3b. POST /oauth/authorize (step=verify) -> verifies 6-digit OTP & issues code + RFC 9207 iss
+    const authPost = await request(app)
+      .post("/oauth/authorize")
+      .set("Cookie", step2Cookies)
+      .type("form")
+      .send({
+        _csrf: csrf2,
+        step: "verify",
+        challenge_id: challengeId,
         lang: "en",
         client_id: clientId,
         redirect_uri: redirectUri,
@@ -214,7 +248,7 @@ describe("OAuth 2.1 compliance & MCP auth", () => {
         scope: "mcp:read",
         state: "st_999",
         email: "alice@example.com",
-        password: "super-secure-password-123"
+        code: sentMail!.formattedCode
       })
       .expect(303);
 

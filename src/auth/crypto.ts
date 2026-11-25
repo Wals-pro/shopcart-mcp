@@ -11,8 +11,16 @@ export function sha256Base64Url(value: string): string {
   return crypto.createHash("sha256").update(value, "utf8").digest("base64url");
 }
 
+export function hmacSha256Hex(secret: string, value: string): string {
+  return crypto.createHmac("sha256", secret).update(value, "utf8").digest("hex");
+}
+
 export function randomToken(bytes = 32): string {
   return crypto.randomBytes(bytes).toString("base64url");
+}
+
+export function randomSixDigitCode(): string {
+  return crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
 }
 
 export function timingSafeEqualStr(a: string, b: string): boolean {

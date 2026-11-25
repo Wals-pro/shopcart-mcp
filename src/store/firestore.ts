@@ -1,6 +1,9 @@
 import { Firestore, Timestamp } from "@google-cloud/firestore";
-import { sha256Hex } from "../auth/crypto.js";
+import { sha256Hex, timingSafeEqualStr } from "../auth/crypto.js";
 import type {
+  EmailAuthChallengeRecord,
+  EmailChallengeVerifyResult,
+  OAuthChallengeParams,
   OAuthClientRecord,
   OAuthCodeRecord,
   OAuthTokenRecord,
@@ -45,8 +48,8 @@ export class FirestoreStore implements StorageBackend {
     return {
       id,
       email: String(data.email),
-      passwordHash: String(data.passwordHash),
-      passwordSalt: String(data.passwordSalt),
+      passwordHash: typeof data.passwordHash === "string" ? data.passwordHash : "",
+      passwordSalt: typeof data.passwordSalt === "string" ? data.passwordSalt : "",
       plan: data.plan === "pro" ? "pro" : "free",
       status:
         data.status === "trialing" || data.status === "past_due" || data.status === "canceled"
@@ -339,6 +342,137 @@ export class FirestoreStore implements StorageBackend {
 
   async deleteWebSession(sessionHash: string): Promise<void> {
     await this.db.collection("web_sessions").doc(sessionHash).delete();
+  }
+
+  private mapEmailChallenge(
+    challengeId: string,
+    d: FirebaseFirestore.DocumentData
+  ): EmailAuthChallengeRecord {
+    let oauthParams: OAuthChallengeParams | null = null;
+    if (d.oauthParams && typeof d.oauthParams === "object") {
+      const o = d.oauthParams as Record<string, unknown>;
+      oauthParams = {
+        clientId: String(o.clientId ?? ""),
+        clientName: String(o.clientName ?? ""),
+        redirectUri: String(o.redirectUri ?? ""),
+        codeChallenge: String(o.codeChallenge ?? ""),
+        codeChallengeMethod: "S256",
+        resource: String(o.resource ?? ""),
+        scope: String(o.scope ?? "mcp:read"),
+        state: String(o.state ?? "")
+      };
+    }
+
+    return {
+      challengeId,
+      email: String(d.email ?? ""),
+      purpose: d.purpose === "oauth" ? "oauth" : "billing",
+      lang: d.lang === "de" ? "de" : "en",
+      otpHash: String(d.otpHash ?? ""),
+      magicTokenHash: String(d.magicTokenHash ?? ""),
+      browserBindHash: typeof d.browserBindHash === "string" ? d.browserBindHash : null,
+      oauthParams,
+      attempts: Number(d.attempts ?? 0),
+      maxAttempts: Number(d.maxAttempts ?? 5),
+      used: Boolean(d.used),
+      createdAt: toDate(d.createdAt),
+      expiresAt: toDate(d.expiresAt)
+    };
+  }
+
+  async saveEmailAuthChallenge(challenge: EmailAuthChallengeRecord): Promise<void> {
+    await this.db
+      .collection("auth_email_challenges")
+      .doc(challenge.challengeId)
+      .set({
+        email: challenge.email,
+        purpose: challenge.purpose,
+        lang: challenge.lang,
+        otpHash: challenge.otpHash,
+        magicTokenHash: challenge.magicTokenHash,
+        browserBindHash: challenge.browserBindHash,
+        oauthParams: challenge.oauthParams,
+        attempts: challenge.attempts,
+        maxAttempts: challenge.maxAttempts,
+        used: challenge.used,
+        createdAt: Timestamp.fromDate(challenge.createdAt),
+        expiresAt: Timestamp.fromDate(challenge.expiresAt)
+      });
+  }
+
+  async getEmailAuthChallenge(challengeId: string): Promise<EmailAuthChallengeRecord | null> {
+    const snap = await this.db.collection("auth_email_challenges").doc(challengeId).get();
+    if (!snap.exists) return null;
+    return this.mapEmailChallenge(challengeId, snap.data()!);
+  }
+
+  async verifyAndConsumeEmailOtp(
+    challengeId: string,
+    expectedOtpHash: string,
+    now = new Date()
+  ): Promise<EmailChallengeVerifyResult> {
+    const ref = this.db.collection("auth_email_challenges").doc(challengeId);
+    return this.db.runTransaction(async (tx): Promise<EmailChallengeVerifyResult> => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) return { status: "not_found" };
+      const rec = this.mapEmailChallenge(challengeId, snap.data()!);
+      if (rec.used) return { status: "used" };
+      if (rec.expiresAt.getTime() <= now.getTime()) return { status: "expired" };
+      if (rec.attempts >= rec.maxAttempts) return { status: "locked" };
+
+      if (!timingSafeEqualStr(rec.otpHash, expectedOtpHash)) {
+        const nextAttempts = rec.attempts + 1;
+        tx.update(ref, { attempts: nextAttempts });
+        if (nextAttempts >= rec.maxAttempts) {
+          return { status: "locked" };
+        }
+        return {
+          status: "invalid_code",
+          remainingAttempts: rec.maxAttempts - nextAttempts
+        };
+      }
+
+      tx.update(ref, { used: true, usedAt: Timestamp.fromDate(now) });
+      return { status: "ok", challenge: { ...rec, used: true } };
+    });
+  }
+
+  async verifyAndConsumeEmailMagicLink(
+    challengeId: string,
+    expectedMagicTokenHash: string,
+    browserBindHash: string | null,
+    now = new Date()
+  ): Promise<EmailChallengeVerifyResult> {
+    const ref = this.db.collection("auth_email_challenges").doc(challengeId);
+    return this.db.runTransaction(async (tx): Promise<EmailChallengeVerifyResult> => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) return { status: "not_found" };
+      const rec = this.mapEmailChallenge(challengeId, snap.data()!);
+      if (rec.used) return { status: "used" };
+      if (rec.expiresAt.getTime() <= now.getTime()) return { status: "expired" };
+      if (rec.attempts >= rec.maxAttempts) return { status: "locked" };
+
+      if (!timingSafeEqualStr(rec.magicTokenHash, expectedMagicTokenHash)) {
+        const nextAttempts = rec.attempts + 1;
+        tx.update(ref, { attempts: nextAttempts });
+        if (nextAttempts >= rec.maxAttempts) {
+          return { status: "locked" };
+        }
+        return {
+          status: "invalid_code",
+          remainingAttempts: rec.maxAttempts - nextAttempts
+        };
+      }
+
+      if (rec.purpose === "oauth" && rec.browserBindHash) {
+        if (!browserBindHash || !timingSafeEqualStr(rec.browserBindHash, browserBindHash)) {
+          return { status: "browser_mismatch", challenge: rec };
+        }
+      }
+
+      tx.update(ref, { used: true, usedAt: Timestamp.fromDate(now) });
+      return { status: "ok", challenge: { ...rec, used: true } };
+    });
   }
 
   async getDailyUsage(userId: string, dayKey: string): Promise<number> {
