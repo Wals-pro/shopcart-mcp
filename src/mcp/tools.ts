@@ -98,13 +98,13 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Inspect Store",
       description:
-        "Check whether an HTTPS online store URL is a supported public Shopify storefront and return its currency, country, WAF restrictions, and available catalog endpoints.",
+        "Check whether an HTTPS online store URL is a supported public Shopify or WooCommerce storefront and return its platform, currency, country, WAF restrictions, and available catalog endpoints.",
       inputSchema: {
         store_url: z
           .string()
           .min(3)
           .max(256)
-          .describe("Store domain or HTTPS URL, e.g. 'snocks.com' or 'https://ridge.com'")
+          .describe("Store domain or HTTPS URL, e.g. 'snocks.com', 'ridge.com', or 'veloheld.de'")
       },
       annotations: makeAnnotations("Inspect Store")
     },
@@ -114,13 +114,15 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
         const { store } = await ctx.registry.resolve(origin, ctx.concurrencyKey);
         if (!store) {
           throw new Error(
-            `Store '${origin}' could not be detected as a supported Shopify storefront.`
+            `Store '${origin}' could not be detected as a supported Shopify or WooCommerce storefront.`
           );
         }
         const notices: string[] = [];
         if (store.wafRestricted) {
           notices.push(
-            "Store uses WAF rules that restrict /meta.json or /products.json; keyword search (/search/suggest.json), product detail (/products/<handle>.js), and cart permalinks remain available."
+            store.platform === "woocommerce"
+              ? "Store restricts /wp-json/wc/store/v1/products; direct cart links (?add-to-cart=...) remain available if you know the product or variation ID."
+              : "Store uses WAF rules that restrict /meta.json or /products.json; keyword search (/search/suggest.json), product detail (/products/<handle>.js), and cart permalinks remain available."
           );
         }
         return { store, notices };
@@ -176,7 +178,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Search Store Products",
       description:
-        "Search a Shopify storefront's public catalog by keyword or collection handle (e.g. 'sale', 'black-friday', 'bestseller') with optional availability, min/max price filters, sort_by (including 'discount_desc'), and automatic compare-at discount/savings calculation.",
+        "Search a supported Shopify or WooCommerce storefront's public catalog by keyword or collection handle (e.g. 'sale', 'black-friday', 'bestseller') with optional availability, min/max price filters, sort_by (including 'discount_desc'), and automatic compare-at discount/savings calculation.",
       inputSchema: {
         store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
         query: z
@@ -229,7 +231,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     async ({ store_url, query, collection, sort_by, limit, available_only, min_price, max_price }) =>
       runGuardedTool(ctx, "search_products", async () => {
         const origin = normalizeStoreOrigin(store_url);
-        const adapter = ctx.registry.getDefault();
+        const adapter = await ctx.registry.resolveAdapter(origin, ctx.concurrencyKey);
         const result = await adapter.searchProducts(origin, {
           query,
           collection,
@@ -258,21 +260,21 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Get Product Details & Variants",
       description:
-        "Retrieve product details, sanitized description text, options, images, and exact numeric variant IDs, prices, automatic compare-at discounts/savings, and availability for a Shopify product handle or URL.",
+        "Retrieve product details, sanitized description text, options, images, and exact numeric variant/product IDs, prices, automatic compare-at discounts/savings, and availability for a Shopify or WooCommerce product handle/slug, numeric ID, or URL.",
       inputSchema: {
         store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
         handle_or_url: z
           .string()
           .min(1)
           .max(300)
-          .describe("Product handle (e.g. 'rolltop-2-0') or full product URL")
+          .describe("Product handle/slug (e.g. 'rolltop-2-0'), numeric WooCommerce product ID, or full product URL")
       },
       annotations: makeAnnotations("Get Product Details & Variants")
     },
     async ({ store_url, handle_or_url }) =>
       runGuardedTool(ctx, "get_product", async () => {
         const origin = normalizeStoreOrigin(store_url);
-        const adapter = ctx.registry.getDefault();
+        const adapter = await ctx.registry.resolveAdapter(origin, ctx.concurrencyKey);
         const result = await adapter.getProduct(origin, handle_or_url, {
           concurrencyKey: ctx.concurrencyKey
         });
@@ -335,7 +337,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Create Store Cart Link",
       description:
-        "Generate a read-only Shopify browser cart or checkout permalink from exact numeric variant IDs and quantities, optionally verifying live availability via verify_handles.",
+        "Generate a read-only Shopify or WooCommerce browser cart or checkout permalink from exact numeric product/variant IDs and quantities, optionally verifying live availability via verify_handles.",
       inputSchema: {
         store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
         items: z
@@ -343,7 +345,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
             z.object({
               variant_id: z
                 .string()
-                .regex(/^\d{1,20}$/, "variant_id must be a numeric Shopify variant ID"),
+                .regex(/^\d{1,20}$/, "variant_id must be a numeric product or variant ID"),
               quantity: z.number().int().min(1).max(99)
             })
           )
@@ -355,7 +357,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           .default("cart")
           .optional()
           .describe(
-            "'cart' opens merchant storefront cart (?storefront=true, default); 'checkout' goes directly to checkout."
+            "'cart' opens merchant storefront cart (default); 'checkout' goes directly to checkout."
           ),
         discount_code: z
           .string()
@@ -367,7 +369,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           .max(10)
           .optional()
           .describe(
-            "Recommended: product handles whose variants should be verified for stock and price via /products/<handle>.js"
+            "Recommended: product handles/slugs (or WooCommerce IDs) whose variants should be verified for stock and price."
           )
       },
       annotations: makeAnnotations("Create Store Cart Link")
@@ -375,7 +377,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     async ({ store_url, items, mode, discount_code, verify_handles }) =>
       runGuardedTool(ctx, "create_cart_link", async () => {
         const origin = normalizeStoreOrigin(store_url);
-        const adapter = ctx.registry.getDefault();
+        const adapter = await ctx.registry.resolveAdapter(origin, ctx.concurrencyKey);
         return adapter.buildCartLink(
           origin,
           items.map((i) => ({ variantId: i.variant_id, quantity: i.quantity })),

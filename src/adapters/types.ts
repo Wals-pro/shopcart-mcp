@@ -4,8 +4,10 @@ export interface Money {
   currency: string;
 }
 
+export type StorePlatform = "shopify" | "woocommerce";
+
 export interface StoreInfo {
-  platform: "shopify";
+  platform: StorePlatform;
   origin: string;
   name: string | null;
   currency: string;
@@ -17,6 +19,7 @@ export interface StoreInfo {
     productCatalogJson: boolean;
     storefrontMcp: boolean;
     storefrontMcpTools: string[];
+    wooStoreApi?: boolean;
   };
 }
 
@@ -161,11 +164,19 @@ export interface CartLinkItemResult {
   unit_price?: Money;
 }
 
+export interface AdditionalCartLink {
+  variant_id: string;
+  quantity: number;
+  title?: string;
+  cart_url: string;
+}
+
 export interface CartLinkResult {
   store_origin: string;
   cart_url: string;
   mode: "cart" | "checkout";
   items: CartLinkItemResult[];
+  additional_cart_links?: AdditionalCartLink[];
   warnings: string[];
   next_step: string;
 }
