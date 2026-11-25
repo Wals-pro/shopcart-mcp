@@ -114,19 +114,19 @@ export function createMcpbManifest(version) {
     display_name: "ShopCart MCP",
     version,
     description:
-      "Search Shopify stores, inspect live product variants and prices, and create browser cart links — local & zero-auth.",
+      "Search Shopify, WooCommerce & Amazon stores, browse deals, check store policies, inspect variants, and create cart links — local & zero-auth.",
     long_description: [
-      "Connect Claude Desktop directly to public Shopify storefronts with zero login, zero API keys, and zero telemetry.",
+      "Connect Claude Desktop directly to public Shopify storefronts, WooCommerce stores, and Amazon marketplaces with zero login, zero API keys required for core features, and zero telemetry.",
       "",
       "**Included read-only tools:**",
-      "- `inspect_store` — Verify Shopify storefront support, currency, country, and WAF behavior.",
-      "- `list_collections` — Browse store collections and automatically highlight Sale, Black Friday, Bestseller, and seasonal deal collections.",
-      "- `search_products` — Search public product catalogs or collections with availability, price, and discount sorting (`discount_desc`, `price_asc`, `price_desc`).",
-      "- `get_product` — Fetch sanitized product details, options, images, stock, compare-at discounts, and exact numeric variant IDs.",
-      "- `get_store_policies` — Check shipping thresholds, delivery times, and return/refund policies via native Storefront MCP and public `/policies` pages.",
-      "- `create_cart_link` — Build verified browser cart or checkout permalinks so you review and complete checkout yourself.",
+      "- `inspect_store` — Verify Shopify, WooCommerce, or Amazon storefront support, currency, country, WAF behavior, and capabilities.",
+      "- `list_collections` — Browse Shopify store collections and automatically highlight Sale, Black Friday, Bestseller, and seasonal deal collections.",
+      "- `search_products` — Search public product catalogs (Shopify, WooCommerce, or Amazon via optional PA-API/Keepa) with availability, price, and discount sorting (`discount_desc`, `price_asc`, `price_desc`).",
+      "- `get_product` — Fetch sanitized product details, options, images, stock, compare-at discounts, and exact variant IDs or Amazon ASINs.",
+      "- `get_store_policies` — Check Shopify shipping thresholds, delivery times, and return/refund policies via native Storefront MCP and public `/policies` pages.",
+      "- `create_cart_link` — Build verified browser cart or checkout permalinks across Shopify, WooCommerce, and Amazon so you review and complete checkout yourself.",
       "",
-      "Includes built-in SSRF protection and prompt-injection sanitization. Independent open-source project by Wals.pro (not affiliated with Shopify Inc.)."
+      "Includes built-in SSRF protection and prompt-injection sanitization. Independent open-source project by Wals.pro (not affiliated with Shopify Inc., Automattic/WooCommerce, or Amazon)."
     ].join("\n"),
     author: {
       name: "Wals.pro",
@@ -151,6 +151,8 @@ export function createMcpbManifest(version) {
     privacy_policies: ["https://shopcart.wals.pro/privacy"],
     keywords: [
       "shopify",
+      "woocommerce",
+      "amazon",
       "shopping",
       "ecommerce",
       "cart",
@@ -171,7 +173,7 @@ export function createMcpbManifest(version) {
       {
         name: "inspect_store",
         description:
-          "Check whether an HTTPS online store URL is a supported public Shopify storefront and return its currency, country, WAF restrictions, and available catalog endpoints."
+          "Check whether an HTTPS online store URL is a supported public Shopify, WooCommerce, or Amazon storefront and return its platform, currency, country, WAF restrictions, and available catalog capabilities."
       },
       {
         name: "list_collections",
@@ -181,12 +183,12 @@ export function createMcpbManifest(version) {
       {
         name: "search_products",
         description:
-          "Search a Shopify storefront's public catalog by keyword or collection handle with optional availability, min/max price filters, sort_by (including discount_desc), and automatic discount/savings calculation."
+          "Search a supported Shopify, WooCommerce, or Amazon storefront's public catalog by keyword or Shopify collection handle with optional availability, min/max price filters, sort_by (including discount_desc), and automatic discount/savings calculation."
       },
       {
         name: "get_product",
         description:
-          "Retrieve product details, sanitized description text, options, images, and exact numeric variant IDs, prices, compare-at discounts, and availability for a Shopify product handle or URL."
+          "Retrieve product details, sanitized description text, options, images, and exact variant IDs (numeric IDs on Shopify/WooCommerce, 10-character ASINs on Amazon), prices, compare-at discounts, and availability."
       },
       {
         name: "get_store_policies",
@@ -196,7 +198,7 @@ export function createMcpbManifest(version) {
       {
         name: "create_cart_link",
         description:
-          "Generate a read-only Shopify browser cart or checkout permalink from exact numeric variant IDs and quantities, optionally verifying live availability via verify_handles."
+          "Generate a read-only browser cart or checkout permalink across Shopify, WooCommerce, and Amazon from exact variant IDs or ASINs and quantities, optionally verifying live availability via verify_handles."
       }
     ],
     tools_generated: false,

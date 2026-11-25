@@ -1,3 +1,4 @@
+import { AmazonAdapter } from "./amazon/adapter.js";
 import { ShopifyAdapter } from "./shopify/adapter.js";
 import { WooCommerceAdapter } from "./woocommerce/adapter.js";
 import type { StoreAdapter, StoreInfo } from "./types.js";
@@ -15,11 +16,17 @@ export class AdapterRegistry {
   private readonly cache = new Map<string, CachedResolution>();
 
   constructor(adapters?: StoreAdapter[]) {
-    this.adapters = adapters ?? [new ShopifyAdapter(), new WooCommerceAdapter()];
+    // AmazonAdapter is registered first because its domain detection is purely synchronous (0 ms, no network probe),
+    // followed by ShopifyAdapter and WooCommerceAdapter.
+    this.adapters = adapters ?? [
+      new AmazonAdapter(),
+      new ShopifyAdapter(),
+      new WooCommerceAdapter()
+    ];
   }
 
   getDefault(): StoreAdapter {
-    return this.adapters[0]!;
+    return this.adapters.find((a) => a.platform === "shopify") ?? this.adapters[0]!;
   }
 
   listPlatforms(): string[] {
@@ -58,7 +65,29 @@ export class AdapterRegistry {
     if (cached && cached.expiresAt > Date.now()) {
       return cached.adapter;
     }
-    const { adapter } = await this.resolve(origin, concurrencyKey);
-    return adapter;
+
+    const now = Date.now();
+    for (let i = 0; i < this.adapters.length; i++) {
+      const adapter = this.adapters[i]!;
+      // If only the default fallback adapter remains, skip redundant network detection probes
+      if (i === this.adapters.length - 1 && adapter === this.getDefault()) {
+        return adapter;
+      }
+      const store = await adapter.detect(origin, concurrencyKey);
+      if (store) {
+        const entry: CachedResolution = {
+          adapter,
+          store,
+          expiresAt: now + REGISTRY_CACHE_TTL_MS
+        };
+        this.cache.set(origin, entry);
+        if (store.origin !== origin) {
+          this.cache.set(store.origin, entry);
+        }
+        return adapter;
+      }
+    }
+
+    return this.getDefault();
   }
 }

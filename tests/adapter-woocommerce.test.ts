@@ -808,10 +808,10 @@ describe("WooCommerceAdapter (detect, search, variable products, cart links)", (
   });
 });
 
-describe("AdapterRegistry auto-routing (Shopify vs. WooCommerce)", () => {
-  it("registers ShopifyAdapter before WooCommerceAdapter and routes each platform automatically", async () => {
+describe("AdapterRegistry auto-routing (Amazon, Shopify & WooCommerce)", () => {
+  it("registers AmazonAdapter -> ShopifyAdapter -> WooCommerceAdapter and routes each platform automatically", async () => {
     const defaultRegistry = new AdapterRegistry();
-    expect(defaultRegistry.listPlatforms()).toEqual(["shopify", "woocommerce"]);
+    expect(defaultRegistry.listPlatforms()).toEqual(["amazon", "shopify", "woocommerce"]);
 
     const fetcher = makeFixtureFetcher({
       // Shopify store
@@ -877,5 +877,13 @@ describe("AdapterRegistry auto-routing (Shopify vs. WooCommerce)", () => {
     // Unknown / non-commerce site returns store: null
     const unknownRes = await registry.resolve("https://plain-blog.example");
     expect(unknownRes.store).toBeNull();
+
+    // WooCommerce strictly rejects Amazon ASINs in buildCartLink
+    const wooAdapter = new WooCommerceAdapter(fetcher);
+    await expect(
+      wooAdapter.buildCartLink("https://mywoo-store.example", [{ variantId: "B08N5WRWNW", quantity: 1 }], {
+        mode: "cart"
+      })
+    ).rejects.toThrow("Invalid WooCommerce product/variation ID");
   });
 });

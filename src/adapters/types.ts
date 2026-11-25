@@ -4,7 +4,7 @@ export interface Money {
   currency: string;
 }
 
-export type StorePlatform = "shopify" | "woocommerce";
+export type StorePlatform = "shopify" | "woocommerce" | "amazon";
 
 export interface StoreInfo {
   platform: StorePlatform;
@@ -20,6 +20,10 @@ export interface StoreInfo {
     storefrontMcp: boolean;
     storefrontMcpTools: string[];
     wooStoreApi?: boolean;
+    liveSearch?: boolean;
+    searchProvider?: "paapi" | "keepa" | "none";
+    asinCartPermalink?: boolean;
+    affiliateTagConfigured?: boolean;
   };
 }
 
@@ -34,8 +38,8 @@ export interface ProductSummary {
   price_min: Money;
   price_max: Money;
   compare_at_price: Money | null;
-  discount_percent: number | null;
-  savings: Money | null;
+  discount_percent?: number | null;
+  savings?: Money | null;
   url: string;
   image_url: string | null;
 }
@@ -47,8 +51,8 @@ export interface ProductVariant {
   available: boolean;
   price: Money;
   compare_at_price: Money | null;
-  discount_percent: number | null;
-  savings: Money | null;
+  discount_percent?: number | null;
+  savings?: Money | null;
   option_values: string[];
 }
 
@@ -87,6 +91,7 @@ export interface SearchProductsResult {
   sort_by?: ProductSortBy;
   products: ProductSummary[];
   notices: string[];
+  agent_guidance?: string;
 }
 
 export interface CollectionSummary {
@@ -177,6 +182,7 @@ export interface CartLinkResult {
   mode: "cart" | "checkout";
   items: CartLinkItemResult[];
   additional_cart_links?: AdditionalCartLink[];
+  affiliate_disclosure?: boolean;
   warnings: string[];
   next_step: string;
 }
@@ -184,14 +190,14 @@ export interface CartLinkResult {
 export interface StoreAdapter {
   readonly platform: string;
   detect(origin: string, concurrencyKey?: string): Promise<StoreInfo | null>;
-  listCollections(origin: string, opts?: ListCollectionsOptions): Promise<ListCollectionsResult>;
+  listCollections?(origin: string, opts?: ListCollectionsOptions): Promise<ListCollectionsResult>;
   searchProducts(origin: string, opts: SearchProductsOptions): Promise<SearchProductsResult>;
   getProduct(
     origin: string,
     handleOrUrl: string,
     opts?: { currencyHint?: string; concurrencyKey?: string }
   ): Promise<GetProductResult>;
-  getStorePolicies(origin: string, opts?: StorePoliciesOptions): Promise<StorePoliciesResult>;
+  getStorePolicies?(origin: string, opts?: StorePoliciesOptions): Promise<StorePoliciesResult>;
   buildCartLink(
     origin: string,
     items: CartLinkItemInput[],
