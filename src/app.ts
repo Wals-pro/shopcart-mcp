@@ -10,7 +10,11 @@ import { EmailOtpService, type EmailSender } from "./auth/email-otp.js";
 import { detectLang } from "./auth/pages.js";
 import { createOAuthRouter } from "./auth/router.js";
 import { consumeUserToolQuota } from "./billing/quota.js";
-import { isStripeWebhookConfigured, processStripeWebhook } from "./billing/stripe.js";
+import {
+  isStripeWebhookConfigured,
+  processStripeWebhook,
+  type BillingStripeClient
+} from "./billing/stripe.js";
 import type { AppConfig } from "./config.js";
 import { createShopcartMcpServer } from "./mcp/create-server.js";
 import type { StorageBackend } from "./store/types.js";
@@ -27,6 +31,7 @@ export interface CreateAppDeps {
   cimdResolver?: CimdResolver;
   emailSender?: EmailSender;
   otpService?: EmailOtpService;
+  stripeClient?: BillingStripeClient;
 }
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
@@ -377,7 +382,7 @@ export function createApp(deps: CreateAppDeps): Express {
   });
 
   app.use(createGuidesRouter(config));
-  app.use(createBillingRouter(config, store, otpService));
+  app.use(createBillingRouter(config, store, otpService, deps.stripeClient));
 
   // 404 fallback
   app.use((_req, res) => {

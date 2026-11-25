@@ -21,6 +21,8 @@ function getStripeClient(config: AppConfig): Stripe {
 
 export type CheckoutLocale = "de" | "en";
 
+export type BillingStripeClient = Pick<Stripe, "customers" | "checkout" | "billingPortal">;
+
 export interface CreateProCheckoutSessionOptions {
   lang?: string;
   now?: Date;
@@ -91,12 +93,13 @@ export async function createProCheckoutSession(
 
 export async function createBillingPortalSession(
   user: UserRecord,
-  config: AppConfig
+  config: AppConfig,
+  stripeClient?: Pick<Stripe, "billingPortal">
 ): Promise<{ url: string }> {
   if (!user.stripeCustomerId) {
     throw new Error("No Stripe customer linked to this account yet");
   }
-  const stripe = getStripeClient(config);
+  const stripe = stripeClient ?? getStripeClient(config);
   const session = await stripe.billingPortal.sessions.create({
     customer: user.stripeCustomerId,
     return_url: `${config.appOrigin}/billing`

@@ -87,12 +87,31 @@ export function verifySignedCsrfToken(
 
 export function isAllowedCsrfOrigin(
   originHeader: string | string[] | undefined,
-  appOrigin: string
+  appOrigin: string,
+  secFetchSiteHeader?: string | string[] | undefined
 ): boolean {
+  const rawSecFetchSite = Array.isArray(secFetchSiteHeader)
+    ? secFetchSiteHeader[0]
+    : secFetchSiteHeader;
+  const secFetchSite = rawSecFetchSite?.trim().toLowerCase();
+
+  if (secFetchSite === "cross-site") {
+    return false;
+  }
+
   if (originHeader === undefined) return true;
   const raw = Array.isArray(originHeader) ? originHeader[0] : originHeader;
   if (!raw || raw.trim() === "") return true;
+
   const normalized = raw.trim().replace(/\/+$/, "");
+  // Browsers send "Origin: null" for same-origin form POSTs when a page had
+  // Referrer-Policy: no-referrer or strict privacy extensions. Allow "Origin: null"
+  // only when the browser explicitly confirms Sec-Fetch-Site: same-origin, blocking
+  // cross-site/sandboxed-iframe null-Origin attacks fail-closed.
+  if (normalized.toLowerCase() === "null") {
+    return secFetchSite === "same-origin";
+  }
+
   const expected = appOrigin.trim().replace(/\/+$/, "");
   return normalized === expected;
 }
@@ -134,16 +153,21 @@ export function verifyCsrfRequest(params: {
   secret: string;
   appOrigin: string;
   originHeader: string | string[] | undefined;
+  secFetchSiteHeader?: string | string[] | undefined;
   formToken: string | undefined;
   cookieValue: string | undefined;
   context: string;
   nowMs?: number;
 }): boolean {
-  if (!isAllowedCsrfOrigin(params.originHeader, params.appOrigin)) {
+  if (!isAllowedCsrfOrigin(params.originHeader, params.appOrigin, params.secFetchSiteHeader)) {
     return false;
   }
   if (verifySignedCsrfToken(params.secret, params.formToken, params.context, params.nowMs)) {
     return true;
+  }
+  // Never bypass context or expiry checks for 3-part signed tokens via cookie matching.
+  if (params.formToken && params.formToken.split(".").length === 3) {
+    return false;
   }
   return verifyCsrfPair(params.secret, params.cookieValue, params.formToken);
 }

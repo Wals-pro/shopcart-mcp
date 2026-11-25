@@ -489,10 +489,13 @@ describe("OAuth 2.1 compliance & MCP auth", () => {
       .expect(200);
 
     expect(String(authGet.headers["content-security-policy"] ?? "")).toContain("img-src 'self' data:");
+    expect(String(authGet.headers["content-security-policy"] ?? "")).toContain("form-action 'self' https://claude.ai");
+    expect(authGet.headers["referrer-policy"]).toBe("same-origin");
     const csrfToken = authGet.text.match(/name="_csrf" value="([^"]+)"/)![1]!;
 
     const billingGet = await request(app).get("/billing/login?lang=de").expect(200);
     expect(String(billingGet.headers["content-security-policy"] ?? "")).toContain("img-src 'self' data:");
+    expect(billingGet.headers["referrer-policy"]).toBe("same-origin");
     const billingCsrf = billingGet.text.match(/name="_csrf" value="([^"]+)"/)![1]!;
 
     // 2. Foreign Origin is blocked with 403 even with a valid signed CSRF token

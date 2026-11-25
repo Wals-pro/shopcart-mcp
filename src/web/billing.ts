@@ -3,6 +3,7 @@ import type { AppConfig } from "../config.js";
 import type { StorageBackend, UserRecord } from "../store/types.js";
 import {
   createCsrfPair,
+  isAllowedCsrfOrigin,
   parseCookies,
   randomToken,
   sha256Hex,
@@ -20,12 +21,17 @@ import { getBerlinDayKey, getEffectiveEntitlement, isPromoFreeProActive } from "
 import {
   createBillingPortalSession,
   createProCheckoutSession,
-  isStripeCheckoutConfigured
+  isStripeCheckoutConfigured,
+  type BillingStripeClient
 } from "../billing/stripe.js";
 
 const BILLING_CSRF_COOKIE = "sc_billing_csrf";
 const BILLING_CSRF_CONTEXT = "billing";
 const WEB_SESSION_TTL_MS = 14 * 24 * 3600 * 1000;
+
+function billingUserCsrfContext(userId: string): string {
+  return `billing:user:${userId}`;
+}
 
 function formatCookie(name: string, value: string, maxAge: number, secure: boolean): string {
   const parts = [
@@ -50,11 +56,13 @@ function getClientIp(req: Request): string {
 function setBillingSecurityHeaders(res: Response): void {
   res.setHeader(
     "Content-Security-Policy",
-    "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+    "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self' https://checkout.stripe.com https://billing.stripe.com; frame-ancestors 'none'; base-uri 'none'"
   );
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("Referrer-Policy", "no-referrer");
+  // same-origin ensures browsers send the real Origin header on same-origin form POSTs
+  // (unlike no-referrer, which forces Origin: null) while never leaking Referer cross-origin.
+  res.setHeader("Referrer-Policy", "same-origin");
   res.setHeader("Cache-Control", "no-store");
 }
 
@@ -288,7 +296,8 @@ function renderBillingLoginStep2(params: {
 export function createBillingRouter(
   config: AppConfig,
   store: StorageBackend,
-  otpService = new EmailOtpService({ config, store })
+  otpService = new EmailOtpService({ config, store }),
+  stripeClient?: BillingStripeClient
 ): Router {
   const router = express.Router();
   const isHttps = config.appOrigin.startsWith("https://");
@@ -321,7 +330,8 @@ export function createBillingRouter(
     const lang = detectLang(req.query.lang, req.headers["accept-language"]);
     const de = lang === "de";
     const user = await getLoggedInUser(req, store);
-    const csrf = createCsrfPair(config.sessionSecret, BILLING_CSRF_CONTEXT);
+    const csrfContext = user ? billingUserCsrfContext(user.id) : BILLING_CSRF_CONTEXT;
+    const csrf = createCsrfPair(config.sessionSecret, csrfContext);
     res.setHeader("Set-Cookie", formatCookie(BILLING_CSRF_COOKIE, csrf.cookieValue, 1800, isHttps));
     setBillingSecurityHeaders(res);
 
@@ -475,6 +485,7 @@ export function createBillingRouter(
         secret: config.sessionSecret,
         appOrigin: config.appOrigin,
         originHeader: req.headers.origin,
+        secFetchSiteHeader: req.headers["sec-fetch-site"],
         formToken: body._csrf,
         cookieValue: cookies[BILLING_CSRF_COOKIE],
         context: BILLING_CSRF_CONTEXT
@@ -607,6 +618,7 @@ export function createBillingRouter(
         secret: config.sessionSecret,
         appOrigin: config.appOrigin,
         originHeader: req.headers.origin,
+        secFetchSiteHeader: req.headers["sec-fetch-site"],
         formToken: body._csrf,
         cookieValue: cookies[BILLING_CSRF_COOKIE],
         context: BILLING_CSRF_CONTEXT
@@ -689,35 +701,57 @@ export function createBillingRouter(
     }
   );
 
-  router.post(
-    "/billing/checkout",
-    express.urlencoded({ extended: false }),
-    async (req: Request, res: Response) => {
-      const cookies = parseCookies(req.headers.cookie);
-      const body = (req.body ?? {}) as Record<string, string | undefined>;
-      if (!verifyCsrfRequest({
+  async function authenticateBillingPost(
+    req: Request,
+    res: Response,
+    body: Record<string, string | undefined>,
+    cookies: Record<string, string>
+  ): Promise<UserRecord | null> {
+    if (!isAllowedCsrfOrigin(req.headers.origin, config.appOrigin, req.headers["sec-fetch-site"])) {
+      res.status(403).send("Invalid CSRF token");
+      return null;
+    }
+    const user = await getLoggedInUser(req, store);
+    if (!user) {
+      if (!(body._csrf ?? "").trim()) {
+        res.status(403).send("Invalid CSRF token");
+        return null;
+      }
+      res.redirect(303, "/billing/login");
+      return null;
+    }
+    if (
+      !verifyCsrfRequest({
         secret: config.sessionSecret,
         appOrigin: config.appOrigin,
         originHeader: req.headers.origin,
+        secFetchSiteHeader: req.headers["sec-fetch-site"],
         formToken: body._csrf,
         cookieValue: cookies[BILLING_CSRF_COOKIE],
-        context: BILLING_CSRF_CONTEXT
-      })) {
-        res.status(403).send("Invalid CSRF token");
-        return;
-      }
-      const user = await getLoggedInUser(req, store);
-      if (!user) {
-        res.redirect(303, "/billing/login");
-        return;
-      }
+        context: billingUserCsrfContext(user.id)
+      })
+    ) {
+      res.status(403).send("Invalid CSRF token");
+      return null;
+    }
+    return user;
+  }
+
+  router.post(
+    "/billing/checkout",
+    express.urlencoded({ extended: false, limit: "16kb" }),
+    async (req: Request, res: Response) => {
+      const cookies = parseCookies(req.headers.cookie);
+      const body = (req.body ?? {}) as Record<string, string | undefined>;
+      const user = await authenticateBillingPost(req, res, body, cookies);
+      if (!user) return;
       if (!isStripeCheckoutConfigured(config)) {
         res.status(503).json({ error: "stripe_not_configured" });
         return;
       }
       try {
         const lang = detectLang(body.lang ?? req.query.lang, req.headers["accept-language"]);
-        const session = await createProCheckoutSession(user, config, store, { lang });
+        const session = await createProCheckoutSession(user, config, store, { lang, stripeClient });
         res.redirect(303, session.url);
       } catch (err) {
         res.status(500).send(err instanceof Error ? err.message : "Checkout error");
@@ -727,28 +761,14 @@ export function createBillingRouter(
 
   router.post(
     "/billing/portal",
-    express.urlencoded({ extended: false }),
+    express.urlencoded({ extended: false, limit: "16kb" }),
     async (req: Request, res: Response) => {
       const cookies = parseCookies(req.headers.cookie);
       const body = (req.body ?? {}) as Record<string, string | undefined>;
-      if (!verifyCsrfRequest({
-        secret: config.sessionSecret,
-        appOrigin: config.appOrigin,
-        originHeader: req.headers.origin,
-        formToken: body._csrf,
-        cookieValue: cookies[BILLING_CSRF_COOKIE],
-        context: BILLING_CSRF_CONTEXT
-      })) {
-        res.status(403).send("Invalid CSRF token");
-        return;
-      }
-      const user = await getLoggedInUser(req, store);
-      if (!user) {
-        res.redirect(303, "/billing/login");
-        return;
-      }
+      const user = await authenticateBillingPost(req, res, body, cookies);
+      if (!user) return;
       try {
-        const session = await createBillingPortalSession(user, config);
+        const session = await createBillingPortalSession(user, config, stripeClient);
         res.redirect(303, session.url);
       } catch (err) {
         res.status(500).send(err instanceof Error ? err.message : "Portal error");
@@ -758,14 +778,20 @@ export function createBillingRouter(
 
   router.post(
     "/billing/logout",
-    express.urlencoded({ extended: false }),
+    express.urlencoded({ extended: false, limit: "16kb" }),
     async (req: Request, res: Response) => {
       const cookies = parseCookies(req.headers.cookie);
+      const body = (req.body ?? {}) as Record<string, string | undefined>;
+      const user = await authenticateBillingPost(req, res, body, cookies);
+      if (!user) return;
       const raw = cookies[SESSION_COOKIE];
       if (raw) {
         await store.deleteWebSession(sha256Hex(raw));
       }
-      res.setHeader("Set-Cookie", formatCookie(SESSION_COOKIE, "", 0, isHttps));
+      res.setHeader("Set-Cookie", [
+        formatCookie(SESSION_COOKIE, "", 0, isHttps),
+        formatCookie(BILLING_CSRF_COOKIE, "", 0, isHttps)
+      ]);
       res.redirect(303, "/billing/login");
     }
   );

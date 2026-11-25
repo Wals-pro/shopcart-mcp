@@ -64,14 +64,18 @@ function getClientIp(req: Request): string {
   return req.socket.remoteAddress ?? "unknown";
 }
 
-function setSecurityHeadersForHtml(res: Response): void {
+function setSecurityHeadersForHtml(
+  res: Response,
+  opts?: { formActionOrigin?: string; referrerPolicy?: "same-origin" | "no-referrer" }
+): void {
+  const formAction = opts?.formActionOrigin ? `'self' ${opts.formActionOrigin}` : "'self'";
   res.setHeader(
     "Content-Security-Policy",
-    "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+    `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action ${formAction}; frame-ancestors 'none'; base-uri 'none'`
   );
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Referrer-Policy", opts?.referrerPolicy ?? "same-origin");
   res.setHeader("Cache-Control", "no-store");
 }
 
@@ -396,13 +400,17 @@ export function createOAuthRouter(
     const scopes = normalizeScopes(rawScope);
     const csrfContext = `oauth:${client.clientId}:${codeChallenge}`;
     const csrf = createCsrfPair(config.sessionSecret, csrfContext);
+    const redirectUrl = new URL(redirectUri);
     res.setHeader(
       "Set-Cookie",
       formatCookie(CSRF_COOKIE, csrf.cookieValue, { maxAge: 1800, secure: isHttps })
     );
-    setSecurityHeadersForHtml(res);
+    setSecurityHeadersForHtml(res, {
+      formActionOrigin: redirectUrl.origin,
+      referrerPolicy: "same-origin"
+    });
 
-    const redirectHost = new URL(redirectUri).host;
+    const redirectHost = redirectUrl.host;
     res.status(200).type("html").send(
       renderAuthorizePage({
         lang,
@@ -473,15 +481,19 @@ export function createOAuthRouter(
           formatCookie(CSRF_COOKIE, freshCsrf.cookieValue, { maxAge: 1800, secure: isHttps }),
           ...(opts.extraCookies ?? [])
         ];
+        const redirectUrl = new URL(redirectUri);
         res.setHeader("Set-Cookie", cookiesToSet);
-        setSecurityHeadersForHtml(res);
+        setSecurityHeadersForHtml(res, {
+          formActionOrigin: redirectUrl.origin,
+          referrerPolicy: "same-origin"
+        });
         res.status(opts.statusCode ?? 200).type("html").send(
           renderAuthorizePage({
             lang,
             clientName: client.clientName,
             clientId: client.clientId,
             redirectUri,
-            redirectHost: new URL(redirectUri).host,
+            redirectHost: redirectUrl.host,
             codeChallenge,
             codeChallengeMethod: "S256",
             resource: resolvedRes.resource,
@@ -515,6 +527,7 @@ export function createOAuthRouter(
           secret: config.sessionSecret,
           appOrigin: config.appOrigin,
           originHeader: req.headers.origin,
+          secFetchSiteHeader: req.headers["sec-fetch-site"],
           formToken: body._csrf,
           cookieValue: cookies[CSRF_COOKIE],
           context: csrfContext
@@ -708,7 +721,7 @@ export function createOAuthRouter(
   });
 
   router.get("/auth/magic", async (req, res) => {
-    setSecurityHeadersForHtml(res);
+    setSecurityHeadersForHtml(res, { referrerPolicy: "no-referrer" });
     const rawToken = typeof req.query.token === "string" ? req.query.token : undefined;
     const cookies = parseCookies(req.headers.cookie);
     const fallbackLang = detectLang(req.query.lang, req.headers["accept-language"]);
