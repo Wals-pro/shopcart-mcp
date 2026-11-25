@@ -19,16 +19,33 @@ function getStripeClient(config: AppConfig): Stripe {
   return new Stripe(config.stripeSecretKey);
 }
 
+export type CheckoutLocale = "de" | "en";
+
+export interface CreateProCheckoutSessionOptions {
+  lang?: string;
+  now?: Date;
+  stripeClient?: Pick<Stripe, "customers" | "checkout">;
+}
+
+export function resolveStripeLocale(lang?: string): CheckoutLocale {
+  return lang === "de" ? "de" : "en";
+}
+
 export async function createProCheckoutSession(
   user: UserRecord,
   config: AppConfig,
   store: StorageBackend,
-  now = new Date()
+  optionsOrNow: CreateProCheckoutSessionOptions | Date = {}
 ): Promise<{ url: string }> {
   if (!config.stripeProPriceId) {
     throw new Error("Stripe Pro price is not configured (STRIPE_PRO_PRICE_ID missing)");
   }
-  const stripe = getStripeClient(config);
+
+  const opts: CreateProCheckoutSessionOptions =
+    optionsOrNow instanceof Date ? { now: optionsOrNow } : optionsOrNow;
+  const now = opts.now ?? new Date();
+  const locale = resolveStripeLocale(opts.lang);
+  const stripe = opts.stripeClient ?? getStripeClient(config);
 
   let customerId = user.stripeCustomerId;
   if (!customerId) {
@@ -40,27 +57,29 @@ export async function createProCheckoutSession(
     await store.updateUser(user.id, { stripeCustomerId: customerId });
   }
 
-  // Black Friday Launch Promo: trial_end at 2026-12-07T00:00:00+01:00 if still >48h in the future;
-  // otherwise enable promotion codes.
+  // Black Friday Launch Promo: trial_end at 2026-12-07T00:00:00+01:00 if still >48h in the future.
+  // Stripe allows allow_promotion_codes: true alongside subscription_data.trial_end (as long as no
+  // discounts array is passed), so users can also enter BLACKFRIDAY visibly at Checkout.
   const usePromoTrial =
     config.promoTrialEnd !== null &&
     config.promoTrialEnd.getTime() - now.getTime() >= MIN_STRIPE_TRIAL_LEAD_MS;
 
   const params: Stripe.Checkout.SessionCreateParams = {
     mode: "subscription",
+    locale,
     customer: customerId,
     client_reference_id: user.id,
     line_items: [{ price: config.stripeProPriceId, quantity: 1 }],
-    success_url: `${config.appOrigin}/billing?checkout=success`,
-    cancel_url: `${config.appOrigin}/billing?checkout=cancel`,
+    success_url: `${config.appOrigin}/billing?checkout=success&lang=${locale}`,
+    cancel_url: `${config.appOrigin}/billing?checkout=cancel&lang=${locale}`,
     metadata: { user_id: user.id },
+    allow_promotion_codes: true,
     subscription_data: {
       metadata: { user_id: user.id },
       ...(usePromoTrial && config.promoTrialEnd
         ? { trial_end: Math.floor(config.promoTrialEnd.getTime() / 1000) }
         : {})
-    },
-    ...(usePromoTrial ? {} : { allow_promotion_codes: true })
+    }
   };
 
   const session = await stripe.checkout.sessions.create(params);
