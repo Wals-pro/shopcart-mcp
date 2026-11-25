@@ -14,6 +14,7 @@ import type { AppConfig } from "./config.js";
 import { createShopcartMcpServer } from "./mcp/create-server.js";
 import type { StorageBackend } from "./store/types.js";
 import { createBillingRouter } from "./web/billing.js";
+import { createGuidesRouter } from "./web/guides.js";
 import { renderLandingPage } from "./web/landing.js";
 import { renderPrivacyPage, renderSecurityTxt, renderTermsPage } from "./web/legal.js";
 
@@ -317,6 +318,7 @@ export function createApp(deps: CreateAppDeps): Express {
     res.status(200).type("html").send(renderTermsPage(config, lang));
   });
 
+  app.use(createGuidesRouter(config));
   app.use(createBillingRouter(config, store));
 
   // 404 fallback
