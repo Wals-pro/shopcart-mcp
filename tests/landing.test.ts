@@ -45,10 +45,20 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
     const css = await request(app).get("/assets/landing.css").expect(200);
     expect(css.headers["content-type"]).toContain("text/css");
     expect(css.headers["x-content-type-options"]).toBe("nosniff");
+    expect(css.text).toContain("--walspro-accent: #ff1f4d");
+    expect(css.text).toContain("--walspro-bg: #141414");
+    expect(css.text).toContain("--walspro-on-accent: #000000");
 
     const js = await request(app).get("/assets/hero-flow.js").expect(200);
     expect(js.headers["content-type"]).toContain("application/javascript");
     expect(js.headers["x-content-type-options"]).toBe("nosniff");
+
+    const mark = await request(app).get("/assets/walspro-mark.svg").expect(200);
+    expect(mark.headers["content-type"]).toContain("image/svg+xml");
+
+    const billing = await request(app).get("/billing?lang=de").expect(200);
+    expect(billing.text).toContain("--walspro-accent:#ff1f4d");
+    expect(billing.text).toContain("--walspro-bg:#141414");
   });
 
   it("supports zero-redeploy DEMO_VIDEO_URL / _DE / _EN for YouTube, Vimeo, TikTok, and direct mp4/webm", async () => {

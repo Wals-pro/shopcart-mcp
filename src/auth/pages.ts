@@ -65,45 +65,58 @@ export function renderAuthorizePage(p: AuthorizePageParams): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#141414">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>${escapeHtml(title)}</title>
 <style>
-:root{--bg:#fafaf9;--card:#ffffff;--ink:#111827;--muted:#57534e;--border:#e7e5e4;--accent:#d92d20;--accent-dark:#b42318;--soft:#fef3f2;--ok-bg:#ecfdf3;--ok-ink:#027a48}
+:root{
+  color-scheme:dark;
+  --walspro-accent:#ff1f4d;--walspro-accent-rgb:255,31,77;--walspro-on-accent:#000000;
+  --walspro-bg:#141414;--walspro-bg-2:#0d0d0d;--walspro-bg-deep:#090909;
+  --walspro-surface:#1a1a1a;--walspro-surface-raised:#1e1e1e;
+  --walspro-border:#2a2a2a;--walspro-border-strong:#3a3a3a;
+  --walspro-ink:#e0e0e0;--walspro-muted:#a7adb4;--walspro-hint:#7e848e;
+  --walspro-tone-positive-fg:#7bd88f;--walspro-tone-positive-bg:rgba(76,175,80,.12);--walspro-tone-positive-border:rgba(76,175,80,.3);
+  --walspro-danger:#ff6b7f;--walspro-danger-bg:rgba(255,107,127,.12);--walspro-danger-border:rgba(255,107,127,.32);
+}
 *{box-sizing:border-box}
-body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;background:var(--bg);color:var(--ink);line-height:1.5;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:20px}
-.card{width:100%;max-width:440px;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:28px;box-shadow:0 12px 30px rgba(0,0,0,.05)}
-.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
-.brand{font-weight:700;font-size:15px;letter-spacing:-.01em;display:flex;align-items:center;gap:8px}
-.dot{width:10px;height:10px;border-radius:50%;background:var(--accent)}
-.lang{font-size:13px;color:var(--muted);text-decoration:none}
-.lang:hover{color:var(--ink)}
-h1{font-size:20px;margin:0 0 6px;letter-spacing:-.02em}
-.sub{font-size:14px;color:var(--muted);margin:0 0 18px}
-.consent-box{background:#f5f5f4;border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:18px;font-size:13px}
-.consent-row{display:flex;justify-content:space-between;gap:12px;margin:4px 0}
-.consent-row span:first-child{color:var(--muted)}
-.consent-row span:last-child{font-weight:600;text-align:right;word-break:break-all}
-.promo{background:var(--ok-bg);color:var(--ok-ink);border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:16px;font-weight:500}
-.err{background:var(--soft);color:var(--accent-dark);border:1px solid #fecdca;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:16px}
-.tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:#f5f5f4;padding:4px;border-radius:10px;margin-bottom:16px}
-.tab{display:block;text-align:center;padding:8px;border-radius:7px;font-size:13px;font-weight:600;text-decoration:none;color:var(--muted);cursor:pointer;border:0;background:transparent}
-.tab.active{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.06)}
-label{display:block;font-size:13px;font-weight:600;margin:12px 0 5px}
-input[type=email],input[type=password]{width:100%;padding:10px 12px;border:1px solid #d6d3d1;border-radius:9px;font-size:14px;background:#fff;color:var(--ink)}
-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+body{margin:0;font-family:"WALSPRO Body","Inter","Avenir Next",system-ui,sans-serif;background:radial-gradient(60% 42% at 85% 0%,rgba(255,31,77,.11),transparent 60%),var(--walspro-bg);color:var(--walspro-ink);line-height:1.5;display:flex;min-height:100dvh;align-items:center;justify-content:center;padding:20px;-webkit-font-smoothing:antialiased}
+.card{width:100%;max-width:450px;background:var(--walspro-surface);border:1px solid var(--walspro-border);border-radius:16px;padding:28px;box-shadow:0 20px 60px rgba(0,0,0,.55)}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+.brand{font-family:"WALSPRO Display","Inter",system-ui,sans-serif;font-weight:750;font-size:15px;letter-spacing:-.01em;display:inline-flex;align-items:center;gap:9px;color:#fff}
+.brand img{width:24px;height:24px;border-radius:6px;display:block}
+.lang{font-size:12.5px;color:var(--walspro-muted);text-decoration:none;padding:5px 10px;border-radius:10px;border:1px solid var(--walspro-border-strong);background:var(--walspro-bg-2)}
+.lang:hover{color:#fff;border-color:rgba(var(--walspro-accent-rgb),.4)}
+h1{font-family:"WALSPRO Display","Inter",system-ui,sans-serif;font-size:21px;margin:0 0 6px;letter-spacing:-.02em;color:#fff}
+.sub{font-size:14px;color:var(--walspro-muted);margin:0 0 18px}
+.sub strong{color:#fff}
+.consent-box{background:var(--walspro-bg-2);border:1px solid var(--walspro-border);border-radius:12px;padding:12px 14px;margin-bottom:18px;font-size:13px}
+.consent-row{display:flex;justify-content:space-between;gap:12px;margin:5px 0}
+.consent-row span:first-child{color:var(--walspro-muted)}
+.consent-row span:last-child{font-weight:600;text-align:right;word-break:break-all;color:var(--walspro-ink)}
+.promo{background:var(--walspro-tone-positive-bg);color:var(--walspro-tone-positive-fg);border:1px solid var(--walspro-tone-positive-border);border-radius:12px;padding:10px 12px;font-size:13px;margin-bottom:16px;font-weight:500}
+.err{background:var(--walspro-danger-bg);color:var(--walspro-danger);border:1px solid var(--walspro-danger-border);border-radius:12px;padding:10px 12px;font-size:13px;margin-bottom:16px}
+.tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--walspro-bg-deep);border:1px solid var(--walspro-border);padding:4px;border-radius:14px;margin-bottom:16px}
+.tab{display:block;text-align:center;padding:8px;border-radius:10px;font-size:13px;font-weight:600;text-decoration:none;color:var(--walspro-muted);cursor:pointer;border:1px solid transparent;background:transparent}
+.tab.active{background:var(--walspro-surface-raised);color:#fff;border-color:var(--walspro-border-strong)}
+label{display:block;font-size:13px;font-weight:600;margin:12px 0 6px;color:var(--walspro-ink)}
+input[type=email],input[type=password]{width:100%;height:44px;padding:0 14px;border:1px solid var(--walspro-border-strong);border-radius:14px;font-size:14px;background:var(--walspro-bg-deep);color:var(--walspro-ink)}
+input:focus{outline:2px solid var(--walspro-accent);outline-offset:1px;border-color:var(--walspro-accent)}
 .hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
-button.primary{width:100%;margin-top:18px;padding:11px 16px;border:0;border-radius:10px;background:var(--accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer}
-button.primary:hover{background:var(--accent-dark)}
-.foot{margin-top:16px;font-size:12px;color:var(--muted);text-align:center}
-.foot a{color:var(--muted)}
+button.primary{width:100%;min-height:44px;margin-top:18px;padding:0 16px;border:0;border-radius:14px;background:var(--walspro-accent);color:var(--walspro-on-accent);font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 8px 24px rgba(255,31,77,.25)}
+button.primary:hover{filter:brightness(1.08)}
+.foot{margin-top:18px;font-size:12px;color:var(--walspro-hint);text-align:center}
+.foot a{color:var(--walspro-muted);text-decoration:none}
+.foot a:hover{color:#fff;text-decoration:underline}
 </style>
 </head>
 <body>
 <main class="card">
   <div class="top">
-    <div class="brand"><span class="dot"></span>shopcart-mcp</div>
+    <div class="brand"><img src="/assets/walspro-mark.svg" alt="wals.pro" width="24" height="24"><span>shopcart-mcp</span></div>
     <a class="lang" href="/oauth/authorize?${escapeHtml(qs)}">${escapeHtml(toggleLabel)}</a>
   </div>
 

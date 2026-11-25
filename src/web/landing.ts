@@ -275,14 +275,14 @@ export function renderLandingPage(config: AppConfig, lang: Lang): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#060913">
+<meta name="theme-color" content="#141414">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(description)}">
-<link rel="stylesheet" href="/assets/landing.css?v=0.2.0">
-<script defer src="/assets/hero-flow.js?v=0.2.0"></script>
+<link rel="stylesheet" href="/assets/landing.css?v=0.2.1">
+<script defer src="/assets/hero-flow.js?v=0.2.1"></script>
 </head>
 <body>
 ${
@@ -306,13 +306,7 @@ ${
 <header class="site-header">
   <div class="wrap nav">
     <a class="brand" href="/?lang=${lang}">
-      <span class="brand-mark" aria-hidden="true">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="9" cy="20" r="1.5"></circle>
-          <circle cx="18" cy="20" r="1.5"></circle>
-          <path d="M2.5 3.5h3l2.2 11.2a2 2 0 0 0 2 1.6h8.8a2 2 0 0 0 2-1.5l1.5-7.3H6.3"></path>
-        </svg>
-      </span>
+      <img class="brand-logo" src="/assets/walspro-mark.svg" alt="wals.pro" width="28" height="28">
       <span>shopcart-mcp</span>
       <span class="brand-badge">&gt; MCP_</span>
     </a>
@@ -741,7 +735,7 @@ ${
       </div>
 
       <div class="grid-2">
-        <article class="card card-rail card-rail-cyan">
+        <article class="card card-rail card-rail-red">
           <div class="tool-head">
             <span class="tool-tag">inspect_store</span>
             <span class="tool-badge">readOnlyHint</span>
@@ -755,7 +749,7 @@ ${
           <div class="tool-sig">inspect_store({ store_url }) → { platform, currency, country }</div>
         </article>
 
-        <article class="card card-rail card-rail-blue">
+        <article class="card card-rail card-rail-coral">
           <div class="tool-head">
             <span class="tool-tag">search_products</span>
             <span class="tool-badge">WAF-resilient</span>
@@ -769,7 +763,7 @@ ${
           <div class="tool-sig">search_products({ query, max_price, available_only }) → Product[]</div>
         </article>
 
-        <article class="card card-rail card-rail-violet">
+        <article class="card card-rail card-rail-info">
           <div class="tool-head">
             <span class="tool-tag">get_product</span>
             <span class="tool-badge">Prompt-Safe</span>
@@ -783,7 +777,7 @@ ${
           <div class="tool-sig">get_product({ handle }) → { variants[], options[], in_stock }</div>
         </article>
 
-        <article class="card card-rail card-rail-emerald">
+        <article class="card card-rail card-rail-positive">
           <div class="tool-head">
             <span class="tool-tag">create_cart_link</span>
             <span class="tool-badge">Deterministic</span>
@@ -909,7 +903,10 @@ ${
 <footer class="site-footer">
   <div class="wrap">
     <div class="foot-row">
-      <div class="foot-brand"><strong>shopcart-mcp</strong> · by <a href="https://wals.pro" target="_blank" rel="noopener noreferrer">Wals.pro</a></div>
+      <div class="foot-brand">
+        <img class="foot-mark" src="/assets/walspro-mark.svg" alt="" width="20" height="20">
+        <span><strong>shopcart-mcp</strong> · by <a href="https://wals.pro" target="_blank" rel="noopener noreferrer">wals.pro</a></span>
+      </div>
       <div class="foot-links">
         <a href="/billing?lang=${lang}">${de ? "Konto &amp; Billing" : "Account &amp; Billing"}</a>
         <a href="${escapeHtml(config.repoUrl)}" target="_blank" rel="noopener noreferrer">GitHub</a>

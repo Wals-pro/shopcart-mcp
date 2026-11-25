@@ -45,48 +45,65 @@ function renderBillingShell(lang: Lang, title: string, bodyHtml: string): string
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#141414">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>${escapeHtml(title)} — shopcart-mcp</title>
 <style>
-:root{--bg:#fafaf9;--card:#fff;--ink:#141413;--muted:#57534e;--border:#e7e5e4;--accent:#d92d20;--accent-dark:#b42318;--ok-bg:#ecfdf3;--ok-ink:#027a48;--warn-bg:#fffaeb;--warn-ink:#b54708}
+:root{
+  color-scheme:dark;
+  --walspro-accent:#ff1f4d;--walspro-accent-rgb:255,31,77;--walspro-on-accent:#000000;
+  --walspro-bg:#141414;--walspro-bg-2:#0d0d0d;--walspro-bg-deep:#090909;
+  --walspro-surface:#1a1a1a;--walspro-surface-raised:#1e1e1e;
+  --walspro-border:#2a2a2a;--walspro-divider:#242424;--walspro-border-strong:#3a3a3a;
+  --walspro-ink:#e0e0e0;--walspro-muted:#a7adb4;--walspro-hint:#7e848e;
+  --walspro-tone-positive-fg:#7bd88f;--walspro-tone-positive-bg:rgba(76,175,80,.12);--walspro-tone-positive-border:rgba(76,175,80,.3);
+  --walspro-tone-warning-fg:#ffb454;--walspro-tone-warning-bg:rgba(255,152,0,.12);--walspro-tone-warning-border:rgba(255,152,0,.3);
+  --walspro-danger:#ff6b7f;--walspro-danger-bg:rgba(255,107,127,.12);--walspro-danger-border:rgba(255,107,127,.32);
+}
 *{box-sizing:border-box}
-body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;background:var(--bg);color:var(--ink);line-height:1.5}
+body{margin:0;min-height:100dvh;font-family:"WALSPRO Body","Inter","Avenir Next",system-ui,sans-serif;background:radial-gradient(60% 40% at 85% 0%,rgba(255,31,77,.1),transparent 60%),var(--walspro-bg);color:var(--walspro-ink);line-height:1.55;-webkit-font-smoothing:antialiased}
 .wrap{max-width:560px;margin:40px auto;padding:0 20px}
-.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
-.brand{font-weight:750;text-decoration:none;color:var(--ink);display:flex;align-items:center;gap:8px}
-.dot{width:10px;height:10px;border-radius:50%;background:var(--accent)}
-.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:28px;box-shadow:0 8px 24px rgba(0,0,0,.04)}
-h1{margin:0 0 8px;font-size:22px;letter-spacing:-.02em}
-.sub{color:var(--muted);font-size:14px;margin:0 0 18px}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}
+.brand{font-family:"WALSPRO Display","Inter",system-ui,sans-serif;font-weight:750;text-decoration:none;color:#fff;display:inline-flex;align-items:center;gap:10px;font-size:16px;letter-spacing:-.02em}
+.brand img{width:26px;height:26px;border-radius:7px;display:block}
+.lang-btn{font-size:13px;color:var(--walspro-muted);text-decoration:none;padding:6px 12px;border-radius:10px;border:1px solid var(--walspro-border-strong);background:var(--walspro-surface)}
+.lang-btn:hover{color:#fff;border-color:rgba(var(--walspro-accent-rgb),.4)}
+.card{background:var(--walspro-surface);border:1px solid var(--walspro-border);border-radius:16px;padding:28px;box-shadow:0 16px 48px rgba(0,0,0,.45)}
+h1{margin:0 0 8px;font-family:"WALSPRO Display","Inter",system-ui,sans-serif;font-size:23px;letter-spacing:-.02em;color:#fff}
+.sub{color:var(--walspro-muted);font-size:14px;margin:0 0 18px}
 .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}
-.stat{background:#f5f5f4;border-radius:12px;padding:14px}
-.stat-label{font-size:12px;color:var(--muted)}
-.stat-val{font-size:20px;font-weight:750;margin-top:2px}
-.banner{border-radius:10px;padding:12px 14px;font-size:13px;margin-bottom:16px}
-.banner.ok{background:var(--ok-bg);color:var(--ok-ink)}
-.banner.warn{background:var(--warn-bg);color:var(--warn-ink)}
-.banner.err{background:#fef3f2;color:var(--accent-dark);border:1px solid #fecdca}
-label{display:block;font-size:13px;font-weight:600;margin:12px 0 4px}
-input[type=email],input[type=password]{width:100%;padding:10px 12px;border:1px solid #d6d3d1;border-radius:9px;font-size:14px}
-.btn{display:inline-flex;align-items:center;justify-content:center;width:100%;padding:11px 16px;border-radius:10px;font-size:14px;font-weight:650;cursor:pointer;border:0;text-decoration:none;margin-top:12px}
-.btn.primary{background:var(--accent);color:#fff}
-.btn.primary:hover{background:var(--accent-dark)}
-.btn.secondary{background:#fff;color:var(--ink);border:1px solid var(--border)}
-.tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:#f5f5f4;padding:4px;border-radius:10px;margin-bottom:16px}
-.tab{text-align:center;padding:8px;border-radius:7px;font-size:13px;font-weight:600;text-decoration:none;color:var(--muted)}
-.tab.active{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.stat{background:var(--walspro-bg-2);border:1px solid var(--walspro-border);border-radius:14px;padding:14px}
+.stat-label{font-size:12px;color:var(--walspro-muted)}
+.stat-val{font-size:20px;font-weight:750;margin-top:3px;color:#fff}
+.banner{border-radius:12px;padding:12px 14px;font-size:13px;margin-bottom:16px;border:1px solid transparent}
+.banner.ok{background:var(--walspro-tone-positive-bg);color:var(--walspro-tone-positive-fg);border-color:var(--walspro-tone-positive-border)}
+.banner.warn{background:var(--walspro-tone-warning-bg);color:var(--walspro-tone-warning-fg);border-color:var(--walspro-tone-warning-border)}
+.banner.err{background:var(--walspro-danger-bg);color:var(--walspro-danger);border-color:var(--walspro-danger-border)}
+label{display:block;font-size:13px;font-weight:600;margin:14px 0 6px;color:var(--walspro-ink)}
+input[type=email],input[type=password]{width:100%;height:44px;padding:0 14px;border:1px solid var(--walspro-border-strong);border-radius:14px;font-size:14px;background:var(--walspro-bg-deep);color:var(--walspro-ink)}
+input:focus{outline:2px solid var(--walspro-accent);outline-offset:1px;border-color:var(--walspro-accent)}
+.btn{display:inline-flex;align-items:center;justify-content:center;width:100%;min-height:44px;padding:0 16px;border-radius:14px;font-size:14px;font-weight:700;cursor:pointer;border:1px solid transparent;text-decoration:none;margin-top:14px;transition:filter 120ms ease,border-color 120ms ease}
+.btn.primary{background:var(--walspro-accent);color:var(--walspro-on-accent);box-shadow:0 8px 24px rgba(255,31,77,.25)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.secondary{background:var(--walspro-surface-raised);color:var(--walspro-ink);border-color:var(--walspro-border-strong)}
+.btn.secondary:hover{border-color:rgba(var(--walspro-accent-rgb),.4)}
+.tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--walspro-bg-deep);border:1px solid var(--walspro-border);padding:4px;border-radius:14px;margin-bottom:16px}
+.tab{text-align:center;padding:9px;border-radius:10px;font-size:13px;font-weight:600;text-decoration:none;color:var(--walspro-muted)}
+.tab.active{background:var(--walspro-surface-raised);color:#fff;border:1px solid var(--walspro-border-strong)}
 .hp{position:absolute;left:-9999px}
-.foot{margin-top:22px;text-align:center;font-size:12px;color:var(--muted)}
-.foot a{color:var(--muted)}
+.foot{margin-top:24px;text-align:center;font-size:12.5px;color:var(--walspro-hint)}
+.foot a{color:var(--walspro-muted);text-decoration:none}
+.foot a:hover{color:#fff;text-decoration:underline}
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="top">
-    <a class="brand" href="/?lang=${lang}"><span class="dot"></span>shopcart-mcp</a>
-    <a style="font-size:13px;color:var(--muted);text-decoration:none" href="/billing?lang=${otherLang}">${de ? "English" : "Deutsch"}</a>
+    <a class="brand" href="/?lang=${lang}"><img src="/assets/walspro-mark.svg" alt="wals.pro" width="26" height="26"><span>shopcart-mcp</span></a>
+    <a class="lang-btn" href="/billing?lang=${otherLang}">${de ? "English" : "Deutsch"}</a>
   </div>
   ${bodyHtml}
   <p class="foot">

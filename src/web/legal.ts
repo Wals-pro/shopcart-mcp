@@ -9,38 +9,48 @@ function renderLegalShell(lang: Lang, title: string, path: string, bodyHtml: str
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#141414">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>${escapeHtml(title)} — ShopCart MCP</title>
 <style>
-:root{--bg:#fafaf9;--card:#fff;--ink:#141413;--muted:#57534e;--border:#e7e5e4;--accent:#d92d20}
+:root{
+  color-scheme:dark;
+  --walspro-accent:#ff1f4d;--walspro-bg:#141414;--walspro-bg-2:#0d0d0d;--walspro-bg-deep:#090909;
+  --walspro-surface:#1a1a1a;--walspro-border:#2a2a2a;--walspro-divider:#242424;--walspro-border-strong:#3a3a3a;
+  --walspro-ink:#e0e0e0;--walspro-muted:#a7adb4;--walspro-hint:#7e848e;
+}
 *{box-sizing:border-box}
-body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;background:var(--bg);color:var(--ink);line-height:1.6}
+body{margin:0;min-height:100dvh;font-family:"WALSPRO Body","Inter","Avenir Next",system-ui,sans-serif;background:radial-gradient(58% 36% at 85% 0%,rgba(255,31,77,.09),transparent 60%),var(--walspro-bg);color:var(--walspro-ink);line-height:1.65;-webkit-font-smoothing:antialiased}
 .wrap{max-width:780px;margin:0 auto;padding:28px 22px 56px}
-.top{display:flex;justify-content:space-between;align-items:center;padding-bottom:18px;border-bottom:1px solid var(--border);margin-bottom:28px}
-.brand{font-weight:750;text-decoration:none;color:var(--ink);display:flex;align-items:center;gap:8px}
-.dot{width:10px;height:10px;border-radius:50%;background:var(--accent)}
-.nav{display:flex;gap:16px;font-size:13px;color:var(--muted)}
+.top{display:flex;justify-content:space-between;align-items:center;padding-bottom:18px;border-bottom:1px solid var(--walspro-divider);margin-bottom:28px;gap:14px;flex-wrap:wrap}
+.brand{font-family:"WALSPRO Display","Inter",system-ui,sans-serif;font-weight:750;text-decoration:none;color:#fff;display:inline-flex;align-items:center;gap:10px;font-size:16px}
+.brand img{width:26px;height:26px;border-radius:7px;display:block}
+.nav{display:flex;gap:16px;font-size:13px;color:var(--walspro-muted);align-items:center;flex-wrap:wrap}
 .nav a{text-decoration:none;color:inherit}
-.nav a:hover{color:var(--ink)}
-.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:30px}
-h1{margin:0 0 6px;font-size:26px;letter-spacing:-.025em}
-.updated{font-size:13px;color:var(--muted);margin:0 0 22px}
-h2{margin:24px 0 8px;font-size:17px;letter-spacing:-.01em}
-p,li{font-size:14.5px;color:#292524}
+.nav a:hover{color:#fff}
+.card{background:var(--walspro-surface);border:1px solid var(--walspro-border);border-radius:16px;padding:30px;box-shadow:0 16px 48px rgba(0,0,0,.4)}
+h1{margin:0 0 6px;font-family:"WALSPRO Display","Inter",system-ui,sans-serif;font-size:26px;letter-spacing:-.025em;color:#fff}
+.updated{font-size:13px;color:var(--walspro-muted);margin:0 0 22px}
+h2{margin:24px 0 8px;font-family:"WALSPRO Display","Inter",system-ui,sans-serif;font-size:17px;letter-spacing:-.01em;color:#fff}
+p,li{font-size:14.5px;color:var(--walspro-ink)}
 ul{padding-left:20px}
 li{margin:6px 0}
-.disclaimer{margin-top:24px;padding:12px 14px;background:#f5f5f4;border-radius:10px;font-size:13px;color:var(--muted)}
-a{color:var(--accent)}
+code{font-family:"SFMono-Regular","Cascadia Code",monospace;background:var(--walspro-bg-deep);border:1px solid var(--walspro-border);padding:1px 6px;border-radius:6px;font-size:13px}
+.disclaimer{margin-top:24px;padding:12px 14px;background:var(--walspro-bg-2);border:1px solid var(--walspro-border);border-radius:12px;font-size:13px;color:var(--walspro-muted)}
+a{color:#ff6b7a}
+a:hover{color:#fff}
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="top">
-    <a class="brand" href="/?lang=${lang}"><span class="dot"></span>ShopCart MCP</a>
+    <a class="brand" href="/?lang=${lang}"><img src="/assets/walspro-mark.svg" alt="wals.pro" width="26" height="26"><span>ShopCart MCP</span></a>
     <nav class="nav">
       <a href="/?lang=${lang}">${de ? "Startseite" : "Home"}</a>
+      <a href="/billing?lang=${lang}">${de ? "Konto & Billing" : "Billing"}</a>
       <a href="/privacy?lang=${lang}">${de ? "Datenschutz" : "Privacy"}</a>
       <a href="/terms?lang=${lang}">${de ? "Nutzungsbedingungen" : "Terms"}</a>
       <a href="${escapeHtml(path)}?lang=${otherLang}">${de ? "English" : "Deutsch"}</a>

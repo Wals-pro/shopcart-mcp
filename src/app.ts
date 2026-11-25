@@ -40,6 +40,11 @@ const STATIC_LANDING_ASSETS: Array<{ route: string; file: string; contentType: s
     route: "/assets/hero-flow.js",
     file: "assets/hero-flow.js",
     contentType: "application/javascript; charset=utf-8"
+  },
+  {
+    route: "/assets/walspro-mark.svg",
+    file: "assets/walspro-mark.svg",
+    contentType: "image/svg+xml; charset=utf-8"
   }
 ];
 

@@ -120,32 +120,32 @@
     };
 
     const colorForRibbon = (u, v, z, alpha) => {
-      // Smooth Cobalt (#2563eb) -> Electric Cyan (#22d3ee) -> Violet (#8b5cf6) -> Magenta (#c084fc)
+      // wals.pro Dark-Mode Spectrum: Silver-Ash (#a7adb4) -> Rose (#ff6b7a) -> Brand Red (#ff1f4d) -> Warm Coral (#ff8a5b)
       let r;
       let g;
       let b;
-      if (u < 0.44) {
-        const k = Math.max(0, Math.min(1, u / 0.44));
-        r = Math.round(37 + (34 - 37) * k);
-        g = Math.round(99 + (211 - 99) * k);
-        b = Math.round(235 + (238 - 235) * k);
-      } else if (u < 0.74) {
-        const k = (u - 0.44) / 0.3;
-        r = Math.round(34 + (110 - 34) * k);
-        g = Math.round(211 + (125 - 211) * k);
-        b = Math.round(238 + (248 - 238) * k);
+      if (u < 0.36) {
+        const k = Math.max(0, Math.min(1, u / 0.36));
+        r = Math.round(167 + (255 - 167) * k);
+        g = Math.round(173 + (107 - 173) * k);
+        b = Math.round(180 + (122 - 180) * k);
+      } else if (u < 0.72) {
+        const k = (u - 0.36) / 0.36;
+        r = 255;
+        g = Math.round(107 + (31 - 107) * k);
+        b = Math.round(122 + (77 - 122) * k);
       } else {
-        const k = Math.max(0, Math.min(1, (u - 0.74) / 0.3));
-        r = Math.round(110 + (205 - 110) * k);
-        g = Math.round(125 + (116 - 125) * k);
-        b = Math.round(248 + (255 - 248) * k);
+        const k = Math.max(0, Math.min(1, (u - 0.72) / 0.32));
+        r = 255;
+        g = Math.round(31 + (138 - 31) * k);
+        b = Math.round(77 + (91 - 77) * k);
       }
 
-      // Specular crest glow for foreground slices
+      // Fine silver-white code highlights on foreground wave crests (#e0e0e0)
       const crest = Math.max(0, 1 - Math.abs(z + 40) / 145) * (1 - Math.abs(v) * 0.4);
-      r = Math.min(255, Math.round(r + crest * 85));
-      g = Math.min(255, Math.round(g + crest * 75));
-      b = Math.min(255, Math.round(b + crest * 40));
+      r = Math.min(242, Math.round(r + crest * 45));
+      g = Math.min(234, Math.round(g + crest * 110));
+      b = Math.min(236, Math.round(b + crest * 115));
 
       return `rgba(${r},${g},${b},${alpha.toFixed(3)})`;
     };
@@ -154,7 +154,7 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
 
-      // A. Luminous ambient ribbon aura behind the code mesh
+      // A. Luminous wals.pro Red & Warm Coral ambient ribbon aura behind the code mesh
       ctx.save();
       ctx.globalCompositeOperation = "screen";
       const bandOffsets = [-0.72, -0.22, 0.25, 0.72];
@@ -168,10 +168,10 @@
           else ctx.lineTo(pt.sx, pt.sy);
         }
         const grad = ctx.createLinearGradient(width * 0.18, height * 0.1, width, height * 0.85);
-        grad.addColorStop(0, "rgba(37, 99, 235, 0.04)");
-        grad.addColorStop(0.38, "rgba(34, 211, 238, 0.22)");
-        grad.addColorStop(0.7, "rgba(99, 102, 241, 0.26)");
-        grad.addColorStop(1, "rgba(168, 85, 247, 0.32)");
+        grad.addColorStop(0, "rgba(167, 173, 180, 0.04)");
+        grad.addColorStop(0.38, "rgba(255, 107, 122, 0.16)");
+        grad.addColorStop(0.7, "rgba(255, 31, 77, 0.24)");
+        grad.addColorStop(1, "rgba(255, 138, 91, 0.22)");
         ctx.strokeStyle = grad;
         ctx.lineWidth = bIdx === 1 || bIdx === 2 ? 78 : 46;
         ctx.lineCap = "round";
@@ -221,7 +221,7 @@
         }
       }
 
-      // C. Luminous energy sparks drifting across the ribbon
+      // C. Luminous energy sparks drifting across the ribbon (wals.pro Red / Coral / Silver)
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       for (const p of particles) {
@@ -232,10 +232,10 @@
         ctx.arc(pt.sx, pt.sy, r, 0, Math.PI * 2);
         ctx.fillStyle =
           p.hueBias === 0
-            ? "rgba(34, 211, 238, 0.55)"
+            ? "rgba(255, 31, 77, 0.6)"
             : p.hueBias === 1
-              ? "rgba(96, 165, 250, 0.5)"
-              : "rgba(192, 132, 252, 0.55)";
+              ? "rgba(255, 138, 91, 0.5)"
+              : "rgba(224, 224, 224, 0.55)";
         ctx.fill();
       }
       ctx.restore();
