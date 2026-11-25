@@ -147,7 +147,7 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
     tldrText:
       "Mit ShopCart MCP verbindet sich Claude direkt mit öffentlichen Shopify-Onlineshops, prüft Größen, Farben, Live-Preise und Lagerbestand und liefert dir einen fertigen Warenkorb-Link — du prüfst und bezahlst immer selbst im Browser.",
     intro:
-      "Du möchtest beim Online-Shopping Zeit sparen, ohne dich durch zwanzig Tabs und ausverkaufte Größen zu klicken? In diesem Praxis-Guide siehst du, wie du Claude sicher mit öffentlichen Shopify-Shops verbindest und in Sekunden einen geprüften Warenkorb im Browser öffnest.",
+      "Du möchtest beim Online-Shopping Zeit sparen, ohne dich durch zwanzig Tabs und ausverkaufte Größen zu klicken? In diesem Praxis-Guide siehst du, wie du Claude als deinen persönlichen KI-Shopping-Assistenten über Shopify MCP sicher mit öffentlichen Online-Shops verbindest und in Sekunden einen geprüften Warenkorb im Browser öffnest.",
     takeawaysHeading: "Das Wichtigste in Kürze",
     takeaways: [
       {
@@ -376,13 +376,13 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       "Ein Klick öffnet den fertigen Beispiel-Prompt — dein KI-Assistent führt dich bei Bedarf direkt durch die kurze Verbindung mit ShopCart MCP.",
     sections: [
       {
-        heading: "Warum ChatGPT Shopping mit MCP mehr leistet als die normale Websuche",
+        heading: "Warum ChatGPT Shopping mit Shopify MCP mehr leistet als die normale Websuche",
         paragraphs: [
           "Die eingebaute Websuche von ChatGPT eignet sich gut für erste Inspiration, stößt beim konkreten Einkaufen aber schnell an Grenzen: Produktseiten sind oft veraltet gecacht, Varianten-Verfügbarkeiten fehlen und am Ende musst du jeden einzelnen Artikel manuell im Shop zusammenklicken.",
-          "Mit ShopCart MCP bekommt ChatGPT direkten Lesezugriff auf strukturierte Katalog- und Variantendaten öffentlicher Shopify-Shops. Statt nur über ein Produkt zu sprechen, prüft ChatGPT live, ob deine Wunschgröße auf Lager ist, und baut dir einen funktionierenden Warenkorb-Link."
+          "Genau hier setzt sicheres Agentic Commerce mit ShopCart MCP an: ChatGPT erhält als KI-Shopping-Assistent direkten Lesezugriff auf strukturierte Katalog- und Variantendaten öffentlicher Shopify-Shops. Statt nur über ein Produkt zu sprechen, prüft ChatGPT live, ob deine Wunschgröße auf Lager ist, und baut dir einen funktionierenden Warenkorb-Link."
         ],
         takeaway:
-          "Fazit: Durch MCP wird aus unverbindlicher ChatGPT-Recherche ein geprüfter, sofort bestellbarer Warenkorb."
+          "Fazit: Durch Shopify MCP wird aus unverbindlicher ChatGPT-Recherche ein geprüfter, sofort bestellbarer Warenkorb."
       },
       {
         heading: "ChatGPT Custom Connector einrichten und Warenkorb füllen",
@@ -740,7 +740,7 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
     tldrText:
       "ShopCart MCP connects Claude directly to public Shopify storefronts so your AI verifies live sizes, colors, stock, and prices and hands you a ready-to-open shopping cart link — strictly read-only, while you stay in full control of checkout.",
     intro:
-      "Tired of asking an AI assistant for shopping recommendations only to click through ten tabs and discover your size is sold out? This guide shows you how to connect Claude to public Shopify stores in under a minute and build verified browser carts in one shot.",
+      "Tired of asking an AI shopping assistant for recommendations only to click through ten tabs and discover your size is sold out? This guide shows you how to connect Claude to public Shopify stores via Shopify MCP in under a minute and build a verified Claude shopping cart in one shot.",
     takeawaysHeading: "Key Takeaways",
     takeaways: [
       {
@@ -969,13 +969,13 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       "Opens a ready-to-use holiday shopping prompt in ChatGPT or Claude — complete with 2-click setup guidance if needed.",
     sections: [
       {
-        heading: "Why Black Friday shopping needs live variant and discount checks",
+        heading: "Why ChatGPT shopping on Black Friday needs live Shopify MCP checks",
         paragraphs: [
           "During Black Week and holiday sales, catalog prices and stock levels change by the minute. Standard search indexes lag behind, which leads to expired deal snippets and sizes that sold out hours earlier.",
-          "By connecting ChatGPT to ShopCart MCP, your assistant queries live Shopify storefront data instead of relying on stale search caches — letting you filter by budget, availability, and exact sizes across your favorite independent brands."
+          "By connecting ChatGPT to ShopCart MCP, your AI shopping assistant brings read-only agentic commerce straight to live Shopify storefront data — letting you filter by budget, availability, and exact sizes across your favorite independent brands."
         ],
         takeaway:
-          "Takeaway: Live catalog queries turn Black Friday browsing from guesswork into verified, in-stock carts."
+          "Takeaway: Live Shopify MCP queries turn ChatGPT shopping on Black Friday from guesswork into verified, in-stock carts."
       },
       {
         heading: "Step-by-step: connect ChatGPT and build your Black Friday cart",
