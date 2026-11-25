@@ -21,6 +21,9 @@ export function renderLandingPage(config: AppConfig, lang: Lang): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(description)}">
 <style>
@@ -317,8 +320,9 @@ pnpm install &amp;&amp; pnpm build &amp;&amp; pnpm start:stdio</code></pre>
       <div class="foot-links">
         <a href="/billing?lang=${lang}">${de ? "Konto & Billing" : "Account & Billing"}</a>
         <a href="${escapeHtml(config.repoUrl)}" target="_blank" rel="noopener">GitHub</a>
+        <a href="/privacy?lang=${lang}">${de ? "Datenschutz" : "Privacy Policy"}</a>
+        <a href="/terms?lang=${lang}">${de ? "Nutzungsbedingungen" : "Terms"}</a>
         <a href="https://wals.pro/policies/legal-notice" target="_blank" rel="noopener">${de ? "Impressum" : "Legal Notice"}</a>
-        <a href="https://wals.pro/policies/privacy-policy" target="_blank" rel="noopener">${de ? "Datenschutz" : "Privacy Policy"}</a>
       </div>
     </div>
     <p class="disclaimer">${

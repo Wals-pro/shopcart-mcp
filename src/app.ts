@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { AdapterRegistry } from "./adapters/registry.js";
@@ -12,6 +15,7 @@ import { createShopcartMcpServer } from "./mcp/create-server.js";
 import type { StorageBackend } from "./store/types.js";
 import { createBillingRouter } from "./web/billing.js";
 import { renderLandingPage } from "./web/landing.js";
+import { renderPrivacyPage, renderSecurityTxt, renderTermsPage } from "./web/legal.js";
 
 export interface CreateAppDeps {
   config: AppConfig;
@@ -19,6 +23,16 @@ export interface CreateAppDeps {
   registry?: AdapterRegistry;
   cimdResolver?: CimdResolver;
 }
+
+const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
+
+const STATIC_ICONS: Array<{ route: string; file: string; contentType: string }> = [
+  { route: "/favicon.ico", file: "favicon.ico", contentType: "image/x-icon" },
+  { route: "/favicon.svg", file: "favicon.svg", contentType: "image/svg+xml; charset=utf-8" },
+  { route: "/favicon.png", file: "favicon.png", contentType: "image/png" },
+  { route: "/apple-touch-icon.png", file: "apple-touch-icon.png", contentType: "image/png" },
+  { route: "/icon-512.png", file: "icon-512.png", contentType: "image/png" }
+];
 
 function corsMiddleware(req: Request, res: Response, next: NextFunction): void {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -93,17 +107,85 @@ export function createApp(deps: CreateAppDeps): Express {
     });
   });
 
-  // 3. CORS on discovery, OAuth JSON endpoints, and /mcp
+  // 3. Static Icons (unauthenticated, required for Claude Connectors Directory, OpenAI, and server.json)
+  for (const icon of STATIC_ICONS) {
+    const filePath = path.join(PUBLIC_DIR, icon.file);
+    const cachedBuffer = fs.existsSync(filePath) ? fs.readFileSync(filePath) : null;
+    app.get(icon.route, (_req, res) => {
+      if (!cachedBuffer) {
+        res.status(404).end();
+        return;
+      }
+      res.setHeader("Content-Type", icon.contentType);
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.status(200).send(cachedBuffer);
+    });
+  }
+
+  // 4. CORS on discovery, OAuth JSON endpoints, and /mcp
   app.use("/.well-known", corsMiddleware);
   app.use("/oauth/token", corsMiddleware);
   app.use("/oauth/register", corsMiddleware);
   app.use("/oauth/revoke", corsMiddleware);
   app.use("/mcp", corsMiddleware);
 
-  // 4. OAuth 2.1 Discovery + Authorize + Register + Token + Revoke
+  // 5. Well-known Directory Verification, Security & MCP Server Card
+  app.get("/.well-known/openai-apps-challenge", (_req, res) => {
+    if (!config.openaiAppsChallenge) {
+      res.status(404).type("text/plain; charset=utf-8").send("Not configured");
+      return;
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.status(200).type("text/plain; charset=utf-8").send(config.openaiAppsChallenge);
+  });
+
+  app.get("/.well-known/mcp-registry-auth", (_req, res) => {
+    if (!config.mcpRegistryAuth) {
+      res.status(404).type("text/plain; charset=utf-8").send("Not configured");
+      return;
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.status(200).type("text/plain; charset=utf-8").send(config.mcpRegistryAuth);
+  });
+
+  app.get("/.well-known/security.txt", (_req, res) => {
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.status(200).type("text/plain; charset=utf-8").send(renderSecurityTxt(config));
+  });
+
+  app.get("/.well-known/mcp.json", (_req, res) => {
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.status(200).json({
+      name: "io.github.Wals-pro/shopcart-mcp",
+      title: "ShopCart MCP",
+      description:
+        "Search Shopify stores, inspect product variants, and create cart links from your AI assistant.",
+      version: config.version,
+      websiteUrl: config.appOrigin,
+      endpoint: `${config.appOrigin}/mcp`,
+      transport: "streamable-http",
+      authentication: {
+        type: "oauth2",
+        protected_resource_metadata: `${config.appOrigin}/.well-known/oauth-protected-resource/mcp`,
+        authorization_server_metadata: `${config.appOrigin}/.well-known/oauth-authorization-server`
+      },
+      icons: [
+        { src: `${config.appOrigin}/apple-touch-icon.png`, mimeType: "image/png", sizes: ["180x180"] },
+        { src: `${config.appOrigin}/icon-512.png`, mimeType: "image/png", sizes: ["512x512"] }
+      ],
+      privacy_policy_url: `${config.appOrigin}/privacy`,
+      terms_of_service_url: `${config.appOrigin}/terms`,
+      support_email: "support@wals.pro"
+    });
+  });
+
+  // 6. OAuth 2.1 Discovery + Authorize + Register + Token + Revoke
   app.use(createOAuthRouter(config, store, cimdResolver));
 
-  // 5. Stateless Streamable HTTP MCP endpoint (/mcp) with RFC 6750 §3.1 Bearer Guard
+  // 7. Stateless Streamable HTTP MCP endpoint (/mcp) with RFC 6750 §3.1 Bearer Guard
   const requireBearer = createBearerAuthMiddleware(config, store);
 
   app.post("/mcp", requireBearer, express.json({ limit: "256kb" }), async (req, res) => {
@@ -166,7 +248,7 @@ export function createApp(deps: CreateAppDeps): Express {
     });
   });
 
-  // 6. Landing Page (DE/EN) & Account/Billing Portal
+  // 8. Landing Page (DE/EN), Product-specific Legal Routes, & Account/Billing Portal
   app.get("/", (req, res) => {
     const lang = detectLang(req.query.lang, req.headers["accept-language"]);
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -174,6 +256,22 @@ export function createApp(deps: CreateAppDeps): Express {
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     res.setHeader("Cache-Control", "public, max-age=60");
     res.status(200).type("html").send(renderLandingPage(config, lang));
+  });
+
+  app.get("/privacy", (req, res) => {
+    const lang = detectLang(req.query.lang, req.headers["accept-language"]);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.status(200).type("html").send(renderPrivacyPage(config, lang));
+  });
+
+  app.get("/terms", (req, res) => {
+    const lang = detectLang(req.query.lang, req.headers["accept-language"]);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.status(200).type("html").send(renderTermsPage(config, lang));
   });
 
   app.use(createBillingRouter(config, store));

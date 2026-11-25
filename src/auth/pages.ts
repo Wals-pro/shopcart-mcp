@@ -65,6 +65,9 @@ export function renderAuthorizePage(p: AuthorizePageParams): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>${escapeHtml(title)}</title>
 <style>
 :root{--bg:#fafaf9;--card:#ffffff;--ink:#111827;--muted:#57534e;--border:#e7e5e4;--accent:#d92d20;--accent-dark:#b42318;--soft:#fef3f2;--ok-bg:#ecfdf3;--ok-ink:#027a48}
@@ -196,7 +199,8 @@ button.primary:hover{background:var(--accent-dark)}
 
   <p class="foot">
     ${de ? "Mit der Anmeldung akzeptierst du unsere" : "By continuing you agree to our"}
-    <a href="https://wals.pro/policies/privacy-policy" target="_blank" rel="noopener">${de ? "Datenschutzerklärung" : "Privacy Policy"}</a> ·
+    <a href="/privacy?lang=${p.lang}" target="_blank" rel="noopener">${de ? "Datenschutzerklärung" : "Privacy Policy"}</a> ·
+    <a href="/terms?lang=${p.lang}" target="_blank" rel="noopener">${de ? "Nutzungsbedingungen" : "Terms"}</a> ·
     <a href="https://wals.pro/policies/legal-notice" target="_blank" rel="noopener">${de ? "Impressum" : "Legal Notice"}</a>
   </p>
 </main>

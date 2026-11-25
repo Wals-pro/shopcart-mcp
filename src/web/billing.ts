@@ -45,6 +45,9 @@ function renderBillingShell(lang: Lang, title: string, bodyHtml: string): string
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>${escapeHtml(title)} — shopcart-mcp</title>
 <style>
 :root{--bg:#fafaf9;--card:#fff;--ink:#141413;--muted:#57534e;--border:#e7e5e4;--accent:#d92d20;--accent-dark:#b42318;--ok-bg:#ecfdf3;--ok-ink:#027a48;--warn-bg:#fffaeb;--warn-ink:#b54708}
@@ -88,8 +91,9 @@ input[type=email],input[type=password]{width:100%;padding:10px 12px;border:1px s
   ${bodyHtml}
   <p class="foot">
     <a href="/?lang=${lang}">${de ? "Startseite" : "Home"}</a> ·
-    <a href="https://wals.pro/policies/legal-notice" target="_blank" rel="noopener">${de ? "Impressum" : "Legal Notice"}</a> ·
-    <a href="https://wals.pro/policies/privacy-policy" target="_blank" rel="noopener">${de ? "Datenschutz" : "Privacy Policy"}</a>
+    <a href="/privacy?lang=${lang}">${de ? "Datenschutz" : "Privacy Policy"}</a> ·
+    <a href="/terms?lang=${lang}">${de ? "Nutzungsbedingungen" : "Terms"}</a> ·
+    <a href="https://wals.pro/policies/legal-notice" target="_blank" rel="noopener">${de ? "Impressum" : "Legal Notice"}</a>
   </p>
 </div>
 </body>

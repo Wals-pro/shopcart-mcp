@@ -12,6 +12,8 @@ export interface AppConfig {
   stripeSecretKey: string | undefined;
   stripeWebhookSecret: string | undefined;
   stripeProPriceId: string | undefined;
+  openaiAppsChallenge: string | undefined;
+  mcpRegistryAuth: string | undefined;
   sessionSecret: string;
   appName: string;
   repoUrl: string;
@@ -77,6 +79,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     stripeSecretKey: env.STRIPE_SECRET_KEY?.trim() || undefined,
     stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET?.trim() || undefined,
     stripeProPriceId: env.STRIPE_PRO_PRICE_ID?.trim() || undefined,
+    openaiAppsChallenge: env.OPENAI_APPS_CHALLENGE?.trim() || undefined,
+    mcpRegistryAuth: env.MCP_REGISTRY_AUTH?.trim() || undefined,
     sessionSecret,
     appName: "shopcart-mcp",
     repoUrl: "https://github.com/Wals-pro/shopcart-mcp",

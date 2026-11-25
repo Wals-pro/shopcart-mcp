@@ -269,13 +269,42 @@ describe("OAuth 2.1 compliance & MCP auth", () => {
       })
       .expect(200);
 
-    const toolNames = (mcpRes.body.result.tools as Array<{ name: string }>).map((t) => t.name);
+    const tools = mcpRes.body.result.tools as Array<{
+      name: string;
+      title?: string;
+      annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; openWorldHint?: boolean };
+    }>;
+    const toolNames = tools.map((t) => t.name);
     expect(toolNames).toEqual([
       "inspect_store",
       "search_products",
       "get_product",
       "create_cart_link"
     ]);
+    for (const tool of tools) {
+      expect(tool.title && tool.title.length > 0 && tool.title.length <= 64).toBe(true);
+      expect(tool.annotations?.readOnlyHint).toBe(true);
+      expect(tool.annotations?.destructiveHint).toBe(false);
+      expect(tool.annotations?.openWorldHint).toBe(true);
+    }
+
+    // Verify initialize returns server instructions
+    const initRes = await request(app)
+      .post("/mcp")
+      .set("Authorization", `Bearer ${tok1.body.access_token}`)
+      .set("Accept", "application/json, text/event-stream")
+      .send({
+        jsonrpc: "2.0",
+        id: 10,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-03-26",
+          capabilities: {},
+          clientInfo: { name: "test", version: "1.0.0" }
+        }
+      })
+      .expect(200);
+    expect(String(initRes.body.result.instructions ?? "")).toContain("untrusted");
 
     // 7. Rotate refresh token -> new pair works
     const tok2 = await request(app)
@@ -336,5 +365,61 @@ describe("OAuth 2.1 compliance & MCP auth", () => {
       })
       .expect(303);
     expect(badRes.headers.location).toContain("error=invalid_target");
+  });
+
+  it("serves directory-readiness icons, product-specific /privacy & /terms, security.txt, mcp.json, env challenges, tool titles/annotations, and >=30d DCR TTL", async () => {
+    const { app, store } = makeTestApp();
+
+    // 1. Static icons unauthenticated
+    const ico = await request(app).get("/favicon.ico").expect(200);
+    expect(ico.headers["content-type"]).toContain("image/x-icon");
+    const svg = await request(app).get("/favicon.svg").expect(200);
+    expect(svg.headers["content-type"]).toContain("image/svg+xml");
+    await request(app).get("/favicon.png").expect(200);
+    await request(app).get("/apple-touch-icon.png").expect(200);
+    await request(app).get("/icon-512.png").expect(200);
+
+    // 2. Product-specific legal pages & security.txt
+    const privacy = await request(app).get("/privacy?lang=en").expect(200);
+    expect(privacy.text).toContain("Wals Professional Services GmbH");
+    expect(privacy.text).toContain("not affiliated with or endorsed by Shopify Inc.");
+    const terms = await request(app).get("/terms?lang=de").expect(200);
+    expect(terms.text).toContain("Shopify Inc.");
+    const sec = await request(app).get("/.well-known/security.txt").expect(200);
+    expect(sec.text).toContain("Contact: mailto:security@wals.pro");
+
+    // 3. Server card
+    const mcpCard = await request(app).get("/.well-known/mcp.json").expect(200);
+    expect(mcpCard.body.name).toBe("io.github.Wals-pro/shopcart-mcp");
+    expect(mcpCard.body.privacy_policy_url).toBe("https://shopcart.wals.pro/privacy");
+
+    // 4. Zero-redeploy verification endpoints return 404 when env empty, 200 text/plain exact match when set
+    await request(app).get("/.well-known/openai-apps-challenge").expect(404);
+    await request(app).get("/.well-known/mcp-registry-auth").expect(404);
+
+    const cfgWithTokens = loadConfig({
+      APP_ORIGIN: "https://shopcart.wals.pro",
+      STORAGE_BACKEND: "memory",
+      SESSION_SECRET: "test-session-secret-0123456789abcdef",
+      OPENAI_APPS_CHALLENGE: "openai-token-12345",
+      MCP_REGISTRY_AUTH: "v=MCPv1; k=ed25519; p=AAAA"
+    });
+    const appWithTokens = createApp({ config: cfgWithTokens, store: new MemoryStore() });
+    const oai = await request(appWithTokens).get("/.well-known/openai-apps-challenge").expect(200);
+    expect(oai.headers["content-type"]).toContain("text/plain");
+    expect(oai.text).toBe("openai-token-12345");
+    const regAuth = await request(appWithTokens).get("/.well-known/mcp-registry-auth").expect(200);
+    expect(regAuth.headers["content-type"]).toContain("text/plain");
+    expect(regAuth.text).toBe("v=MCPv1; k=ed25519; p=AAAA");
+
+    // 5. DCR unactivated TTL >= 30 days (Glama compatibility)
+    const reg = await request(app)
+      .post("/oauth/register")
+      .send({ client_name: "Glama Probe", redirect_uris: ["https://glama.ai/oauth/callback"] })
+      .expect(201);
+    const savedClient = await store.getOAuthClient(reg.body.client_id);
+    expect(savedClient).not.toBeNull();
+    const ttlDays = (savedClient!.expiresAt.getTime() - savedClient!.createdAt.getTime()) / (24 * 3600 * 1000);
+    expect(ttlDays).toBeGreaterThanOrEqual(30);
   });
 });

@@ -20,12 +20,15 @@ export interface ToolRuntimeContext {
   consumeQuota?: (toolName: string) => Promise<QuotaCheckResult>;
 }
 
-const READ_ONLY_ANNOTATIONS = {
-  readOnlyHint: true,
-  destructiveHint: false,
-  idempotentHint: true,
-  openWorldHint: true
-} as const;
+function makeAnnotations(title: string) {
+  return {
+    title,
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true
+  } as const;
+}
 
 function jsonContent(payload: unknown, isError = false) {
   return {
@@ -87,17 +90,21 @@ async function runGuardedTool<T>(
 }
 
 export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext): void {
-  server.tool(
+  server.registerTool(
     "inspect_store",
-    "Check whether an online store URL is a supported Shopify storefront, discover its currency, country, WAF restrictions, and optional Storefront MCP capabilities.",
     {
-      store_url: z
-        .string()
-        .min(3)
-        .max(256)
-        .describe("Store domain or HTTPS URL, e.g. 'snocks.com' or 'https://ridge.com'")
+      title: "Inspect Store",
+      description:
+        "Check whether an HTTPS online store URL is a supported public Shopify storefront and return its currency, country, WAF restrictions, and available catalog endpoints.",
+      inputSchema: {
+        store_url: z
+          .string()
+          .min(3)
+          .max(256)
+          .describe("Store domain or HTTPS URL, e.g. 'snocks.com' or 'https://ridge.com'")
+      },
+      annotations: makeAnnotations("Inspect Store")
     },
-    READ_ONLY_ANNOTATIONS,
     async ({ store_url }) =>
       runGuardedTool(ctx, "inspect_store", async () => {
         const origin = normalizeStoreOrigin(store_url);
@@ -117,40 +124,46 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
       })
   );
 
-  server.tool(
+  server.registerTool(
     "search_products",
-    "Search products in a Shopify storefront by keyword (WAF-resilient) or browse top products when query is omitted. Returns normalized prices, availability, and product handles.",
     {
-      store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
-      query: z
-        .string()
-        .max(120)
-        .optional()
-        .describe("Search keyword(s). Recommended for all stores; required on WAF-restricted stores."),
-      limit: z
-        .number()
-        .int()
-        .min(1)
-        .max(20)
-        .default(10)
-        .optional()
-        .describe("Max number of products to return (1-20, default 10)."),
-      available_only: z
-        .boolean()
-        .optional()
-        .describe("If true, only return products currently marked available."),
-      min_price: z
-        .number()
-        .min(0)
-        .optional()
-        .describe("Minimum price filter in store major currency units."),
-      max_price: z
-        .number()
-        .min(0)
-        .optional()
-        .describe("Maximum price filter in store major currency units.")
+      title: "Search Store Products",
+      description:
+        "Search a Shopify storefront's public catalog by keyword (or browse top items when query is omitted) with optional availability and min/max price filters.",
+      inputSchema: {
+        store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
+        query: z
+          .string()
+          .max(120)
+          .optional()
+          .describe(
+            "Search keyword(s). Recommended for all stores; required on WAF-restricted stores."
+          ),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(20)
+          .default(10)
+          .optional()
+          .describe("Max number of products to return (1-20, default 10)."),
+        available_only: z
+          .boolean()
+          .optional()
+          .describe("If true, only return products currently marked available."),
+        min_price: z
+          .number()
+          .min(0)
+          .optional()
+          .describe("Minimum price filter in store major currency units."),
+        max_price: z
+          .number()
+          .min(0)
+          .optional()
+          .describe("Maximum price filter in store major currency units.")
+      },
+      annotations: makeAnnotations("Search Store Products")
     },
-    READ_ONLY_ANNOTATIONS,
     async ({ store_url, query, limit, available_only, min_price, max_price }) =>
       runGuardedTool(ctx, "search_products", async () => {
         const origin = normalizeStoreOrigin(store_url);
@@ -174,18 +187,22 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
       })
   );
 
-  server.tool(
+  server.registerTool(
     "get_product",
-    "Fetch detailed product metadata, options, clean description text, and exact variant IDs/prices/availability for a Shopify product handle or URL.",
     {
-      store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
-      handle_or_url: z
-        .string()
-        .min(1)
-        .max(300)
-        .describe("Product handle (e.g. 'rolltop-2-0') or full product URL")
+      title: "Get Product Details & Variants",
+      description:
+        "Retrieve product details, sanitized description text, options, images, and exact numeric variant IDs, prices, and availability for a Shopify product handle or URL.",
+      inputSchema: {
+        store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
+        handle_or_url: z
+          .string()
+          .min(1)
+          .max(300)
+          .describe("Product handle (e.g. 'rolltop-2-0') or full product URL")
+      },
+      annotations: makeAnnotations("Get Product Details & Variants")
     },
-    READ_ONLY_ANNOTATIONS,
     async ({ store_url, handle_or_url }) =>
       runGuardedTool(ctx, "get_product", async () => {
         const origin = normalizeStoreOrigin(store_url);
@@ -202,40 +219,48 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
       })
   );
 
-  server.tool(
+  server.registerTool(
     "create_cart_link",
-    "Build a deterministic Shopify cart or checkout permalink for one or more variant IDs and quantities. Optionally pass verify_handles to check variant existence and stock before generating the link.",
     {
-      store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
-      items: z
-        .array(
-          z.object({
-            variant_id: z
-              .string()
-              .regex(/^\d{1,20}$/, "variant_id must be a numeric Shopify variant ID"),
-            quantity: z.number().int().min(1).max(99)
-          })
-        )
-        .min(1)
-        .max(20)
-        .describe("Line items with numeric variant_id from get_product and quantity (1..99)"),
-      mode: z
-        .enum(["cart", "checkout"])
-        .default("cart")
-        .optional()
-        .describe("'cart' opens merchant storefront cart (?storefront=true, default); 'checkout' goes directly to checkout."),
-      discount_code: z
-        .string()
-        .regex(/^[A-Za-z0-9._-]{1,64}$/, "discount_code contains invalid characters")
-        .optional()
-        .describe("Optional discount/coupon code to pre-apply"),
-      verify_handles: z
-        .array(z.string().min(1).max(200))
-        .max(10)
-        .optional()
-        .describe("Recommended: product handles whose variants should be verified for stock & price via /products/<handle>.js")
+      title: "Create Store Cart Link",
+      description:
+        "Generate a read-only Shopify browser cart or checkout permalink from exact numeric variant IDs and quantities, optionally verifying live availability via verify_handles.",
+      inputSchema: {
+        store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
+        items: z
+          .array(
+            z.object({
+              variant_id: z
+                .string()
+                .regex(/^\d{1,20}$/, "variant_id must be a numeric Shopify variant ID"),
+              quantity: z.number().int().min(1).max(99)
+            })
+          )
+          .min(1)
+          .max(20)
+          .describe("Line items with numeric variant_id from get_product and quantity (1..99)"),
+        mode: z
+          .enum(["cart", "checkout"])
+          .default("cart")
+          .optional()
+          .describe(
+            "'cart' opens merchant storefront cart (?storefront=true, default); 'checkout' goes directly to checkout."
+          ),
+        discount_code: z
+          .string()
+          .regex(/^[A-Za-z0-9._-]{1,64}$/, "discount_code contains invalid characters")
+          .optional()
+          .describe("Optional discount/coupon code supplied by the user"),
+        verify_handles: z
+          .array(z.string().min(1).max(200))
+          .max(10)
+          .optional()
+          .describe(
+            "Recommended: product handles whose variants should be verified for stock and price via /products/<handle>.js"
+          )
+      },
+      annotations: makeAnnotations("Create Store Cart Link")
     },
-    READ_ONLY_ANNOTATIONS,
     async ({ store_url, items, mode, discount_code, verify_handles }) =>
       runGuardedTool(ctx, "create_cart_link", async () => {
         const origin = normalizeStoreOrigin(store_url);
