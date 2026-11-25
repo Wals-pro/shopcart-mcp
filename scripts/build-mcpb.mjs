@@ -120,8 +120,10 @@ export function createMcpbManifest(version) {
       "",
       "**Included read-only tools:**",
       "- `inspect_store` — Verify Shopify storefront support, currency, country, and WAF behavior.",
-      "- `search_products` — Search public product catalogs by keyword with price and availability filters.",
-      "- `get_product` — Fetch sanitized product details, options, images, stock, and exact numeric variant IDs.",
+      "- `list_collections` — Browse store collections and automatically highlight Sale, Black Friday, Bestseller, and seasonal deal collections.",
+      "- `search_products` — Search public product catalogs or collections with availability, price, and discount sorting (`discount_desc`, `price_asc`, `price_desc`).",
+      "- `get_product` — Fetch sanitized product details, options, images, stock, compare-at discounts, and exact numeric variant IDs.",
+      "- `get_store_policies` — Check shipping thresholds, delivery times, and return/refund policies via native Storefront MCP and public `/policies` pages.",
       "- `create_cart_link` — Build verified browser cart or checkout permalinks so you review and complete checkout yourself.",
       "",
       "Includes built-in SSRF protection and prompt-injection sanitization. Independent open-source project by Wals.pro (not affiliated with Shopify Inc.)."
@@ -172,14 +174,24 @@ export function createMcpbManifest(version) {
           "Check whether an HTTPS online store URL is a supported public Shopify storefront and return its currency, country, WAF restrictions, and available catalog endpoints."
       },
       {
+        name: "list_collections",
+        description:
+          "List public collections from a Shopify storefront and automatically highlight Sale, Black Friday, Outlet, Bestseller, Bundle, and Advent calendar deal collections."
+      },
+      {
         name: "search_products",
         description:
-          "Search a Shopify storefront's public catalog by keyword (or browse top items when query is omitted) with optional availability and min/max price filters."
+          "Search a Shopify storefront's public catalog by keyword or collection handle with optional availability, min/max price filters, sort_by (including discount_desc), and automatic discount/savings calculation."
       },
       {
         name: "get_product",
         description:
-          "Retrieve product details, sanitized description text, options, images, and exact numeric variant IDs, prices, and availability for a Shopify product handle or URL."
+          "Retrieve product details, sanitized description text, options, images, and exact numeric variant IDs, prices, compare-at discounts, and availability for a Shopify product handle or URL."
+      },
+      {
+        name: "get_store_policies",
+        description:
+          "Fetch a Shopify store's shipping, delivery, and return/refund policies via native Storefront MCP FAQ search and public /policies endpoints with sanitized excerpts, extracted hints, and official policy URLs."
       },
       {
         name: "create_cart_link",
