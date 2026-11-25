@@ -363,7 +363,7 @@ img {
 
 .hero-inner {
   position: relative;
-  padding-top: 36px;
+  padding-top: 22px;
   padding-bottom: 68px;
 }
 
@@ -471,7 +471,7 @@ img {
 
 /* --- Launcher: 1 click into Claude / ChatGPT with the start prompt prefilled --- */
 .launcher {
-  margin-top: 22px;
+  margin-top: 18px;
   padding: 18px 20px;
   border-radius: 22px;
   border: 1px solid var(--walspro-border-strong);
