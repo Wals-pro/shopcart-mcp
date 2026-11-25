@@ -49,10 +49,62 @@ export async function verifyPassword(
   return crypto.timingSafeEqual(derived, expected);
 }
 
-export function createCsrfPair(secret: string): { token: string; cookieValue: string } {
-  const token = randomToken(24);
+export const CSRF_TOKEN_TTL_MS = 30 * 60 * 1000;
+
+export function createSignedCsrfToken(
+  secret: string,
+  context: string,
+  nowMs = Date.now()
+): string {
+  const exp = Math.floor((nowMs + CSRF_TOKEN_TTL_MS) / 1000);
+  const nonce = randomToken(16);
+  const sig = crypto
+    .createHmac("sha256", secret)
+    .update(`csrf:v1:${context}:${exp}:${nonce}`)
+    .digest("base64url");
+  return `${exp}.${nonce}.${sig}`;
+}
+
+export function verifySignedCsrfToken(
+  secret: string,
+  token: string | undefined,
+  context: string,
+  nowMs = Date.now()
+): boolean {
+  if (!token) return false;
+  const parts = token.split(".");
+  if (parts.length !== 3) return false;
+  const [expStr, nonce, sig] = parts;
+  if (!expStr || !nonce || !sig || !/^\d+$/.test(expStr)) return false;
+  const expSec = Number(expStr);
+  if (!Number.isSafeInteger(expSec) || expSec * 1000 < nowMs) return false;
+  const expectedSig = crypto
+    .createHmac("sha256", secret)
+    .update(`csrf:v1:${context}:${expStr}:${nonce}`)
+    .digest("base64url");
+  return timingSafeEqualStr(sig, expectedSig);
+}
+
+export function isAllowedCsrfOrigin(
+  originHeader: string | string[] | undefined,
+  appOrigin: string
+): boolean {
+  if (originHeader === undefined) return true;
+  const raw = Array.isArray(originHeader) ? originHeader[0] : originHeader;
+  if (!raw || raw.trim() === "") return true;
+  const normalized = raw.trim().replace(/\/+$/, "");
+  const expected = appOrigin.trim().replace(/\/+$/, "");
+  return normalized === expected;
+}
+
+export function createCsrfPair(
+  secret: string,
+  context = "default",
+  nowMs = Date.now()
+): { token: string; cookieValue: string } {
+  const token = createSignedCsrfToken(secret, context, nowMs);
   const sig = crypto.createHmac("sha256", secret).update(token).digest("base64url");
-  return { token, cookieValue: `${token}.${sig}` };
+  return { token, cookieValue: `${token}|${sig}` };
 }
 
 export function verifyCsrfPair(
@@ -61,13 +113,39 @@ export function verifyCsrfPair(
   formToken: string | undefined
 ): boolean {
   if (!cookieValue || !formToken) return false;
-  const parts = cookieValue.split(".");
-  if (parts.length !== 2) return false;
-  const [token, sig] = parts;
+  let token: string | undefined;
+  let sig: string | undefined;
+  if (cookieValue.includes("|")) {
+    const parts = cookieValue.split("|");
+    if (parts.length !== 2) return false;
+    [token, sig] = parts;
+  } else {
+    const parts = cookieValue.split(".");
+    if (parts.length !== 2) return false;
+    [token, sig] = parts;
+  }
   if (!token || !sig) return false;
   if (!timingSafeEqualStr(token, formToken)) return false;
   const expectedSig = crypto.createHmac("sha256", secret).update(token).digest("base64url");
   return timingSafeEqualStr(sig, expectedSig);
+}
+
+export function verifyCsrfRequest(params: {
+  secret: string;
+  appOrigin: string;
+  originHeader: string | string[] | undefined;
+  formToken: string | undefined;
+  cookieValue: string | undefined;
+  context: string;
+  nowMs?: number;
+}): boolean {
+  if (!isAllowedCsrfOrigin(params.originHeader, params.appOrigin)) {
+    return false;
+  }
+  if (verifySignedCsrfToken(params.secret, params.formToken, params.context, params.nowMs)) {
+    return true;
+  }
+  return verifyCsrfPair(params.secret, params.cookieValue, params.formToken);
 }
 
 export function parseCookies(header: string | undefined): Record<string, string> {

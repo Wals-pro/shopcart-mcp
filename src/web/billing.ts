@@ -6,7 +6,7 @@ import {
   parseCookies,
   randomToken,
   sha256Hex,
-  verifyCsrfPair
+  verifyCsrfRequest
 } from "../auth/crypto.js";
 import {
   EmailOtpService,
@@ -24,6 +24,7 @@ import {
 } from "../billing/stripe.js";
 
 const BILLING_CSRF_COOKIE = "sc_billing_csrf";
+const BILLING_CSRF_CONTEXT = "billing";
 const WEB_SESSION_TTL_MS = 14 * 24 * 3600 * 1000;
 
 function formatCookie(name: string, value: string, maxAge: number, secure: boolean): string {
@@ -300,7 +301,7 @@ export function createBillingRouter(
       res.redirect(303, `/billing?lang=${lang}`);
       return;
     }
-    const csrf = createCsrfPair(config.sessionSecret);
+    const csrf = createCsrfPair(config.sessionSecret, BILLING_CSRF_CONTEXT);
     res.setHeader("Set-Cookie", formatCookie(BILLING_CSRF_COOKIE, csrf.cookieValue, 1800, isHttps));
     setBillingSecurityHeaders(res);
     const prefillEmail = typeof req.query.email === "string" ? req.query.email : "";
@@ -320,7 +321,7 @@ export function createBillingRouter(
     const lang = detectLang(req.query.lang, req.headers["accept-language"]);
     const de = lang === "de";
     const user = await getLoggedInUser(req, store);
-    const csrf = createCsrfPair(config.sessionSecret);
+    const csrf = createCsrfPair(config.sessionSecret, BILLING_CSRF_CONTEXT);
     res.setHeader("Set-Cookie", formatCookie(BILLING_CSRF_COOKIE, csrf.cookieValue, 1800, isHttps));
     setBillingSecurityHeaders(res);
 
@@ -449,7 +450,7 @@ export function createBillingRouter(
     const cookies = parseCookies(req.headers.cookie);
 
     const renderStep1Error = (msg: string, statusCode = 400) => {
-      const freshCsrf = createCsrfPair(config.sessionSecret);
+      const freshCsrf = createCsrfPair(config.sessionSecret, BILLING_CSRF_CONTEXT);
       res.setHeader("Set-Cookie", formatCookie(BILLING_CSRF_COOKIE, freshCsrf.cookieValue, 1800, isHttps));
       setBillingSecurityHeaders(res);
       const html = renderBillingLoginStep1({
@@ -470,7 +471,14 @@ export function createBillingRouter(
       return;
     }
 
-    if (!verifyCsrfPair(config.sessionSecret, cookies[BILLING_CSRF_COOKIE], body._csrf)) {
+    if (!verifyCsrfRequest({
+        secret: config.sessionSecret,
+        appOrigin: config.appOrigin,
+        originHeader: req.headers.origin,
+        formToken: body._csrf,
+        cookieValue: cookies[BILLING_CSRF_COOKIE],
+        context: BILLING_CSRF_CONTEXT
+      })) {
       renderStep1Error(
         de ? "Sitzung abgelaufen. Bitte erneut absenden." : "Form session expired. Please try again.",
         403
@@ -512,7 +520,7 @@ export function createBillingRouter(
       return;
     }
 
-    const freshCsrf = createCsrfPair(config.sessionSecret);
+    const freshCsrf = createCsrfPair(config.sessionSecret, BILLING_CSRF_CONTEXT);
     res.setHeader("Set-Cookie", [
       formatCookie(BILLING_CSRF_COOKIE, freshCsrf.cookieValue, 1800, isHttps),
       formatCookie(OTP_BIND_COOKIE, requested.browserBindCookieValue, 900, isHttps)
@@ -557,7 +565,7 @@ export function createBillingRouter(
       const cookies = parseCookies(req.headers.cookie);
 
       const renderStep1 = (msg: string, statusCode = 400) => {
-        const freshCsrf = createCsrfPair(config.sessionSecret);
+        const freshCsrf = createCsrfPair(config.sessionSecret, BILLING_CSRF_CONTEXT);
         res.setHeader("Set-Cookie", formatCookie(BILLING_CSRF_COOKIE, freshCsrf.cookieValue, 1800, isHttps));
         setBillingSecurityHeaders(res);
         const html = renderBillingLoginStep1({
@@ -574,7 +582,7 @@ export function createBillingRouter(
       };
 
       const renderStep2 = (msg: string, statusCode = 400) => {
-        const freshCsrf = createCsrfPair(config.sessionSecret);
+        const freshCsrf = createCsrfPair(config.sessionSecret, BILLING_CSRF_CONTEXT);
         res.setHeader("Set-Cookie", formatCookie(BILLING_CSRF_COOKIE, freshCsrf.cookieValue, 1800, isHttps));
         setBillingSecurityHeaders(res);
         const html = renderBillingLoginStep2({
@@ -595,7 +603,14 @@ export function createBillingRouter(
         return;
       }
 
-      if (!verifyCsrfPair(config.sessionSecret, cookies[BILLING_CSRF_COOKIE], body._csrf)) {
+      if (!verifyCsrfRequest({
+        secret: config.sessionSecret,
+        appOrigin: config.appOrigin,
+        originHeader: req.headers.origin,
+        formToken: body._csrf,
+        cookieValue: cookies[BILLING_CSRF_COOKIE],
+        context: BILLING_CSRF_CONTEXT
+      })) {
         renderStep2(
           de ? "Sitzung abgelaufen. Bitte erneut absenden." : "Form session expired. Please try again.",
           403
@@ -680,7 +695,14 @@ export function createBillingRouter(
     async (req: Request, res: Response) => {
       const cookies = parseCookies(req.headers.cookie);
       const body = (req.body ?? {}) as Record<string, string | undefined>;
-      if (!verifyCsrfPair(config.sessionSecret, cookies[BILLING_CSRF_COOKIE], body._csrf)) {
+      if (!verifyCsrfRequest({
+        secret: config.sessionSecret,
+        appOrigin: config.appOrigin,
+        originHeader: req.headers.origin,
+        formToken: body._csrf,
+        cookieValue: cookies[BILLING_CSRF_COOKIE],
+        context: BILLING_CSRF_CONTEXT
+      })) {
         res.status(403).send("Invalid CSRF token");
         return;
       }
@@ -709,7 +731,14 @@ export function createBillingRouter(
     async (req: Request, res: Response) => {
       const cookies = parseCookies(req.headers.cookie);
       const body = (req.body ?? {}) as Record<string, string | undefined>;
-      if (!verifyCsrfPair(config.sessionSecret, cookies[BILLING_CSRF_COOKIE], body._csrf)) {
+      if (!verifyCsrfRequest({
+        secret: config.sessionSecret,
+        appOrigin: config.appOrigin,
+        originHeader: req.headers.origin,
+        formToken: body._csrf,
+        cookieValue: cookies[BILLING_CSRF_COOKIE],
+        context: BILLING_CSRF_CONTEXT
+      })) {
         res.status(403).send("Invalid CSRF token");
         return;
       }
