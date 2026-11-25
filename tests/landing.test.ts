@@ -220,6 +220,9 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
     const devSection = en.text.slice(en.text.indexOf('id="developers"'));
     expect(devSection).toContain(`href="${install.cursor.replace(/&/g, "&amp;")}"`);
     expect(devSection).toContain("Install in VS Code");
+    // Claude Desktop extension (.mcpb): offered in the launcher (hero + after demo) and in the developer section
+    expect(en.text.match(/href="\/downloads\/shopcart-mcp\.mcpb" download/g)).toHaveLength(3);
+    await request(app).get("/downloads/shopcart-mcp.mcpb").expect(200);
     expect(en.text.slice(0, en.text.indexOf('id="developers"'))).not.toContain("cursor://");
     expect(getWishes("en").map((w) => w.label)).toEqual([
       "Allbirds sneakers",

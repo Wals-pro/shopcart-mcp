@@ -739,6 +739,20 @@ img {
   color: var(--walspro-muted);
 }
 
+.desktop-link {
+  margin-left: auto;
+  color: var(--walspro-ink);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: var(--walspro-border-strong);
+  text-underline-offset: 3px;
+}
+
+.desktop-link:hover {
+  color: #ffffff;
+  text-decoration-color: #ff6b7a;
+}
+
 /* --- Developer section: native 1-click install deeplinks (Cursor, VS Code) --- */
 .install-row {
   display: flex;

@@ -349,6 +349,9 @@ function renderLauncher(config: AppConfig, lang: Lang, slot: "hero" | "demo"): s
         <button type="button" class="copy-mini" data-copy-target="mcp-url-${slot}" data-copied-label="${copied}">${
           de ? "URL kopieren" : "Copy URL"
         }</button>
+        <a class="desktop-link" href="/downloads/shopcart-mcp.mcpb" download>${
+          de ? "Claude Desktop? 1-Klick-Erweiterung laden" : "Claude Desktop? Get the 1-click extension"
+        } <span aria-hidden="true">↓</span></a>
       </div>
     </div>
 
@@ -939,8 +942,13 @@ ${
         <span class="install-label">${de ? "1-Klick-Install:" : "1-click install:"}</span>
         <a class="btn-install" href="${escapeHtml(installLinks.cursor)}">${de ? "In Cursor installieren" : "Install in Cursor"}</a>
         <a class="btn-install" href="${escapeHtml(installLinks.vscode)}">${de ? "In VS Code installieren" : "Install in VS Code"}</a>
+        <a class="btn-install" href="/downloads/shopcart-mcp.mcpb" download>${
+          de ? "Claude Desktop (.mcpb, Mac/Windows)" : "Claude Desktop (.mcpb, Mac/Windows)"
+        }</a>
         <span class="install-note">${
-          de ? "Öffnet die App und trägt ShopCart als MCP-Server ein." : "Opens the app and adds ShopCart as an MCP server."
+          de
+            ? "Öffnet die App und trägt ShopCart als MCP-Server ein. Die Claude-Desktop-Erweiterung installierst du per Doppelklick."
+            : "Opens the app and adds ShopCart as an MCP server. Install the Claude Desktop extension with a double-click."
         }</span>
       </div>
 
