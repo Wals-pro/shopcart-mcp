@@ -173,6 +173,21 @@ export function createApp(deps: CreateAppDeps): Express {
     });
   }
 
+  // Claude Desktop 1-click Extension (.mcpb) download
+  const mcpbFilePath = path.join(PUBLIC_DIR, "downloads", "shopcart-mcp.mcpb");
+  const cachedMcpbBuffer = fs.existsSync(mcpbFilePath) ? fs.readFileSync(mcpbFilePath) : null;
+  app.get("/downloads/shopcart-mcp.mcpb", (_req, res) => {
+    if (!cachedMcpbBuffer) {
+      res.status(404).end();
+      return;
+    }
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("Content-Disposition", 'attachment; filename="shopcart-mcp.mcpb"');
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.status(200).send(cachedMcpbBuffer);
+  });
+
   // 4. CORS on discovery, OAuth JSON endpoints, and /mcp
   app.use("/.well-known", corsMiddleware);
   app.use("/oauth/token", corsMiddleware);

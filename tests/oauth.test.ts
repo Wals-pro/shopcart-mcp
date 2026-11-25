@@ -456,4 +456,155 @@ describe("OAuth 2.1 compliance & MCP auth", () => {
     const ttlDays = (savedClient!.expiresAt.getTime() - savedClient!.createdAt.getTime()) / (24 * 3600 * 1000);
     expect(ttlDays).toBeGreaterThanOrEqual(30);
   });
+
+  it("supports stateless signed CSRF without cookie + Origin check and sends CSP img-src 'self' data: on /oauth/authorize & /billing/login", async () => {
+    const { app, emailSender } = makeTestApp();
+
+    const reg = await request(app)
+      .post("/oauth/register")
+      .send({
+        client_name: "Safari Webview Client",
+        redirect_uris: ["https://claude.ai/api/mcp/auth_callback"],
+        token_endpoint_auth_method: "none"
+      })
+      .expect(201);
+
+    const clientId = reg.body.client_id as string;
+    const verifier = "verifier_stateless_csrf_0123456789_ABCDEFGHIJKLMNOPQRSTUVWXYZ_012345";
+    const challenge = sha256Base64Url(verifier);
+    const redirectUri = "https://claude.ai/api/mcp/auth_callback";
+
+    // 1. GET /oauth/authorize & /billing/login include img-src 'self' data: in CSP
+    const authGet = await request(app)
+      .get("/oauth/authorize")
+      .query({
+        response_type: "code",
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+        resource: "https://shopcart.wals.pro/mcp",
+        state: "st_csrf"
+      })
+      .expect(200);
+
+    expect(String(authGet.headers["content-security-policy"] ?? "")).toContain("img-src 'self' data:");
+    const csrfToken = authGet.text.match(/name="_csrf" value="([^"]+)"/)![1]!;
+
+    const billingGet = await request(app).get("/billing/login?lang=de").expect(200);
+    expect(String(billingGet.headers["content-security-policy"] ?? "")).toContain("img-src 'self' data:");
+    const billingCsrf = billingGet.text.match(/name="_csrf" value="([^"]+)"/)![1]!;
+
+    // 2. Foreign Origin is blocked with 403 even with a valid signed CSRF token
+    await request(app)
+      .post("/oauth/authorize")
+      .set("Origin", "https://evil.example")
+      .type("form")
+      .send({
+        _csrf: csrfToken,
+        step: "email",
+        lang: "en",
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+        resource: "https://shopcart.wals.pro/mcp",
+        scope: "mcp:read",
+        state: "st_csrf",
+        email: "stateless@example.com"
+      })
+      .expect(403);
+
+    await request(app)
+      .post("/billing/login")
+      .set("Origin", "https://evil.example")
+      .type("form")
+      .send({
+        _csrf: billingCsrf,
+        lang: "de",
+        email: "stateless@example.com"
+      })
+      .expect(403);
+
+    // 3. Cross-context replay (different PKCE challenge) is rejected with 403
+    await request(app)
+      .post("/oauth/authorize")
+      .set("Origin", "https://shopcart.wals.pro")
+      .type("form")
+      .send({
+        _csrf: csrfToken,
+        step: "email",
+        lang: "en",
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        code_challenge: sha256Base64Url("other_verifier_0123456789_ABCDEFGHIJKLMNOPQRSTUVWXYZ_012345"),
+        code_challenge_method: "S256",
+        resource: "https://shopcart.wals.pro/mcp",
+        scope: "mcp:read",
+        state: "st_csrf",
+        email: "stateless@example.com"
+      })
+      .expect(403);
+
+    // 4. Valid signed CSRF token + matching Origin succeeds WITHOUT any Cookie header
+    const step1 = await request(app)
+      .post("/oauth/authorize")
+      .set("Origin", "https://shopcart.wals.pro")
+      .type("form")
+      .send({
+        _csrf: csrfToken,
+        step: "email",
+        lang: "en",
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+        resource: "https://shopcart.wals.pro/mcp",
+        scope: "mcp:read",
+        state: "st_csrf",
+        email: "stateless@example.com"
+      })
+      .expect(200);
+
+    const mail = emailSender.lastFor("stateless@example.com");
+    expect(mail).toBeDefined();
+    const csrf2 = step1.text.match(/name="_csrf" value="([^"]+)"/)![1]!;
+    const challengeId = step1.text.match(/name="challenge_id" value="([^"]+)"/)![1]!;
+
+    // Step 2 also succeeds WITHOUT any Cookie header when Origin matches and token is valid
+    const step2 = await request(app)
+      .post("/oauth/authorize")
+      .set("Origin", "https://shopcart.wals.pro")
+      .type("form")
+      .send({
+        _csrf: csrf2,
+        step: "verify",
+        challenge_id: challengeId,
+        lang: "en",
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+        resource: "https://shopcart.wals.pro/mcp",
+        scope: "mcp:read",
+        state: "st_csrf",
+        email: "stateless@example.com",
+        code: mail!.code
+      })
+      .expect(303);
+
+    expect(new URL(step2.headers.location!).searchParams.get("code")).toMatch(/^sc_code_/);
+
+    // 5. /billing/login also succeeds WITHOUT Cookie header when Origin matches
+    await request(app)
+      .post("/billing/login")
+      .set("Origin", "https://shopcart.wals.pro")
+      .type("form")
+      .send({
+        _csrf: billingCsrf,
+        lang: "de",
+        email: "stateless-billing@example.com"
+      })
+      .expect(200);
+  });
 });

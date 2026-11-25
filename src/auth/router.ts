@@ -9,7 +9,7 @@ import {
   randomToken,
   sha256Hex,
   timingSafeEqualStr,
-  verifyCsrfPair
+  verifyCsrfRequest
 } from "./crypto.js";
 import {
   EmailOtpService,
@@ -394,7 +394,8 @@ export function createOAuthRouter(
     }
 
     const scopes = normalizeScopes(rawScope);
-    const csrf = createCsrfPair(config.sessionSecret);
+    const csrfContext = `oauth:${client.clientId}:${codeChallenge}`;
+    const csrf = createCsrfPair(config.sessionSecret, csrfContext);
     res.setHeader(
       "Set-Cookie",
       formatCookie(CSRF_COOKIE, csrf.cookieValue, { maxAge: 1800, secure: isHttps })
@@ -458,6 +459,7 @@ export function createOAuthRouter(
         return;
       }
 
+      const csrfContext = `oauth:${client.clientId}:${codeChallenge}`;
       const renderStep = (opts: {
         renderStep: "email" | "verify";
         statusCode?: number;
@@ -466,7 +468,7 @@ export function createOAuthRouter(
         challengeId?: string;
         extraCookies?: string[];
       }) => {
-        const freshCsrf = createCsrfPair(config.sessionSecret);
+        const freshCsrf = createCsrfPair(config.sessionSecret, csrfContext);
         const cookiesToSet = [
           formatCookie(CSRF_COOKIE, freshCsrf.cookieValue, { maxAge: 1800, secure: isHttps }),
           ...(opts.extraCookies ?? [])
@@ -506,9 +508,18 @@ export function createOAuthRouter(
         return;
       }
 
-      // CSRF verification
+      // CSRF verification (stateless HMAC-signed + time-bound token + Origin check + cookie fallback)
       const cookies = parseCookies(req.headers.cookie);
-      if (!verifyCsrfPair(config.sessionSecret, cookies[CSRF_COOKIE], body._csrf)) {
+      if (
+        !verifyCsrfRequest({
+          secret: config.sessionSecret,
+          appOrigin: config.appOrigin,
+          originHeader: req.headers.origin,
+          formToken: body._csrf,
+          cookieValue: cookies[CSRF_COOKIE],
+          context: csrfContext
+        })
+      ) {
         renderStep({
           renderStep: step === "verify" && challengeId ? "verify" : "email",
           challengeId: step === "verify" ? challengeId : undefined,
