@@ -4,8 +4,10 @@ export interface Money {
   currency: string;
 }
 
+export type StorePlatform = "shopify" | "woocommerce" | "amazon";
+
 export interface StoreInfo {
-  platform: "shopify";
+  platform: StorePlatform;
   origin: string;
   name: string | null;
   currency: string;
@@ -17,6 +19,10 @@ export interface StoreInfo {
     productCatalogJson: boolean;
     storefrontMcp: boolean;
     storefrontMcpTools: string[];
+    liveSearch?: boolean;
+    searchProvider?: "paapi" | "keepa" | "none";
+    asinCartPermalink?: boolean;
+    affiliateTagConfigured?: boolean;
   };
 }
 
@@ -74,6 +80,7 @@ export interface SearchProductsResult {
   currency: string;
   products: ProductSummary[];
   notices: string[];
+  agent_guidance?: string;
 }
 
 export interface GetProductResult {
@@ -101,6 +108,7 @@ export interface CartLinkResult {
   cart_url: string;
   mode: "cart" | "checkout";
   items: CartLinkItemResult[];
+  affiliate_disclosure?: boolean;
   warnings: string[];
   next_step: string;
 }
