@@ -1,0 +1,64 @@
+{
+  "name": "shopcart-mcp",
+  "version": "0.1.0",
+  "description": "Agentic Shopping & Cart MCP for Shopify (and more) — local stdio OSS CLI and hosted OAuth 2.1 Streamable HTTP server",
+  "license": "MIT",
+  "type": "module",
+  "author": "Wals.pro <info@wals.pro>",
+  "homepage": "https://shopcart.wals.pro",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Wals-pro/shopcart-mcp.git"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "shopify",
+    "ecommerce",
+    "shopping",
+    "cart",
+    "ai-agent",
+    "claude",
+    "chatgpt",
+    "oauth2"
+  ],
+  "bin": {
+    "shopcart-mcp": "./dist/cli.js"
+  },
+  "main": "./dist/cli.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev:stdio": "tsx src/cli.ts",
+    "dev:server": "tsx src/server.ts",
+    "start": "node dist/server.js",
+    "start:stdio": "node dist/cli.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@google-cloud/firestore": "^7.11.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "express": "^4.21.2",
+    "stripe": "^17.7.0",
+    "undici": "^7.5.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.13.0",
+    "@types/supertest": "^6.0.2",
+    "supertest": "^7.0.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8"
+  }
+}
