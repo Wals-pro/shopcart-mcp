@@ -17,6 +17,7 @@ export interface DomainMetadata {
   metaJsonBlocked: boolean;
   productCatalogBlocked: boolean;
   detectedShopify: boolean;
+  storefrontMcpTools: string[] | null;
   expiresAt: number;
 }
 
@@ -145,6 +146,41 @@ export class ShopifyClient {
       return { status: res.status, data: JSON.parse(res.bodyText) as T };
     } catch {
       return { status: res.status, data: null };
+    }
+  }
+
+  async getText(
+    url: string,
+    opts: { timeoutMs?: number; maxBytes?: number; concurrencyKey?: string } = {}
+  ): Promise<{ status: number; text: string; contentType: string; url: string }> {
+    const res = await this.fetcher(url, {
+      method: "GET",
+      headers: {
+        "User-Agent": DEFAULT_UA,
+        Accept: "text/html, application/xhtml+xml, text/plain;q=0.9, */*;q=0.1"
+      },
+      timeoutMs: opts.timeoutMs ?? 5000,
+      maxRedirects: 3,
+      maxBytes: opts.maxBytes ?? 1_048_576,
+      concurrencyKey: opts.concurrencyKey
+    });
+
+    return {
+      status: res.status,
+      text: res.bodyText,
+      contentType: res.contentType,
+      url: res.url || url
+    };
+  }
+
+  setStorefrontMcpTools(origin: string, tools: string[]): void {
+    const existing = this.cache.get(origin);
+    if (existing) {
+      existing.storefrontMcpTools = tools;
+      const canonical = this.cache.get(existing.origin);
+      if (canonical && canonical !== existing) {
+        canonical.storefrontMcpTools = tools;
+      }
     }
   }
 
@@ -290,6 +326,7 @@ export class ShopifyClient {
       metaJsonBlocked,
       productCatalogBlocked: cached?.productCatalogBlocked ?? false,
       detectedShopify: state.detectedShopify,
+      storefrontMcpTools: cached?.storefrontMcpTools ?? null,
       expiresAt: now + META_CACHE_TTL_MS
     };
 

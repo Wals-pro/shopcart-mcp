@@ -311,8 +311,10 @@ describe("OAuth 2.1 compliance & MCP auth", () => {
     const toolNames = tools.map((t) => t.name);
     expect(toolNames).toEqual([
       "inspect_store",
+      "list_collections",
       "search_products",
       "get_product",
+      "get_store_policies",
       "create_cart_link"
     ]);
     for (const tool of tools) {

@@ -13,7 +13,14 @@ import { MemoryStore } from "../src/store/memory.js";
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MCPB_PATH = path.join(ROOT_DIR, "public", "downloads", "shopcart-mcp.mcpb");
 
-const EXPECTED_TOOLS = ["inspect_store", "search_products", "get_product", "create_cart_link"];
+const EXPECTED_TOOLS = [
+  "inspect_store",
+  "list_collections",
+  "search_products",
+  "get_product",
+  "get_store_policies",
+  "create_cart_link"
+];
 
 /**
  * Minimal pure-Node ZIP extractor for validating the generated .mcpb archive
