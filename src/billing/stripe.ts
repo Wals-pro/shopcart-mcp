@@ -19,11 +19,58 @@ function getStripeClient(config: AppConfig): Stripe {
   return new Stripe(config.stripeSecretKey);
 }
 
+export type CheckoutLang = "de" | "en";
+
+export interface ProCheckoutOptions {
+  /** UI language of the page that started the checkout; controls the Stripe Checkout locale. */
+  lang?: CheckoutLang;
+  now?: Date;
+}
+
+/** Pure builder for the Stripe Checkout Session params (kept separate so it can be unit-tested). */
+export function buildProCheckoutParams(
+  user: Pick<UserRecord, "id">,
+  customerId: string,
+  config: AppConfig,
+  options: ProCheckoutOptions = {}
+): Stripe.Checkout.SessionCreateParams {
+  if (!config.stripeProPriceId) {
+    throw new Error("Stripe Pro price is not configured (STRIPE_PRO_PRICE_ID missing)");
+  }
+  const now = options.now ?? new Date();
+  const lang: CheckoutLang = options.lang === "de" ? "de" : "en";
+
+  // Black Friday Launch Promo: trial_end at 2026-12-07T00:00:00+01:00 if still >48h in the future;
+  // otherwise enable promotion codes.
+  const usePromoTrial =
+    config.promoTrialEnd !== null &&
+    config.promoTrialEnd.getTime() - now.getTime() >= MIN_STRIPE_TRIAL_LEAD_MS;
+
+  return {
+    mode: "subscription",
+    customer: customerId,
+    client_reference_id: user.id,
+    // /billing?lang=de opens a German Stripe Checkout, everything else an English one.
+    locale: lang === "de" ? "de" : "en",
+    line_items: [{ price: config.stripeProPriceId, quantity: 1 }],
+    success_url: `${config.appOrigin}/billing?checkout=success&lang=${lang}`,
+    cancel_url: `${config.appOrigin}/billing?checkout=cancel&lang=${lang}`,
+    metadata: { user_id: user.id },
+    subscription_data: {
+      metadata: { user_id: user.id },
+      ...(usePromoTrial && config.promoTrialEnd
+        ? { trial_end: Math.floor(config.promoTrialEnd.getTime() / 1000) }
+        : {})
+    },
+    ...(usePromoTrial ? {} : { allow_promotion_codes: true })
+  };
+}
+
 export async function createProCheckoutSession(
   user: UserRecord,
   config: AppConfig,
   store: StorageBackend,
-  now = new Date()
+  options: ProCheckoutOptions = {}
 ): Promise<{ url: string }> {
   if (!config.stripeProPriceId) {
     throw new Error("Stripe Pro price is not configured (STRIPE_PRO_PRICE_ID missing)");
@@ -40,28 +87,7 @@ export async function createProCheckoutSession(
     await store.updateUser(user.id, { stripeCustomerId: customerId });
   }
 
-  // Black Friday Launch Promo: trial_end at 2026-12-07T00:00:00+01:00 if still >48h in the future;
-  // otherwise enable promotion codes.
-  const usePromoTrial =
-    config.promoTrialEnd !== null &&
-    config.promoTrialEnd.getTime() - now.getTime() >= MIN_STRIPE_TRIAL_LEAD_MS;
-
-  const params: Stripe.Checkout.SessionCreateParams = {
-    mode: "subscription",
-    customer: customerId,
-    client_reference_id: user.id,
-    line_items: [{ price: config.stripeProPriceId, quantity: 1 }],
-    success_url: `${config.appOrigin}/billing?checkout=success`,
-    cancel_url: `${config.appOrigin}/billing?checkout=cancel`,
-    metadata: { user_id: user.id },
-    subscription_data: {
-      metadata: { user_id: user.id },
-      ...(usePromoTrial && config.promoTrialEnd
-        ? { trial_end: Math.floor(config.promoTrialEnd.getTime() / 1000) }
-        : {})
-    },
-    ...(usePromoTrial ? {} : { allow_promotion_codes: true })
-  };
+  const params = buildProCheckoutParams(user, customerId, config, options);
 
   const session = await stripe.checkout.sessions.create(params);
   if (!session.url) {

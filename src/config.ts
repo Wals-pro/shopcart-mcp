@@ -105,6 +105,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     sessionSecret,
     appName: "shopcart-mcp",
     repoUrl: "https://github.com/Wals-pro/shopcart-mcp",
-    version: "0.1.0"
+    version: "0.3.0"
   };
 }

@@ -14,6 +14,7 @@ import type { AppConfig } from "./config.js";
 import { createShopcartMcpServer } from "./mcp/create-server.js";
 import type { StorageBackend } from "./store/types.js";
 import { createBillingRouter } from "./web/billing.js";
+import { renderLlmsFullTxt, renderLlmsTxt, renderRobotsTxt, renderSitemapXml } from "./web/discovery.js";
 import { renderLandingPage } from "./web/landing.js";
 import { renderPrivacyPage, renderSecurityTxt, renderTermsPage } from "./web/legal.js";
 
@@ -298,7 +299,43 @@ export function createApp(deps: CreateAppDeps): Express {
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     res.setHeader("Cache-Control", "public, max-age=60");
+    res.setHeader("Vary", "Accept-Language");
+    res.setHeader("Content-Language", lang);
+    // Agent discovery (GEO/AEO): point AI agents and crawlers at the machine-readable summaries.
+    res.setHeader(
+      "Link",
+      [
+        `<${config.appOrigin}/llms.txt>; rel="alternate"; type="text/plain"`,
+        `<${config.appOrigin}/llms-full.txt>; rel="alternate"; type="text/plain"; title="llms-full.txt"`
+      ].join(", ")
+    );
     res.status(200).type("html").send(renderLandingPage(config, lang));
+  });
+
+  // 8b. Agent discovery files: llms.txt, llms-full.txt, robots.txt, sitemap.xml
+  const sendDiscoveryText = (res: Response, body: string): void => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.status(200).setHeader("Content-Type", "text/plain; charset=utf-8").send(body);
+  };
+
+  app.get("/llms.txt", (_req, res) => {
+    sendDiscoveryText(res, renderLlmsTxt(config));
+  });
+
+  app.get("/llms-full.txt", (_req, res) => {
+    sendDiscoveryText(res, renderLlmsFullTxt(config));
+  });
+
+  app.get("/robots.txt", (_req, res) => {
+    sendDiscoveryText(res, renderRobotsTxt(config));
+  });
+
+  app.get("/sitemap.xml", (_req, res) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.status(200).setHeader("Content-Type", "application/xml; charset=utf-8").send(renderSitemapXml(config));
   });
 
   app.get("/privacy", (req, res) => {

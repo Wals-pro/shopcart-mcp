@@ -236,6 +236,7 @@ export function createBillingRouter(config: AppConfig, store: StorageBackend): R
           ? stripeReady
             ? `<form method="POST" action="/billing/checkout">
                 <input type="hidden" name="_csrf" value="${escapeHtml(csrf.token)}">
+                <input type="hidden" name="lang" value="${lang}">
                 <button class="btn primary" type="submit">${
                   ent.promoActive
                     ? de
@@ -387,7 +388,9 @@ export function createBillingRouter(config: AppConfig, store: StorageBackend): R
         return;
       }
       try {
-        const session = await createProCheckoutSession(user, config, store);
+        const session = await createProCheckoutSession(user, config, store, {
+          lang: detectLang(body.lang, req.headers["accept-language"])
+        });
         res.redirect(303, session.url);
       } catch (err) {
         res.status(500).send(err instanceof Error ? err.message : "Checkout error");

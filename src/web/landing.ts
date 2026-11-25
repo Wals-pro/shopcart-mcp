@@ -1,6 +1,25 @@
 import type { AppConfig } from "../config.js";
 import { escapeHtml, type Lang } from "../auth/pages.js";
 import { isPromoFreeProActive } from "../billing/quota.js";
+import {
+  AI_LINK_BASES,
+  CONNECT_SETTINGS_URLS,
+  EXAMPLE_PRICES_VERIFIED_DE,
+  EXAMPLE_PRICES_VERIFIED_EN,
+  buildAiLinks,
+  buildInstallLinks,
+  buildJsonLd,
+  buildStartPrompt,
+  defaultPromptTail,
+  formatPromoEnd,
+  getFaq,
+  getHowTo,
+  getUseCases,
+  getWishes,
+  serializeJsonLd,
+  startPromptHead,
+  taskTail
+} from "./content.js";
 
 export type ResolvedDemoMedia =
   | { kind: "simulation" }
@@ -84,49 +103,393 @@ export function resolveDemoMedia(config: AppConfig, lang: Lang): ResolvedDemoMed
   return { kind: "simulation" };
 }
 
-export function renderLandingPage(config: AppConfig, lang: Lang): string {
+
+// ---------------------------------------------------------------------------
+// Consumer-friendly live shopping simulation (fallback when no demo video is set)
+// ---------------------------------------------------------------------------
+
+export interface SimScenario {
+  id: string;
+  tab: string;
+  user: string;
+  steps: Array<{ label: string; meta: string }>;
+  answer: string;
+  shop: string;
+  items: Array<{ qty: string; name: string; variant: string; price: string }>;
+  total: string;
+  cartUrl: string;
+  cta: string;
+}
+
+/**
+ * Real example carts. Every cartUrl below was opened live in a browser and resolves to a filled
+ * merchant cart (see EXAMPLE_PRICES_VERIFIED_*). Never add generated domains or guessed variant IDs.
+ */
+export function getSimScenarios(lang: Lang): SimScenario[] {
+  const de = lang === "de";
+
+  const snocks: SimScenario = {
+    id: "snocks",
+    tab: "SNOCKS",
+    user: de
+      ? "Ich brauche Sneaker-Socken von SNOCKS in 43–46: 2× weiß und 1× schwarz."
+      : "I need SNOCKS sneaker socks in size 43–46: 2× white and 1× black.",
+    steps: de
+      ? [
+          { label: "Shop gefunden", meta: "snocks.com · Preise in €" },
+          { label: "Sortiment durchsucht", meta: "Sneaker Socken in Weiß & Schwarz" },
+          { label: "Größe & Preis geprüft", meta: "43–46 verfügbar · je 22,49 €" },
+          { label: "Warenkorb-Link gebaut", meta: "3 Artikel · geprüft" }
+        ]
+      : [
+          { label: "Store found", meta: "snocks.com · prices in €" },
+          { label: "Catalog searched", meta: "Sneaker socks in white & black" },
+          { label: "Size & price checked", meta: "43–46 in stock · €22.49 each" },
+          { label: "Cart link built", meta: "3 items · verified" }
+        ],
+    answer: de
+      ? "Fertig! Drei Sets in 43–46 liegen in deinem Warenkorb. Schau kurz drüber und bezahl direkt bei SNOCKS."
+      : "Done! Three packs in 43–46 are in your cart. Take a quick look and pay directly at SNOCKS.",
+    shop: "SNOCKS · snocks.com",
+    items: [
+      {
+        qty: "2×",
+        name: "Sneaker Socken | White",
+        variant: de ? "43–46 · 6 Paar" : "43–46 · 6 pairs",
+        price: de ? "44,98 €" : "€44.98"
+      },
+      {
+        qty: "1×",
+        name: "Sneaker Socken | Black",
+        variant: de ? "43–46 · 6 Paar" : "43–46 · 6 pairs",
+        price: de ? "22,49 €" : "€22.49"
+      }
+    ],
+    total: de ? "67,47 €" : "€67.47",
+    cartUrl: "https://snocks.com/cart/44434567725323:2,19729211981894:1?storefront=true",
+    cta: de ? "Beispiel-Warenkorb bei SNOCKS öffnen" : "Open example cart at SNOCKS"
+  };
+
+  const kernenergie: SimScenario = {
+    id: "kernenergie",
+    tab: "KERNenergie",
+    user: de
+      ? "Ich suche bei KERNenergie zwei kleine Weihnachtsgeschenke, zusammen unter 40 €."
+      : "I'm looking for two small Christmas gifts at KERNenergie, under €40 in total.",
+    steps: de
+      ? [
+          { label: "Shop gefunden", meta: "kern-energie.com · Preise in €" },
+          { label: "Sortiment durchsucht", meta: "Weihnachtsgeschenke unter 40 €" },
+          { label: "Preis & Verfügbarkeit geprüft", meta: "24,95 € + 12,95 € · lieferbar" },
+          { label: "Warenkorb-Link gebaut", meta: "2 Artikel · geprüft" }
+        ]
+      : [
+          { label: "Store found", meta: "kern-energie.com · prices in €" },
+          { label: "Catalog searched", meta: "Christmas gifts under €40" },
+          { label: "Price & stock checked", meta: "€24.95 + €12.95 · in stock" },
+          { label: "Cart link built", meta: "2 items · verified" }
+        ],
+    answer: de
+      ? "Beide Geschenke sind lieferbar und bleiben zusammen unter 40 €. Dein Warenkorb ist bereit."
+      : "Both gifts are in stock and stay under €40 together. Your cart is ready.",
+    shop: "KERNenergie · kern-energie.com",
+    items: [
+      {
+        qty: "1×",
+        name: "Weihnachtsgeschenk MandelgeNUSS",
+        variant: de ? "Schokolierte & gebrannte Mandeln" : "Chocolate-coated & roasted almonds",
+        price: de ? "24,95 €" : "€24.95"
+      },
+      {
+        qty: "1×",
+        name: "Mini Weihnachtsgeschenk",
+        variant: de ? "Nussmischung & gebrannte Nüsse" : "Nut mix & roasted nuts",
+        price: de ? "12,95 €" : "€12.95"
+      }
+    ],
+    total: de ? "37,90 €" : "€37.90",
+    cartUrl: "https://kern-energie.com/cart/49277053370627:1,49277057696003:1?storefront=true",
+    cta: de ? "Beispiel-Warenkorb bei KERNenergie öffnen" : "Open example cart at KERNenergie"
+  };
+
+  if (!de) {
+    const allbirds: SimScenario = {
+      id: "allbirds",
+      tab: "Allbirds",
+      user: "I'd like the Allbirds Men's Wool Runner NZ in dark grey, size 10.",
+      steps: [
+        { label: "Store found", meta: "allbirds.com · prices in $" },
+        { label: "Catalog searched", meta: "Men's Wool Runner NZ" },
+        { label: "Size & price checked", meta: "Size 10 in stock · $110.00" },
+        { label: "Cart link built", meta: "1 item · verified" }
+      ],
+      answer:
+        "Done! The Wool Runner NZ in dark grey, size 10, is in your cart. Take a quick look and pay directly at Allbirds.",
+      shop: "Allbirds · allbirds.com",
+      items: [
+        {
+          qty: "1×",
+          name: "Men's Wool Runner NZ",
+          variant: "Dark Grey (Light Grey Sole) · Size 10",
+          price: "$110.00"
+        }
+      ],
+      total: "$110.00",
+      cartUrl: "https://www.allbirds.com/cart/41243558707280:1?storefront=true",
+      cta: "Open example cart at Allbirds"
+    };
+    return [allbirds, snocks, kernenergie];
+  }
+
+  const purelei: SimScenario = {
+    id: "purelei",
+    tab: "PURELEI",
+    user: "Ich möchte bei PURELEI den Adventskalender in Gold und dazu die Bold Charm Kette in Gold.",
+    steps: [
+      { label: "Shop gefunden", meta: "purelei.com · Preise in €" },
+      { label: "Sortiment durchsucht", meta: "Adventskalender & Ketten" },
+      { label: "Variante & Preis geprüft", meta: "Gold · 139,90 € + 27,93 €" },
+      { label: "Warenkorb-Link gebaut", meta: "2 Artikel · geprüft" }
+    ],
+    answer:
+      "Adventskalender und Kette liegen in Gold in deinem Warenkorb. Prüf alles in Ruhe und bezahl direkt bei PURELEI.",
+    shop: "PURELEI · purelei.com",
+    items: [
+      { qty: "1×", name: "PURELEI Adventskalender", variant: "Gold", price: "139,90 €" },
+      { qty: "1×", name: "Bold Charm Kette", variant: "Gold", price: "27,93 €" }
+    ],
+    total: "167,83 €",
+    cartUrl: "https://purelei.com/cart/57560981766409:1,55956947566857:1?storefront=true",
+    cta: "Beispiel-Warenkorb bei PURELEI öffnen"
+  };
+
+  return [snocks, kernenergie, purelei];
+}
+
+/** Shopping moments that drift along the hero wave (rendered on canvas by hero-flow.js). */
+function getHeroChips(lang: Lang): Array<{ t: string; k: "item" | "price" | "ready" | "link" }> {
+  return lang === "de"
+    ? [
+        { t: "2× SNOCKS Gr. 43–46", k: "item" },
+        { t: "Sneaker Socken · 22,49 €", k: "price" },
+        { t: "Größe verfügbar ✓", k: "ready" },
+        { t: "KERNenergie Geschenkset · 24,95 €", k: "price" },
+        { t: "Geschenk unter 50 €", k: "item" },
+        { t: "Warenkorb bereit ✓", k: "ready" },
+        { t: "PURELEI Kette · Gold", k: "item" },
+        { t: "Checkout-Link", k: "link" },
+        { t: "Black-Friday-Preis geprüft ✓", k: "ready" }
+      ]
+    : [
+        { t: "2× SNOCKS size 43–46", k: "item" },
+        { t: "SNOCKS bundle · €67.47", k: "price" },
+        { t: "Size in stock ✓", k: "ready" },
+        { t: "Allbirds Wool Runner · size 10", k: "item" },
+        { t: "Holiday gift under $50", k: "item" },
+        { t: "Cart ready ✓", k: "ready" },
+        { t: "Wool Runner NZ · $110.00", k: "price" },
+        { t: "Checkout link", k: "link" },
+        { t: "Black Friday price checked ✓", k: "ready" }
+      ];
+}
+
+function renderLauncher(config: AppConfig, lang: Lang, slot: "hero" | "demo"): string {
   const de = lang === "de";
   const mcpUrl = `${config.appOrigin}/mcp`;
+  const head = startPromptHead(config, lang);
+  const defaultTail = defaultPromptTail(lang);
+  const prompt = buildStartPrompt(config, lang);
+  const links = buildAiLinks(prompt);
+  const wishes = getWishes(lang);
+  const copied = de ? "Kopiert ✓" : "Copied ✓";
+
+  const connectHintClaude = de
+    ? "Link kopiert ✓ – einfach in Claude einfügen & verbinden."
+    : "Link copied ✓ – just paste it into Claude and connect.";
+  const connectHintChatgpt = de
+    ? "Link kopiert ✓ – in ChatGPT: Einstellungen → Connectors → eigenen Connector hinzufügen (Plus/Pro)."
+    : "Link copied ✓ – in ChatGPT: Settings → Connectors → add a custom connector (Plus/Pro).";
+  const connectHintFailed = de
+    ? "Kopieren hat nicht geklappt – bitte den Link unten manuell kopieren."
+    : "Copying didn't work – please copy the link below manually.";
+
+  return `<div
+    class="launcher launcher-${slot}"
+    ${slot === "hero" ? 'id="start"' : ""}
+    data-launcher
+    data-prompt-head="${escapeHtml(head)}"
+    data-default-tail="${escapeHtml(defaultTail)}"
+  >
+    <div class="launcher-head">
+      <span class="launcher-title">${de ? "Lass meine KI das einrichten" : "Let my AI set this up for me"}</span>
+      <span class="launcher-hint">${de ? "2 Klicks, null Technik." : "2 clicks, zero tech."}</span>
+    </div>
+
+    <div class="launch-step">
+      <div class="launch-step-head">
+        <span class="launch-step-num" aria-hidden="true">1</span>
+        <span class="launch-step-title">${de ? "Einmalig verbinden" : "Connect once"}</span>
+      </div>
+      <div class="launch-grid">
+        <a class="btn-launch btn-launch-primary" data-connect="claude" data-connect-url="${escapeHtml(mcpUrl)}" data-connect-hint="${escapeHtml(connectHintClaude)}" data-connect-failed="${escapeHtml(connectHintFailed)}" href="${CONNECT_SETTINGS_URLS.claude}" target="_blank" rel="noopener">
+          <span>${de ? "Mit Claude verbinden" : "Connect to Claude"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
+        </a>
+        <a class="btn-launch btn-launch-primary" data-connect="chatgpt" data-connect-url="${escapeHtml(mcpUrl)}" data-connect-hint="${escapeHtml(connectHintChatgpt)}" data-connect-failed="${escapeHtml(connectHintFailed)}" href="${CONNECT_SETTINGS_URLS.chatgpt}" target="_blank" rel="noopener">
+          <span>${de ? "Mit ChatGPT verbinden" : "Connect to ChatGPT"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
+        </a>
+      </div>
+      <p class="connect-status" data-connect-status role="status" aria-live="polite">${
+        de
+          ? "Kopiert deinen ShopCart-Link und öffnet die Connector-Einstellungen: einfügen, fertig."
+          : "Copies your ShopCart link and opens the connector settings: paste it, done."
+      }</p>
+      <div class="url-copy">
+        <span class="url-copy-label">${de ? "Dein Link:" : "Your link:"}</span>
+        <code class="url-copy-value" id="mcp-url-${slot}">${escapeHtml(mcpUrl)}</code>
+        <button type="button" class="copy-mini" data-copy-target="mcp-url-${slot}" data-copied-label="${copied}">${
+          de ? "URL kopieren" : "Copy URL"
+        }</button>
+      </div>
+    </div>
+
+    <div class="launch-step">
+      <div class="launch-step-head">
+        <span class="launch-step-num" aria-hidden="true">2</span>
+        <span class="launch-step-title">${de ? "Sofort losshoppen" : "Start shopping"}</span>
+        <span class="launch-step-note">${de ? "Wunsch antippen ist optional" : "Picking a wish is optional"}</span>
+      </div>
+      <div class="wish-chips" role="group" aria-label="${de ? "Wunsch auswählen (optional)" : "Pick a wish (optional)"}">
+        ${wishes
+          .map(
+            (w) =>
+              `<button type="button" class="wish-chip" data-wish-tail="${escapeHtml(w.tail)}" aria-pressed="false">${escapeHtml(w.label)}</button>`
+          )
+          .join("\n        ")}
+      </div>
+      <div class="launch-grid">
+        <a class="btn-launch btn-launch-start" data-ai-link="claude" data-ai-base="${AI_LINK_BASES.claude}" href="${escapeHtml(links.claude)}" target="_blank" rel="noopener">
+          <span>${de ? "In Claude starten" : "Start in Claude"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
+        </a>
+        <a class="btn-launch btn-launch-start" data-ai-link="chatgpt" data-ai-base="${AI_LINK_BASES.chatgpt}" href="${escapeHtml(links.chatgpt)}" target="_blank" rel="noopener">
+          <span>${de ? "In ChatGPT starten" : "Start in ChatGPT"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
+        </a>
+      </div>
+      <div class="launch-more">
+        <a class="btn-launch btn-launch-ghost" data-ai-link="perplexity" data-ai-base="${AI_LINK_BASES.perplexity}" href="${escapeHtml(links.perplexity)}" target="_blank" rel="noopener">
+          <span>${de ? "In Perplexity starten" : "Start in Perplexity"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
+        </a>
+        <button type="button" class="btn-launch btn-launch-ghost" data-copy-prompt data-copied-label="${copied}">
+          <span>${de ? "Startprompt für jede andere KI kopieren" : "Copy start prompt for any other AI"}</span>
+        </button>
+      </div>
+      <details class="prompt-peek">
+        <summary>${de ? "Startprompt ansehen" : "View start prompt"}</summary>
+        <p class="prompt-preview" data-prompt-preview>${escapeHtml(prompt)}</p>
+      </details>
+    </div>
+  </div>`;
+}
+
+function renderSimulation(lang: Lang): string {
+  const de = lang === "de";
+  const scenarios = getSimScenarios(lang);
+  const first = scenarios[0]!;
+  const verified = de ? EXAMPLE_PRICES_VERIFIED_DE : EXAMPLE_PRICES_VERIFIED_EN;
+
+  return `<div class="media-frame media-frame-sim">
+    <div class="sim-player" id="sim-player" data-phase="3" data-sim="${escapeHtml(JSON.stringify(scenarios))}">
+      <div class="sim-chat">
+        <div class="sim-chat-head">
+          <span class="sim-avatar" aria-hidden="true">${de ? "KI" : "AI"}</span>
+          <span>${de ? "Dein KI-Assistent · mit ShopCart verbunden" : "Your AI assistant · connected to ShopCart"}</span>
+        </div>
+        <div class="sim-msg sim-msg-user" id="sim-user">${escapeHtml(first.user)}</div>
+        <ol class="sim-steps" id="sim-steps" aria-live="polite">
+          ${first.steps
+            .map(
+              (step) => `<li class="sim-step" data-state="done">
+            <span class="sim-step-icon" aria-hidden="true"></span>
+            <span class="sim-step-label">${escapeHtml(step.label)}</span>
+            <span class="sim-step-meta">${escapeHtml(step.meta)}</span>
+          </li>`
+            )
+            .join("\n          ")}
+        </ol>
+        <div class="sim-msg sim-msg-ai" id="sim-answer" data-show="true">${escapeHtml(first.answer)}</div>
+      </div>
+
+      <aside class="sim-cart" id="sim-cart" data-ready="true" aria-label="${de ? "Beispiel-Warenkorb" : "Example cart"}">
+        <div class="sim-cart-head">
+          <span class="sim-cart-title">${de ? "Dein Warenkorb" : "Your cart"}</span>
+          <span class="sim-cart-shop" id="sim-shop">${escapeHtml(first.shop)}</span>
+        </div>
+        <ul class="sim-cart-items" id="sim-items">
+          ${first.items
+            .map(
+              (item) => `<li class="sim-cart-item" data-show="true">
+            <span class="sim-cart-qty">${escapeHtml(item.qty)}</span>
+            <span class="sim-cart-info"><span class="sim-cart-name">${escapeHtml(item.name)}</span><span class="sim-cart-meta">${escapeHtml(item.variant)}</span></span>
+            <span class="sim-cart-price">${escapeHtml(item.price)}</span>
+          </li>`
+            )
+            .join("\n          ")}
+        </ul>
+        <p class="sim-cart-empty">${de ? "Dein Warenkorb füllt sich gleich …" : "Your cart is about to fill up …"}</p>
+        <div class="sim-cart-total">
+          <span>${de ? "Zwischensumme" : "Subtotal"}</span>
+          <strong id="sim-total">${escapeHtml(first.total)}</strong>
+        </div>
+        <a class="sim-cart-link" id="sim-link" href="${escapeHtml(first.cartUrl)}" target="_blank" rel="noopener noreferrer">
+          <span id="sim-link-label">${escapeHtml(first.cta)}</span><span aria-hidden="true">↗</span>
+        </a>
+        <p class="sim-cart-note">${
+          de
+            ? `Du prüfst und bezahlst selbst im Shop. Beispielpreise vom ${verified}, Preise und Verfügbarkeit können sich ändern.`
+            : `You review and pay in the store yourself. Example prices as of ${verified}; prices and availability may change.`
+        }</p>
+      </aside>
+    </div>
+  </div>`;
+}
+
+export function renderLandingPage(config: AppConfig, lang: Lang): string {
+  const de = lang === "de";
+  const origin = config.appOrigin;
+  const mcpUrl = `${origin}/mcp`;
   const promoActive = isPromoFreeProActive(config);
+  const promoEnd = formatPromoEnd(config, lang);
+  const promoEndShort = de ? promoEnd.replace(/\.\d{4}$/, ".") : promoEnd.replace(/,\s*\d{4}$/, "");
   const otherLang = de ? "en" : "de";
   const demoMedia = resolveDemoMedia(config, lang);
   const defaultAspect = demoMedia.kind === "simulation" ? "16:9" : demoMedia.defaultAspect;
   const hasExternalVideo = demoMedia.kind !== "simulation";
+  const assetVersion = encodeURIComponent(config.version);
+  const pageUrl = `${origin}/?lang=${lang}`;
+
+  const faq = getFaq(config, lang);
+  const howTo = getHowTo(lang);
+  const useCases = getUseCases(lang);
+  const scenarios = getSimScenarios(lang);
+  const promptHead = startPromptHead(config, lang);
 
   const title = de
-    ? "shopcart-mcp — Agentic Shopping & Cart MCP für Shopify-Shops"
-    : "shopcart-mcp — Agentic Shopping & Cart MCP for Shopify Stores";
+    ? "ShopCart – KI Shopping Assistent: Warenkorb mit Claude & ChatGPT füllen"
+    : "ShopCart – AI shopping assistant: let Claude & ChatGPT fill your cart";
 
   const description = de
-    ? "Verbinde Claude, ChatGPT, Claude Code oder Cursor direkt mit tausenden Shopify-Shops: Produkte suchen, Varianten prüfen, sichere Warenkorb-Links erstellen. Open Source (MIT) oder gehostet mit OAuth 2.1."
-    : "Connect Claude, ChatGPT, Claude Code, or Cursor directly to Shopify storefronts: search products, verify variants, and create deterministic cart links. Open-source (MIT) or hosted with OAuth 2.1.";
+    ? "Sag Claude oder ChatGPT, was du suchst: ShopCart findet echte Produkte, Größen und Preise in Online-Shops und gibt dir einen fertigen Warenkorb-Link. Du prüfst und bezahlst selbst. Kostenlos starten."
+    : "Tell Claude or ChatGPT what you're looking for: ShopCart finds real products, sizes, and prices in online stores and hands you a ready-to-review cart link. You stay in control of checkout. Free to start.";
 
-  const cursorSnippet = JSON.stringify(
-    {
-      mcpServers: {
-        shopcart: {
-          url: mcpUrl
-        }
-      }
-    },
-    null,
-    2
-  );
-
+  const cursorSnippet = JSON.stringify({ mcpServers: { shopcart: { url: mcpUrl } } }, null, 2);
   const localSnippet = JSON.stringify(
-    {
-      mcpServers: {
-        shopcart: {
-          command: "npx",
-          args: ["-y", "shopcart-mcp"]
-        }
-      }
-    },
+    { mcpServers: { shopcart: { command: "npx", args: ["-y", "shopcart-mcp"] } } },
     null,
     2
   );
-
   const claudeCodeCmd = `claude mcp add --transport http shopcart ${mcpUrl}`;
+  const installLinks = buildInstallLinks(config);
+  const copyLabel = de ? "Kopieren" : "Copy";
+  const copiedLabel = de ? "Kopiert ✓" : "Copied ✓";
 
   const demoViewportHtml =
     demoMedia.kind === "iframe"
@@ -146,128 +509,89 @@ export function renderLandingPage(config: AppConfig, lang: Lang): string {
               <source src="${escapeHtml(demoMedia.src)}">
             </video>
           </div>`
-        : `<div class="media-frame">
-            <div class="sim-player" id="sim-player">
-              <div class="sim-chat">
-                <div class="sim-msg-user">${
-                  de
-                    ? "Such mir Merinosocken bis 30 € bei allbirds.eu und leg 2 Paar in Größe M direkt in meinen Warenkorb."
-                    : "Find merino socks under €30 on allbirds.eu and add 2 pairs in size M straight to my cart."
-                }</div>
+        : renderSimulation(lang);
 
-                <div class="sim-steps" aria-live="polite">
-                  <div class="sim-step" data-state="active">
-                    <div class="sim-step-left">
-                      <span class="sim-step-icon" aria-hidden="true">1</span>
-                      <span class="sim-step-call">inspect_store("allbirds.eu")</span>
-                    </div>
-                    <span class="sim-step-meta">Shopify · EUR</span>
-                  </div>
-                  <div class="sim-step" data-state="pending">
-                    <div class="sim-step-left">
-                      <span class="sim-step-icon" aria-hidden="true">2</span>
-                      <span class="sim-step-call">search_products("merino socks", max_price=30)</span>
-                    </div>
-                    <span class="sim-step-meta">4 matches</span>
-                  </div>
-                  <div class="sim-step" data-state="pending">
-                    <div class="sim-step-left">
-                      <span class="sim-step-icon" aria-hidden="true">3</span>
-                      <span class="sim-step-call">get_product("merino-crew-sock")</span>
-                    </div>
-                    <span class="sim-step-meta">M · EUR 25.49</span>
-                  </div>
-                  <div class="sim-step" data-state="pending">
-                    <div class="sim-step-left">
-                      <span class="sim-step-icon" aria-hidden="true">4</span>
-                      <span class="sim-step-call">create_cart_link(37548706496709:2)</span>
-                    </div>
-                    <span class="sim-step-meta">302 verified</span>
-                  </div>
-                </div>
+  const demoToggleHtml = hasExternalVideo
+    ? `<div class="seg-toggle" role="group" aria-label="${de ? "Video-Seitenverhältnis" : "Video aspect ratio"}">
+        <button type="button" class="seg-btn" data-set-aspect="16:9" aria-pressed="${String(defaultAspect === "16:9")}">16:9</button>
+        <button type="button" class="seg-btn" data-set-aspect="9:16" aria-pressed="${String(defaultAspect === "9:16")}">9:16</button>
+      </div>`
+    : `<div class="seg-toggle" role="group" aria-label="${de ? "Beispiel wählen" : "Choose example"}">
+        ${scenarios
+          .map(
+            (sc, idx) =>
+              `<button type="button" class="seg-btn" data-sim-scenario="${idx}" aria-pressed="${String(idx === 0)}">${escapeHtml(sc.tab)}</button>`
+          )
+          .join("\n        ")}
+      </div>`;
 
-                <div class="sim-cart-card" id="sim-cart-card" data-ready="false">
-                  <div class="sim-cart-head">
-                    <span>✓ ${de ? "Warenkorb-Link verifiziert & bereit" : "Cart link verified & ready"}</span>
-                    <span>storefront=true</span>
-                  </div>
-                  <div class="sim-cart-item">
-                    <div>
-                      <div class="sim-cart-name">Merino Crew Sock (2×)</div>
-                      <div class="sim-cart-meta">${
-                        de ? "Größe M · Natural Black · Auf Lager" : "Size M · Natural Black · In stock"
-                      }</div>
-                    </div>
-                    <div class="sim-cart-price">EUR 50.98</div>
-                  </div>
-                  <a
-                    class="sim-cart-link"
-                    href="https://shop.allbirds.eu/cart/37548706496709:2?storefront=true"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <span>${de ? "Beispiel-Warenkorb öffnen" : "Open example cart link"}</span>
-                    <span aria-hidden="true">↗</span>
-                  </a>
-                  <div class="sim-cart-url">https://shop.allbirds.eu/cart/37548706496709:2?storefront=true</div>
-                </div>
-              </div>
+  const simPhaseLabels = de
+    ? ["Wunsch", "Suche", "Prüfung", "Warenkorb"]
+    : ["Wish", "Search", "Check", "Cart"];
 
-              <div class="sim-inspector">
-                <div class="sim-inspector-head">
-                  <span>MCP JSON-RPC · Streamable HTTP</span>
-                  <span class="sim-status-ok" id="sim-latency">142 ms · 200 OK</span>
-                </div>
-                <pre class="sim-json" id="sim-json-output">{
-  "tool": "inspect_store",
-  "arguments": { "store_url": "https://shop.allbirds.eu" }
-}</pre>
-                <div class="sim-guards">
-                  <span class="guard-pill">OAuth 2.1 PKCE</span>
-                  <span class="guard-pill">DNS-Pinned SSRF</span>
-                  <span class="guard-pill">Prompt-Sanitized</span>
-                </div>
-              </div>
-            </div>
-          </div>`;
+  const demoControlsHtml = hasExternalVideo
+    ? ""
+    : `<div class="demo-controls">
+        <div class="demo-btn-group">
+          <button
+            type="button"
+            class="sim-ctrl-btn"
+            id="sim-play-btn"
+            data-pause-label="Pause"
+            data-play-label="${de ? "Abspielen" : "Play"}"
+          >❚❚ Pause</button>
+          <button type="button" class="sim-ctrl-btn" id="sim-replay-btn">↺ ${de ? "Neu starten" : "Replay"}</button>
+        </div>
+        <div class="sim-timeline" role="group" aria-label="${de ? "Schritte des Beispiels" : "Example steps"}">
+          ${simPhaseLabels
+            .map(
+              (label, idx) => `<button type="button" class="sim-seg-btn" data-sim-phase="${idx}" data-active="${String(idx === 3)}" data-filled="true">
+            <span>${idx + 1} · ${label}</span>
+            <span class="sim-seg-bar"><span class="sim-seg-fill"></span></span>
+          </button>`
+            )
+            .join("\n          ")}
+        </div>
+      </div>`;
 
-  const demoControlsHtml =
-    demoMedia.kind === "simulation"
-      ? `<div class="demo-controls">
-          <div class="demo-btn-group">
-            <button
-              type="button"
-              class="sim-ctrl-btn"
-              id="sim-play-btn"
-              data-pause-label="${de ? "Pause" : "Pause"}"
-              data-play-label="${de ? "Abspielen" : "Play"}"
-            >❚❚ ${de ? "Pause" : "Pause"}</button>
-            <button type="button" class="sim-ctrl-btn" id="sim-replay-btn">↺ ${
-              de ? "Neu starten" : "Replay"
-            }</button>
+  const useCasesHtml = useCases
+    .map((uc) => {
+      const links = buildAiLinks(`${promptHead} ${taskTail(lang, uc.ask)}`);
+      return `<article class="card usecase-card">
+          <span class="usecase-kicker">${escapeHtml(uc.kicker)}</span>
+          <h3>${escapeHtml(uc.title)}</h3>
+          <p>${escapeHtml(uc.text)}</p>
+          <blockquote class="usecase-ask">${de ? "„" : "“"}${escapeHtml(uc.ask)}${de ? "“" : "”"}</blockquote>
+          <div class="usecase-actions">
+            <a class="link-go" href="${escapeHtml(links.claude)}" target="_blank" rel="noopener">${
+              de ? "In Claude testen" : "Try in Claude"
+            } <span aria-hidden="true">↗</span></a>
+            <a class="link-go" href="${escapeHtml(links.chatgpt)}" target="_blank" rel="noopener">${
+              de ? "In ChatGPT testen" : "Try in ChatGPT"
+            } <span aria-hidden="true">↗</span></a>
           </div>
-          <div class="sim-timeline" role="group" aria-label="${
-            de ? "Simulationsschritte" : "Simulation steps"
-          }">
-            <button type="button" class="sim-seg-btn" data-sim-step="0" data-active="true" data-filled="true">
-              <span>01 inspect_store</span>
-              <span class="sim-seg-bar"><span class="sim-seg-fill"></span></span>
-            </button>
-            <button type="button" class="sim-seg-btn" data-sim-step="1" data-active="false" data-filled="false">
-              <span>02 search_products</span>
-              <span class="sim-seg-bar"><span class="sim-seg-fill"></span></span>
-            </button>
-            <button type="button" class="sim-seg-btn" data-sim-step="2" data-active="false" data-filled="false">
-              <span>03 get_product</span>
-              <span class="sim-seg-bar"><span class="sim-seg-fill"></span></span>
-            </button>
-            <button type="button" class="sim-seg-btn" data-sim-step="3" data-active="false" data-filled="false">
-              <span>04 create_cart_link</span>
-              <span class="sim-seg-bar"><span class="sim-seg-fill"></span></span>
-            </button>
-          </div>
-        </div>`
-      : "";
+        </article>`;
+    })
+    .join("\n        ");
+
+  const howHtml = howTo.steps
+    .map(
+      (step, idx) => `<li class="how-step">
+          <span class="how-num" aria-hidden="true">${idx + 1}</span>
+          <h3>${escapeHtml(step.name)}</h3>
+          <p>${escapeHtml(step.text)}</p>
+        </li>`
+    )
+    .join("\n        ");
+
+  const faqHtml = faq
+    .map(
+      (item, idx) => `<details class="faq-item"${idx === 0 ? " open" : ""}>
+          <summary><span>${escapeHtml(item.q)}</span><span class="faq-icon" aria-hidden="true"></span></summary>
+          <div class="faq-answer"><p>${escapeHtml(item.a)}</p></div>
+        </details>`
+    )
+    .join("\n        ");
 
   return `<!doctype html>
 <html lang="${lang}">
@@ -275,29 +599,42 @@ export function renderLandingPage(config: AppConfig, lang: Lang): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#141414">
+<meta name="theme-color" content="#090909">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(description)}">
-<link rel="stylesheet" href="/assets/landing.css?v=0.2.1">
-<script defer src="/assets/hero-flow.js?v=0.2.1"></script>
+<link rel="canonical" href="${escapeHtml(pageUrl)}">
+<link rel="alternate" hreflang="de" href="${escapeHtml(`${origin}/?lang=de`)}">
+<link rel="alternate" hreflang="en" href="${escapeHtml(`${origin}/?lang=en`)}">
+<link rel="alternate" hreflang="x-default" href="${escapeHtml(`${origin}/`)}">
+<link rel="alternate" type="text/plain" title="llms.txt" href="${escapeHtml(`${origin}/llms.txt`)}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="ShopCart">
+<meta property="og:title" content="${escapeHtml(title)}">
+<meta property="og:description" content="${escapeHtml(description)}">
+<meta property="og:url" content="${escapeHtml(pageUrl)}">
+<meta property="og:image" content="${escapeHtml(`${origin}/icon-512.png`)}">
+<meta property="og:locale" content="${de ? "de_DE" : "en_US"}">
+<meta name="twitter:card" content="summary">
+<link rel="stylesheet" href="/assets/landing.css?v=${assetVersion}">
+<script defer src="/assets/hero-flow.js?v=${assetVersion}"></script>
+<script type="application/ld+json">${serializeJsonLd(buildJsonLd(config, lang))}</script>
 </head>
 <body>
+<a class="skip-link" href="#start">${de ? "Direkt zum Start" : "Skip to start"}</a>
 ${
   promoActive
     ? `<div class="promo-bar">
         <div class="wrap promo-inner">
-          <span class="promo-pill">Black Friday Launch</span>
-          <span>${
+          <span class="promo-pill">Black Friday</span>
+          <span class="promo-text">${
             de
-              ? `Hosted Pro kostenlos bis 06.12.2026 (${config.proDailyLimit} Calls/Tag) · Code <code class="promo-code">BLACKFRIDAY</code>`
-              : `Hosted Pro free until Dec 6, 2026 (${config.proDailyLimit} calls/day) · Code <code class="promo-code">BLACKFRIDAY</code>`
+              ? `Pro gratis bis ${promoEnd} <span class="promo-extra">(${config.proDailyLimit} Abfragen/Tag) · Code <code class="promo-code">BLACKFRIDAY</code></span>`
+              : `Pro free until ${promoEnd} <span class="promo-extra">(${config.proDailyLimit} lookups/day) · Code <code class="promo-code">BLACKFRIDAY</code></span>`
           }</span>
-          <a class="promo-cta" href="/billing?lang=${lang}">${
-            de ? "Gratis aktivieren →" : "Claim free Pro →"
-          }</a>
+          <a class="promo-cta" href="/billing?lang=${lang}">${de ? "Gratis sichern →" : "Claim free Pro →"}</a>
         </div>
       </div>`
     : ""
@@ -307,163 +644,104 @@ ${
   <div class="wrap nav">
     <a class="brand" href="/?lang=${lang}">
       <img class="brand-logo" src="/assets/walspro-mark.svg" alt="wals.pro" width="28" height="28">
-      <span>shopcart-mcp</span>
-      <span class="brand-badge">&gt; MCP_</span>
+      <span>ShopCart</span>
     </a>
 
     <nav class="nav-links" aria-label="${de ? "Hauptnavigation" : "Main navigation"}">
       <a class="hide-sm" href="#demo">Demo</a>
-      <a class="hide-sm" href="#setup">Setup</a>
-      <a class="hide-sm" href="#tools">Tools</a>
+      <a class="hide-sm" href="#how">${de ? "So funktioniert’s" : "How it works"}</a>
+      <a class="hide-sm" href="#examples">${de ? "Beispiele" : "Examples"}</a>
       <a class="hide-sm" href="#pricing">${de ? "Preise" : "Pricing"}</a>
-      <a class="hide-sm" href="${escapeHtml(config.repoUrl)}" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a class="hide-sm" href="#faq">FAQ</a>
+      <a class="hide-md" href="#developers">${de ? "Für Entwickler" : "Developers"}</a>
       <div class="nav-actions">
-        <a class="btn-nav" href="/billing?lang=${lang}">${de ? "Konto & Billing" : "Account & Billing"}</a>
-        <a class="btn-nav btn-lang" href="/?lang=${otherLang}" hreflang="${otherLang}">${de ? "EN" : "DE"}</a>
+        <a class="btn-nav" href="/billing?lang=${lang}">${de ? "Konto" : "Account"}</a>
+        <a class="btn-nav btn-lang" href="/?lang=${otherLang}" hreflang="${otherLang}" aria-label="${
+          de ? "Switch to English" : "Auf Deutsch wechseln"
+        }">${de ? "EN" : "DE"}</a>
       </div>
     </nav>
   </div>
 </header>
 
 <main>
-  <!-- OVHcloud-Style Dynamic Flow Hero -->
-  <section class="hero-section">
-    <div class="wrap">
-      <div class="hero-frame">
-        <div class="hero-canvas-wrap">
-          <canvas id="hero-flow-canvas" class="hero-canvas" aria-hidden="true"></canvas>
+  <!-- Hero: consumer promise + 1-click launch into the AI tool -->
+  <section class="hero" id="top">
+    <div class="hero-canvas-wrap" aria-hidden="true">
+      <canvas
+        id="hero-flow-canvas"
+        class="hero-canvas"
+        data-chips="${escapeHtml(JSON.stringify(getHeroChips(lang)))}"
+      ></canvas>
+    </div>
+    <div class="hero-fade" aria-hidden="true"></div>
+
+    <div class="wrap hero-inner">
+      <div class="hero-content" id="hero-content">
+        <div class="eyebrow">
+          <span class="eyebrow-dot" aria-hidden="true"></span>
+          <span>${de ? "Dein KI Shopping Assistent · kostenlos starten" : "Your AI shopping assistant · free to start"}</span>
         </div>
-        <button
-          type="button"
-          id="hero-motion-btn"
-          class="hero-motion-btn"
-          data-pause-label="${de ? "Animation pausieren" : "Pause animation"}"
-          data-play-label="${de ? "Animation starten" : "Play animation"}"
-        >❚❚ ${de ? "Animation pausieren" : "Pause animation"}</button>
 
-        <div class="hero-content">
-          <div class="eyebrow">
-            <span class="eyebrow-dot" aria-hidden="true"></span>
-            <span>Open Source (MIT) · OAuth 2.1 PKCE · Streamable HTTP &amp; stdio</span>
-          </div>
+        <h1 class="hero-title">${
+          de
+            ? `Lass Claude &amp; ChatGPT <span class="title-accent">deinen Warenkorb füllen.</span>`
+            : `Let Claude &amp; ChatGPT <span class="title-accent">fill your shopping cart.</span>`
+        }</h1>
 
-          <h1 class="hero-title">
-            ${de ? "Agentic Shopping &amp; Cart MCP" : "Agentic Shopping &amp; Cart MCP"}<br>
-            <span class="title-accent">${de ? "für Shopify-Shops" : "for Shopify Stores"}</span>
-          </h1>
+        <p class="hero-lead">${
+          de
+            ? "Sag deiner KI einfach, was du suchst – sie findet die passenden Produkte &amp; Größen in echten Online-Shops und gibt dir einen fertigen Warenkorb-Link. Du prüfst und bezahlst selbst."
+            : "Tell your AI what you're looking for — it finds real products, sizes, and prices in online stores and hands you a ready-to-review cart link. You stay in full control of checkout."
+        }</p>
 
-          <p class="hero-lead">${
-            de
-              ? "Lass Claude, ChatGPT, Claude Code oder Cursor Produkte in beliebigen Shopify-Shops suchen, echte Varianten &amp; Preise prüfen und verifizierte Warenkorb-Links erstellen — WAF-resilient und geschützt gegen SSRF &amp; Prompt-Injection."
-              : "Let Claude, ChatGPT, Claude Code, or Cursor search any Shopify storefront, inspect live variants &amp; prices, and generate verified cart links — WAF-resilient with DNS-pinned SSRF &amp; prompt-injection guards."
-          }</p>
+        ${renderLauncher(config, lang, "hero")}
 
-          <div class="endpoint-box">
-            <span class="endpoint-proto">MCP URL</span>
-            <div class="endpoint-url" id="mcp-url">${escapeHtml(mcpUrl)}</div>
-            <button
-              type="button"
-              class="btn-primary"
-              id="copy-btn"
-              data-copy-target="mcp-url"
-              data-copied-label="${de ? "Kopiert ✓" : "Copied ✓"}"
-              data-prompt-label="${de ? "MCP-URL kopieren:" : "Copy MCP URL:"}"
-            >${de ? "MCP-URL kopieren" : "Copy MCP URL"}</button>
-          </div>
-
-          <div class="hero-actions">
-            <a class="btn-primary" href="/billing?lang=${lang}">${
-              promoActive
-                ? de
-                  ? "Pro gratis bis 06.12. sichern"
-                  : "Claim free Pro until Dec 6"
-                : de
-                  ? "Kostenloses Konto starten"
-                  : "Start free account"
-            }</a>
-            <a class="btn-secondary" href="#demo">${de ? "Live-Demo ansehen" : "Watch live demo"}</a>
-            <a class="btn-secondary" href="${escapeHtml(config.repoUrl)}" target="_blank" rel="noopener noreferrer">GitHub · MIT</a>
-          </div>
-
-          <div class="spec-strip">
-            <span class="spec-item"><span class="spec-check" aria-hidden="true">✓</span> ${
-              de ? "4 Read-Only Tools" : "4 read-only tools"
-            }</span>
-            <span class="spec-item"><span class="spec-check" aria-hidden="true">✓</span> OAuth 2.1 (CIMD &amp; DCR)</span>
-            <span class="spec-item"><span class="spec-check" aria-hidden="true">✓</span> ${
-              de ? "DNS-gepinnter SSRF-Schutz" : "DNS-pinned SSRF guard"
-            }</span>
-            <span class="spec-item"><span class="spec-check" aria-hidden="true">✓</span> EU Cloud Run (europe-west1)</span>
-          </div>
-        </div>
+        <ul class="trust-strip">
+          <li>${de ? "Du bezahlst immer selbst im Shop" : "You always pay in the store yourself"}</li>
+          <li>${de ? "Keine Zahlungsdaten bei uns" : "No payment details with us"}</li>
+          <li>${de ? "Kostenlos starten" : "Free to start"}</li>
+        </ul>
       </div>
     </div>
+
+    <button
+      type="button"
+      id="hero-motion-btn"
+      class="hero-motion-btn"
+      data-pause-label="${de ? "Animation pausieren" : "Pause animation"}"
+      data-play-label="${de ? "Animation starten" : "Play animation"}"
+      aria-label="${de ? "Animation pausieren" : "Pause animation"}"
+    >❚❚</button>
   </section>
 
-  <!-- Demo Video / Interactive Live Simulation Showcase -->
-  <section id="demo" class="demo-section">
+  <!-- Demo video / live shopping example -->
+  <section id="demo" class="section section-demo">
     <div class="wrap">
       <div class="section-head">
-        <div>
-          <span class="section-kicker">${
-            hasExternalVideo
-              ? de
-                ? "PRODUKTVIDEO"
-                : "PRODUCT VIDEO"
-              : de
-                ? "INTERAKTIVE LIVE-SIMULATION"
-                : "INTERACTIVE LIVE SIMULATION"
-          }</span>
-          <h2 class="section-title">${
-            de
-              ? "Vom Chat-Prompt zum fertigen Warenkorb in Sekunden"
-              : "From chat prompt to verified checkout cart in seconds"
-          }</h2>
-          <p class="section-sub">${
-            de
-              ? "Sieh live, wie dein KI-Assistent Store, Produkte, Varianten und den deterministischen Warenkorb-Permalink per MCP-Protokoll abruft."
-              : "Watch how your AI assistant inspects a storefront, searches products, verifies live variants, and generates a deterministic cart link over MCP."
-          }</p>
-        </div>
+        <span class="section-kicker">${
+          hasExternalVideo ? (de ? "Produktvideo" : "Product video") : de ? "Live-Beispiel" : "Live example"
+        }</span>
+        <h2 class="section-title">${
+          de ? "Vom Wunsch zum fertigen Warenkorb in Sekunden" : "From wish to ready-made cart in seconds"
+        }</h2>
+        <p class="section-sub">${
+          de
+            ? "So sieht KI-Shopping mit ChatGPT oder Claude aus: Du schreibst einen Satz, deine KI sucht, prüft Größe und Preis und legt alles in den Warenkorb."
+            : "This is what ChatGPT shopping or shopping with Claude looks like: you write one sentence, your AI searches, checks size and price, and fills the cart."
+        }</p>
       </div>
 
       <div class="demo-stage-wrap">
         <div class="demo-glow" aria-hidden="true"></div>
-        <div
-          class="demo-shell"
-          id="demo-shell"
-          data-aspect="${defaultAspect}"
-          data-has-video="${String(hasExternalVideo)}"
-        >
+        <div class="demo-shell" id="demo-shell" data-aspect="${defaultAspect}" data-has-video="${String(hasExternalVideo)}">
           <div class="demo-chrome">
             <div class="chrome-left">
               <div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
-              <div class="chrome-address">
-                <span>claude.ai</span>
-                <span aria-hidden="true">·</span>
-                <span>shopcart-mcp</span>
-              </div>
-              <span class="live-tag">${
-                hasExternalVideo ? "VIDEO" : de ? "LIVE TRACE" : "LIVE TRACE"
-              }</span>
+              <div class="chrome-address">${de ? "Dein KI-Chat" : "Your AI chat"}</div>
+              <span class="live-tag">${hasExternalVideo ? "Video" : de ? "Beispiel" : "Example"}</span>
             </div>
-
-            <div class="aspect-toggle" role="group" aria-label="${
-              de ? "Video-Seitenverhältnis" : "Video aspect ratio"
-            }">
-              <button
-                type="button"
-                class="aspect-btn"
-                data-set-aspect="16:9"
-                aria-pressed="${String(defaultAspect === "16:9")}"
-              >16:9 ${de ? "Desktop" : "Desktop"}</button>
-              <button
-                type="button"
-                class="aspect-btn"
-                data-set-aspect="9:16"
-                aria-pressed="${String(defaultAspect === "9:16")}"
-              >9:16 Reel / TikTok</button>
-            </div>
+            ${demoToggleHtml}
           </div>
 
           <div class="demo-viewport">
@@ -473,47 +751,214 @@ ${
           ${demoControlsHtml}
         </div>
       </div>
+
+      <div class="demo-cta">
+        <h3 class="demo-cta-title">${de ? "Jetzt mit deinem eigenen Wunsch ausprobieren" : "Now try it with your own wish"}</h3>
+        ${renderLauncher(config, lang, "demo")}
+      </div>
     </div>
   </section>
 
-  <!-- Client Setup Tabs -->
-  <section id="setup" class="section">
+  <!-- How it works -->
+  <section id="how" class="section">
     <div class="wrap">
       <div class="section-head">
-        <div>
-          <span class="section-kicker">QUICKSTART</span>
-          <h2 class="section-title">${
-            de ? "In 30 Sekunden mit jedem MCP-Client verbinden" : "Connect any MCP client in 30 seconds"
-          }</h2>
-          <p class="section-sub">${
+        <span class="section-kicker">${de ? "So funktioniert’s" : "How it works"}</span>
+        <h2 class="section-title">${escapeHtml(howTo.name)}</h2>
+        <p class="section-sub">${
+          de
+            ? "Kein Formular, keine Einrichtung von Hand: Deine KI übernimmt den Weg zum Warenkorb, du behältst die Kontrolle."
+            : "No forms, no manual setup: your AI handles the way to the cart, and you stay in control."
+        }</p>
+      </div>
+      <ol class="how-grid">
+        ${howHtml}
+      </ol>
+
+      <div class="control-strip">
+        <div class="control-item">
+          <h3>${de ? "Die KI kauft nie selbst" : "The AI never buys for you"}</h3>
+          <p>${
             de
-              ? "Gehostet mit OAuth 2.1 (CIMD &amp; DCR + PKCE S256) oder lokal per npx komplett ohne Login."
-              : "Hosted via OAuth 2.1 (CIMD &amp; DCR + PKCE S256) or locally via npx with zero authentication."
+              ? "ShopCart kann nur lesen: suchen, prüfen, Link bauen. Bestellen und bezahlen kannst nur du."
+              : "ShopCart can only read: search, check, build a link. Only you can order and pay."
           }</p>
         </div>
+        <div class="control-item">
+          <h3>${de ? "Keine Adresse, keine Zahlungsdaten" : "No address, no payment details"}</h3>
+          <p>${
+            de
+              ? "Lieferadresse und Zahlung gibst du wie immer direkt im Shop ein, nie bei uns oder deiner KI."
+              : "You enter shipping and payment directly in the store as usual, never with us or your AI."
+          }</p>
+        </div>
+        <div class="control-item">
+          <h3>${de ? "Echte Preise und Größen" : "Real prices and sizes"}</h3>
+          <p>${
+            de
+              ? "Preise, Varianten und Verfügbarkeit kommen live aus dem Shop, nicht aus veralteten Suchergebnissen."
+              : "Prices, variants, and availability come live from the store, not from stale search results."
+          }</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Use cases -->
+  <section id="examples" class="section">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="section-kicker">${de ? "Beispiele" : "Examples"}</span>
+        <h2 class="section-title">${
+          de ? "Wofür du deinen KI Shopping Assistenten nutzt" : "What to use your AI shopping assistant for"
+        }</h2>
+        <p class="section-sub">${
+          de
+            ? "Tippe ein Beispiel an: Es öffnet sich direkt in Claude oder ChatGPT, fertig formuliert."
+            : "Tap an example: it opens right in Claude or ChatGPT, fully worded."
+        }</p>
+      </div>
+      <div class="grid-2">
+        ${useCasesHtml}
+      </div>
+    </div>
+  </section>
+
+  <!-- Pricing -->
+  <section id="pricing" class="section">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="section-kicker">${de ? "Preise" : "Pricing"}</span>
+        <h2 class="section-title">${
+          de ? "Kostenlos starten. Mehr, wenn du mehr shoppst." : "Start free. More when you shop more."
+        }</h2>
+        <p class="section-sub">${
+          de
+            ? "Eine Shop-Abfrage ist ein Schritt deiner KI, zum Beispiel eine Suche oder eine Größenprüfung. Ein Warenkorb braucht meist nur wenige davon."
+            : "A store lookup is one step your AI takes, such as a search or a size check. A cart usually needs only a few."
+        }</p>
+      </div>
+
+      <div class="pricing-grid">
+        <article class="card price-card">
+          <h3>${de ? "Kostenlos" : "Free"}</h3>
+          <div class="price-row">
+            <div class="price">0 € <span>/ ${de ? "Monat" : "month"}</span></div>
+          </div>
+          <ul class="feat-list">
+            <li>${de ? `${config.freeDailyLimit} Shop-Abfragen pro Tag` : `${config.freeDailyLimit} store lookups per day`}</li>
+            <li>${de ? "Für Claude, ChatGPT und andere KI-Tools" : "For Claude, ChatGPT, and other AI tools"}</li>
+            <li>${de ? "Keine Kreditkarte nötig" : "No credit card needed"}</li>
+          </ul>
+          <a class="btn-secondary w-full" href="#start">${de ? "Kostenlos starten" : "Start free"}</a>
+        </article>
+
+        <article class="card price-card card-featured">
+          ${
+            promoActive
+              ? `<div class="pill-promo">★ ${
+                  de ? `0 € bis ${promoEnd} · Code BLACKFRIDAY` : `€0 until ${promoEnd} · Code BLACKFRIDAY`
+                }</div>`
+              : ""
+          }
+          <h3>Pro</h3>
+          <div class="price-row">
+            ${promoActive ? `<span class="price-old">9 €</span>` : ""}
+            <div class="price">${promoActive ? "0 €" : "9 €"} <span>/ ${
+              promoActive ? (de ? `bis ${promoEndShort}` : `until ${promoEndShort}`) : de ? "Monat" : "month"
+            }</span></div>
+          </div>
+          ${
+            promoActive
+              ? `<p class="price-note">${
+                  de ? "Danach 9 €/Monat · jederzeit kündbar" : "Then €9/month · cancel anytime"
+                }</p>`
+              : ""
+          }
+          <ul class="feat-list">
+            <li>${de ? `${config.proDailyLimit} Shop-Abfragen pro Tag` : `${config.proDailyLimit} store lookups per day`}</li>
+            <li>${
+              de
+                ? "Für Black Friday, Geschenke-Marathons und Preisvergleiche"
+                : "For Black Friday, gift marathons, and price comparisons"
+            }</li>
+            <li>${de ? "Monatlich kündbar, sichere Zahlung über Stripe" : "Cancel monthly, secure payment via Stripe"}</li>
+          </ul>
+          <a class="btn-primary w-full" href="/billing?lang=${lang}">${
+            promoActive ? (de ? "Pro jetzt kostenlos sichern" : "Claim free Pro access") : de ? "Auf Pro upgraden" : "Upgrade to Pro"
+          }</a>
+        </article>
+      </div>
+
+      <p class="pricing-oss">${
+        de
+          ? `Du entwickelst selbst? Die Open-Source-Version läuft lokal kostenlos und unbegrenzt. <a href="#developers">Für Entwickler &amp; Self-Hosting</a>`
+          : `Building it yourself? The open-source version runs locally, free and unlimited. <a href="#developers">For developers &amp; self-hosting</a>`
+      }</p>
+    </div>
+  </section>
+
+  <!-- FAQ (in sync with FAQPage JSON-LD) -->
+  <section id="faq" class="section">
+    <div class="wrap wrap-narrow">
+      <div class="section-head">
+        <span class="section-kicker">FAQ</span>
+        <h2 class="section-title">${de ? "Häufige Fragen zum Einkaufen mit KI" : "Common questions about shopping with AI"}</h2>
+      </div>
+      <div class="faq-list">
+        ${faqHtml}
+      </div>
+    </div>
+  </section>
+
+  <!-- Developers & self-hosting (compact, at the very bottom) -->
+  <section id="developers" class="section section-dev">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="section-kicker">${de ? "Für Entwickler &amp; Self-Hosting" : "For developers &amp; self-hosting"}</span>
+        <h2 class="section-title">${
+          de ? "Open Source: ein Shopify MCP für Agentic Commerce" : "Open source: a Shopify MCP for agentic commerce"
+        }</h2>
+        <p class="section-sub">${
+          de
+            ? "Technisch ist ShopCart ein MCP-Server (Model Context Protocol) mit vier read-only Tools. Gehostet mit OAuth 2.1 oder lokal per <code>npx</code>, ganz ohne Konto."
+            : "Technically, ShopCart is an MCP server (Model Context Protocol) with four read-only tools. Hosted with OAuth 2.1 or locally via <code>npx</code>, no account required."
+        }</p>
+      </div>
+
+      <ul class="dev-facts">
+        <li><strong>MIT</strong> ${de ? "Open Source" : "open source"}</li>
+        <li><strong>OAuth 2.1</strong> CIMD &amp; DCR · PKCE S256</li>
+        <li><strong>Streamable HTTP</strong> &amp; stdio</li>
+        <li><strong>npx -y shopcart-mcp</strong></li>
+        <li><strong>EU</strong> Cloud Run · europe-west1</li>
+      </ul>
+
+      <div class="install-row">
+        <span class="install-label">${de ? "1-Klick-Install:" : "1-click install:"}</span>
+        <a class="btn-install" href="${escapeHtml(installLinks.cursor)}">${de ? "In Cursor installieren" : "Install in Cursor"}</a>
+        <a class="btn-install" href="${escapeHtml(installLinks.vscode)}">${de ? "In VS Code installieren" : "Install in VS Code"}</a>
+        <span class="install-note">${
+          de ? "Öffnet die App und trägt ShopCart als MCP-Server ein." : "Opens the app and adds ShopCart as an MCP server."
+        }</span>
       </div>
 
       <div class="tabs-card" data-tabs-root>
         <div class="tablist" role="tablist" aria-label="${de ? "MCP-Clients" : "MCP clients"}">
           <button type="button" role="tab" id="tab-claude-ai" class="tab-btn" aria-selected="true" tabindex="0">
-            <span>Claude.ai</span>
-            <span class="tab-tag">OAuth 2.1</span>
+            <span>Claude.ai</span><span class="tab-tag">OAuth 2.1</span>
           </button>
           <button type="button" role="tab" id="tab-chatgpt" class="tab-btn" aria-selected="false" tabindex="-1">
-            <span>ChatGPT</span>
-            <span class="tab-tag">Connectors</span>
+            <span>ChatGPT</span><span class="tab-tag">Connectors</span>
           </button>
           <button type="button" role="tab" id="tab-claude-code" class="tab-btn" aria-selected="false" tabindex="-1">
-            <span>Claude Code</span>
-            <span class="tab-tag">CLI</span>
+            <span>Claude Code</span><span class="tab-tag">CLI</span>
           </button>
           <button type="button" role="tab" id="tab-cursor" class="tab-btn" aria-selected="false" tabindex="-1">
-            <span>Cursor</span>
-            <span class="tab-tag">mcp.json</span>
+            <span>Cursor</span><span class="tab-tag">mcp.json</span>
           </button>
           <button type="button" role="tab" id="tab-local" class="tab-btn" aria-selected="false" tabindex="-1">
-            <span>OpenClaw / Local npx</span>
-            <span class="tab-tag">MIT · stdio</span>
+            <span>OpenClaw / Local npx</span><span class="tab-tag">MIT · stdio</span>
           </button>
         </div>
 
@@ -522,38 +967,22 @@ ${
             <div class="tab-panel-inner">
               <div>
                 <h3>Claude.ai &amp; Claude Desktop</h3>
-                <p>${
-                  de
-                    ? "Direkte Integration als Custom Connector mit automatischer OAuth-2.1-CIMD-Erkennung — kein API-Key nötig."
-                    : "Direct Custom Connector setup with automatic OAuth 2.1 CIMD discovery — no manual API keys."
-                }</p>
                 <ol class="setup-steps">
-                  <li><span class="step-badge">1</span><span>${
-                    de
-                      ? "Öffne <strong>Settings → Connectors → Add custom connector</strong>."
-                      : "Open <strong>Settings → Connectors → Add custom connector</strong>."
-                  }</span></li>
+                  <li><span class="step-badge">1</span><span><strong>Settings → Connectors → Add custom connector</strong></span></li>
                   <li><span class="step-badge">2</span><span>${
-                    de
-                      ? "Füge die Remote-MCP-URL rechts ein und speichere."
-                      : "Paste the remote MCP URL on the right and save."
+                    de ? "Remote-MCP-URL einfügen und speichern." : "Paste the remote MCP URL and save."
                   }</span></li>
                   <li><span class="step-badge">3</span><span>${
                     de
-                      ? "Im Browser-Popup anmelden oder kostenloses Konto anlegen — fertig!"
-                      : "Sign in or create a free account in the OAuth popup — ready to shop!"
+                      ? "Im Browser-Fenster anmelden oder kostenloses Konto anlegen."
+                      : "Sign in or create a free account in the browser window."
                   }</span></li>
                 </ol>
               </div>
               <div class="code-card">
                 <div class="code-head">
-                  <span>Remote Streamable HTTP Endpoint</span>
-                  <button
-                    type="button"
-                    class="copy-mini"
-                    data-copy-target="code-claude-ai"
-                    data-copied-label="${de ? "Kopiert ✓" : "Copied ✓"}"
-                  >${de ? "Kopieren" : "Copy"}</button>
+                  <span>Remote MCP (Streamable HTTP)</span>
+                  <button type="button" class="copy-mini" data-copy-target="code-claude-ai" data-copied-label="${copiedLabel}">${copyLabel}</button>
                 </div>
                 <pre><code id="code-claude-ai">${escapeHtml(mcpUrl)}</code></pre>
               </div>
@@ -564,38 +993,26 @@ ${
             <div class="tab-panel-inner">
               <div>
                 <h3>ChatGPT Custom Connectors</h3>
-                <p>${
-                  de
-                    ? "Kompatibel mit ChatGPT Developer Mode &amp; Custom MCP Connectors inkl. RFC 9728 Discovery."
-                    : "Compatible with ChatGPT Developer Mode &amp; Custom MCP Connectors including RFC 9728 discovery."
-                }</p>
                 <ol class="setup-steps">
                   <li><span class="step-badge">1</span><span>${
                     de
-                      ? "Öffne <strong>Settings → Connectors → Create</strong> und wähle <strong>MCP Server</strong>."
-                      : "Open <strong>Settings → Connectors → Create</strong> and select <strong>MCP Server</strong>."
+                      ? "<strong>Settings → Connectors → Create</strong>, dann <strong>MCP Server</strong> wählen."
+                      : "<strong>Settings → Connectors → Create</strong>, then select <strong>MCP Server</strong>."
                   }</span></li>
                   <li><span class="step-badge">2</span><span>${
                     de
-                      ? "Trage die Endpoint-URL rechts ein und wähle <strong>OAuth</strong> als Authentifizierung."
-                      : "Enter the endpoint URL on the right and choose <strong>OAuth</strong> authentication."
+                      ? "Endpoint-URL eintragen, Authentifizierung <strong>OAuth</strong>."
+                      : "Enter the endpoint URL, authentication <strong>OAuth</strong>."
                   }</span></li>
                   <li><span class="step-badge">3</span><span>${
-                    de
-                      ? "Autorisiere den Zugriff per PKCE S256 und starte deinen ersten Shopping-Prompt."
-                      : "Authorize via PKCE S256 and run your first shopping prompt."
+                    de ? "Zugriff per PKCE S256 autorisieren (RFC 9728 Discovery)." : "Authorize via PKCE S256 (RFC 9728 discovery)."
                   }</span></li>
                 </ol>
               </div>
               <div class="code-card">
                 <div class="code-head">
                   <span>ChatGPT MCP Server URL</span>
-                  <button
-                    type="button"
-                    class="copy-mini"
-                    data-copy-target="code-chatgpt"
-                    data-copied-label="${de ? "Kopiert ✓" : "Copied ✓"}"
-                  >${de ? "Kopieren" : "Copy"}</button>
+                  <button type="button" class="copy-mini" data-copy-target="code-chatgpt" data-copied-label="${copiedLabel}">${copyLabel}</button>
                 </div>
                 <pre><code id="code-chatgpt">${escapeHtml(mcpUrl)}</code></pre>
               </div>
@@ -606,20 +1023,13 @@ ${
             <div class="tab-panel-inner">
               <div>
                 <h3>Claude Code CLI</h3>
-                <p>${
-                  de
-                    ? "Ein einziger Terminal-Befehl registriert den Streamable-HTTP-Server mit automatischem Loopback-OAuth."
-                    : "A single CLI command registers the Streamable HTTP server with automatic loopback OAuth."
-                }</p>
                 <ol class="setup-steps">
                   <li><span class="step-badge">1</span><span>${
-                    de
-                      ? "Führe den Befehl rechts im Terminal aus."
-                      : "Run the command on the right in your terminal."
+                    de ? "Befehl im Terminal ausführen." : "Run the command in your terminal."
                   }</span></li>
                   <li><span class="step-badge">2</span><span>${
                     de
-                      ? "Starte <code>claude</code> und bestätige den OAuth-Login einmalig über <code>/mcp</code>."
+                      ? "<code>claude</code> starten und den OAuth-Login einmalig über <code>/mcp</code> bestätigen."
                       : "Start <code>claude</code> and confirm the one-time OAuth sign-in via <code>/mcp</code>."
                   }</span></li>
                 </ol>
@@ -627,12 +1037,7 @@ ${
               <div class="code-card">
                 <div class="code-head">
                   <span>Terminal (zsh / bash)</span>
-                  <button
-                    type="button"
-                    class="copy-mini"
-                    data-copy-target="code-claude-code"
-                    data-copied-label="${de ? "Kopiert ✓" : "Copied ✓"}"
-                  >${de ? "Kopieren" : "Copy"}</button>
+                  <button type="button" class="copy-mini" data-copy-target="code-claude-code" data-copied-label="${copiedLabel}">${copyLabel}</button>
                 </div>
                 <pre><code id="code-claude-code">${escapeHtml(claudeCodeCmd)}</code></pre>
               </div>
@@ -643,33 +1048,23 @@ ${
             <div class="tab-panel-inner">
               <div>
                 <h3>Cursor &amp; VS Code</h3>
-                <p>${
-                  de
-                    ? "Nutzt RFC 8252 Dynamic Loopback OAuth (DCR) oder alternativ die lokale stdio-CLI."
-                    : "Uses RFC 8252 dynamic loopback OAuth (DCR) or optionally the local stdio CLI."
-                }</p>
                 <ol class="setup-steps">
                   <li><span class="step-badge">1</span><span>${
                     de
-                      ? "Öffne <code>.cursor/mcp.json</code> in deinem Projekt oder global unter <code>~/.cursor/mcp.json</code>."
-                      : "Open <code>.cursor/mcp.json</code> in your project or globally at <code>~/.cursor/mcp.json</code>."
+                      ? "<code>.cursor/mcp.json</code> im Projekt oder <code>~/.cursor/mcp.json</code> global öffnen."
+                      : "Open <code>.cursor/mcp.json</code> in your project or <code>~/.cursor/mcp.json</code> globally."
                   }</span></li>
                   <li><span class="step-badge">2</span><span>${
                     de
-                      ? "Füge die Konfiguration rechts ein und klicke in Cursor auf <strong>Connect</strong>."
-                      : "Paste the config on the right and click <strong>Connect</strong> in Cursor."
+                      ? "Konfiguration einfügen und in Cursor auf <strong>Connect</strong> klicken (RFC 8252 Loopback-OAuth)."
+                      : "Paste the config and click <strong>Connect</strong> in Cursor (RFC 8252 loopback OAuth)."
                   }</span></li>
                 </ol>
               </div>
               <div class="code-card">
                 <div class="code-head">
                   <span>.cursor/mcp.json</span>
-                  <button
-                    type="button"
-                    class="copy-mini"
-                    data-copy-target="code-cursor"
-                    data-copied-label="${de ? "Kopiert ✓" : "Copied ✓"}"
-                  >${de ? "Kopieren" : "Copy"}</button>
+                  <button type="button" class="copy-mini" data-copy-target="code-cursor" data-copied-label="${copiedLabel}">${copyLabel}</button>
                 </div>
                 <pre><code id="code-cursor">${escapeHtml(cursorSnippet)}</code></pre>
               </div>
@@ -680,33 +1075,23 @@ ${
             <div class="tab-panel-inner">
               <div>
                 <h3>OpenClaw / Local npx (MIT)</h3>
-                <p>${
-                  de
-                    ? "100 % lokal via <code>stdio</code> — unbegrenzte Calls, kein Konto, keine Telemetrie, direkt per <code>npx</code>."
-                    : "100% local via <code>stdio</code> — unlimited calls, zero auth, zero telemetry, directly via <code>npx</code>."
-                }</p>
                 <ol class="setup-steps">
                   <li><span class="step-badge">1</span><span>${
                     de
-                      ? "Direktstart im Terminal: <code>npx -y shopcart-mcp</code> (Node.js ≥ 22)."
-                      : "Instant terminal launch: <code>npx -y shopcart-mcp</code> (Node.js ≥ 22)."
+                      ? "Direktstart: <code>npx -y shopcart-mcp</code> (Node.js ≥ 22), 100 % lokal über <code>stdio</code>."
+                      : "Instant launch: <code>npx -y shopcart-mcp</code> (Node.js ≥ 22), 100% local over <code>stdio</code>."
                   }</span></li>
                   <li><span class="step-badge">2</span><span>${
                     de
-                      ? "Oder trage den JSON-Block rechts in OpenClaw, Claude Desktop oder jeden stdio-MCP-Host ein."
-                      : "Or paste the JSON block on the right into OpenClaw, Claude Desktop, or any stdio MCP host."
+                      ? "Oder den JSON-Block in OpenClaw, Claude Desktop, Goose, Raycast oder jeden stdio-MCP-Host eintragen. Unbegrenzt, kein Konto, keine Telemetrie."
+                      : "Or paste the JSON block into OpenClaw, Claude Desktop, Goose, Raycast, or any stdio MCP host. Unlimited, no account, no telemetry."
                   }</span></li>
                 </ol>
               </div>
               <div class="code-card">
                 <div class="code-head">
                   <span>mcp-servers.json (stdio)</span>
-                  <button
-                    type="button"
-                    class="copy-mini"
-                    data-copy-target="code-local"
-                    data-copied-label="${de ? "Kopiert ✓" : "Copied ✓"}"
-                  >${de ? "Kopieren" : "Copy"}</button>
+                  <button type="button" class="copy-mini" data-copy-target="code-local" data-copied-label="${copiedLabel}">${copyLabel}</button>
                 </div>
                 <pre><code id="code-local">${escapeHtml(localSnippet)}</code></pre>
               </div>
@@ -714,187 +1099,60 @@ ${
           </div>
         </div>
       </div>
-    </div>
-  </section>
 
-  <!-- 4 Focused Shopping Tools -->
-  <section id="tools" class="section">
-    <div class="wrap">
-      <div class="section-head">
-        <div>
-          <span class="section-kicker">MCP TOOLKIT</span>
-          <h2 class="section-title">${
-            de ? "4 präzise, read-only Shopping-Tools" : "4 focused, read-only shopping tools"
-          }</h2>
-          <p class="section-sub">${
-            de
-              ? "Gebaut für echte E-Commerce-Zuverlässigkeit: währungsgenaue Preise, WAF-Resilienz, DNS-gepinnter SSRF-Schutz und HTML-/Unicode-Sanitizing."
-              : "Built for real-world e-commerce reliability: exact minor-unit currency math, WAF resilience, DNS-pinned SSRF protection, and HTML/Unicode sanitizing."
-          }</p>
-        </div>
-      </div>
-
-      <div class="grid-2">
-        <article class="card card-rail card-rail-red">
-          <div class="tool-head">
+      <details class="dev-details">
+        <summary><span>${de ? "Die 4 read-only Tools im Detail" : "The 4 read-only tools in detail"}</span><span class="faq-icon" aria-hidden="true"></span></summary>
+        <div class="grid-2 dev-tools">
+          <article class="card card-flat">
             <span class="tool-tag">inspect_store</span>
-            <span class="tool-badge">readOnlyHint</span>
-          </div>
-          <h3>${de ? "Shop, Währung & WAF erkennen" : "Detect store, currency & WAF"}</h3>
-          <p>${
-            de
-              ? "Verifiziert Shopify-Kompatibilität, Shop-Währung, Zielland, WAF-Verhalten und optionale native Storefront-MCP-Fähigkeiten."
-              : "Verifies Shopify compatibility, storefront currency, country, WAF behavior, and optional native Storefront MCP capabilities."
-          }</p>
-          <div class="tool-sig">inspect_store({ store_url }) → { platform, currency, country }</div>
-        </article>
-
-        <article class="card card-rail card-rail-coral">
-          <div class="tool-head">
+            <p>${
+              de
+                ? "Prüft Shopify-Kompatibilität, Shop-Währung, Land und WAF-Verhalten."
+                : "Verifies Shopify compatibility, store currency, country, and WAF behavior."
+            }</p>
+            <div class="tool-sig">inspect_store({ store_url })</div>
+          </article>
+          <article class="card card-flat">
             <span class="tool-tag">search_products</span>
-            <span class="tool-badge">WAF-resilient</span>
-          </div>
-          <h3>${de ? "Schnelle, strukturierte Produktsuche" : "Fast, structured product search"}</h3>
-          <p>${
-            de
-              ? "Nutzt primär <code>/search/suggest.json</code> mit Preis- &amp; Verfügbarkeitsfiltern und sauber normalisierten Beträgen."
-              : "Queries <code>/search/suggest.json</code> first with price &amp; stock filters and cleanly normalized amounts."
-          }</p>
-          <div class="tool-sig">search_products({ query, max_price, available_only }) → Product[]</div>
-        </article>
-
-        <article class="card card-rail card-rail-info">
-          <div class="tool-head">
+            <p>${
+              de
+                ? "Katalogsuche mit Preis- und Verfügbarkeitsfiltern, WAF-resilient über <code>/search/suggest.json</code>."
+                : "Catalog search with price and stock filters, WAF-resilient via <code>/search/suggest.json</code>."
+            }</p>
+            <div class="tool-sig">search_products({ store_url, query, max_price, available_only })</div>
+          </article>
+          <article class="card card-flat">
             <span class="tool-tag">get_product</span>
-            <span class="tool-badge">Prompt-Safe</span>
-          </div>
-          <h3>${de ? "Varianten, Optionen & Live-Bestand" : "Variants, options & live stock"}</h3>
-          <p>${
-            de
-              ? "Liest <code>/products/&lt;handle&gt;.js</code>, konvertiert Minor-Units exakt pro Währung und entfernt verstecktes Unicode &amp; HTML."
-              : "Fetches <code>/products/&lt;handle&gt;.js</code>, converts minor units accurately per currency, and strips hidden Unicode &amp; HTML."
-          }</p>
-          <div class="tool-sig">get_product({ handle }) → { variants[], options[], in_stock }</div>
-        </article>
-
-        <article class="card card-rail card-rail-positive">
-          <div class="tool-head">
+            <p>${
+              de
+                ? "Varianten, Optionen und Live-Bestand; Minor-Units exakt pro Währung, HTML und verstecktes Unicode entfernt."
+                : "Variants, options, and live stock; exact minor units per currency, HTML and hidden Unicode stripped."
+            }</p>
+            <div class="tool-sig">get_product({ store_url, handle_or_url })</div>
+          </article>
+          <article class="card card-flat">
             <span class="tool-tag">create_cart_link</span>
-            <span class="tool-badge">Deterministic</span>
-          </div>
-          <h3>${de ? "Verifizierter Warenkorb-Permalink" : "Verified cart permalink"}</h3>
-          <p>${
-            de
-              ? "Erzeugt prüfbare <code>/cart/&lt;id&gt;:&lt;qty&gt;?storefront=true</code> Links inkl. optionaler Live-Variantenprüfung — niemals automatische Käufe."
-              : "Builds verifiable <code>/cart/&lt;id&gt;:&lt;qty&gt;?storefront=true</code> links with optional live variant verification — never auto-purchases."
-          }</p>
-          <div class="tool-sig">create_cart_link({ items }) → 302 /cart/37548706496709:2?storefront=true</div>
-        </article>
-      </div>
-    </div>
-  </section>
-
-  <!-- Pricing -->
-  <section id="pricing" class="section">
-    <div class="wrap">
-      <div class="section-head">
-        <div>
-          <span class="section-kicker">${de ? "PREISE" : "PRICING"}</span>
-          <h2 class="section-title">${
-            de ? "Open Source im Kern. Gehostet in 30 Sekunden." : "Open source at heart. Hosted in 30 seconds."
-          }</h2>
-          <p class="section-sub">${
-            de
-              ? "Lokal immer kostenlos unter MIT-Lizenz. Oder als sofort einsatzbereiter OAuth-2.1-Endpoint in der EU."
-              : "Always free locally under the MIT license. Or ready-to-use as a hosted OAuth 2.1 endpoint in the EU."
-          }</p>
+            <p>${
+              de
+                ? "Geprüfter Warenkorb- oder Checkout-Permalink <code>/cart/&lt;id&gt;:&lt;qty&gt;</code>, niemals automatische Käufe."
+                : "Verified cart or checkout permalink <code>/cart/&lt;id&gt;:&lt;qty&gt;</code>, never auto-purchases."
+            }</p>
+            <div class="tool-sig">create_cart_link({ store_url, items, mode, verify_handles })</div>
+          </article>
         </div>
-      </div>
+        <p class="dev-security">${
+          de
+            ? "Sicherheit: DNS-gepinnter SSRF-Schutz, Prompt-Injection-Sanitizing für Shop-Texte, Refresh-Token-Rotation mit Replay-Erkennung."
+            : "Security: DNS-pinned SSRF guard, prompt-injection sanitizing for store text, refresh-token rotation with replay detection."
+        }</p>
+      </details>
 
-      <div class="grid-3">
-        <article class="card">
-          <h3>OSS MIT (Local / Self-Host)</h3>
-          <div class="price-row">
-            <div class="price">0 € <span>/ ${de ? "immer" : "forever"}</span></div>
-          </div>
-          <ul class="feat-list">
-            <li>${de ? "Unbegrenzte lokale stdio Tool-Calls" : "Unlimited local stdio tool calls"}</li>
-            <li>${de ? "Kein Login, keine Telemetrie" : "Zero auth, zero telemetry"}</li>
-            <li>${de ? "MIT-Lizenz · Docker-ready" : "MIT license · Docker-ready"}</li>
-          </ul>
-          <a class="btn-secondary w-full" href="${escapeHtml(config.repoUrl)}" target="_blank" rel="noopener noreferrer">${
-            de ? "Auf GitHub ansehen" : "View on GitHub"
-          }</a>
-        </article>
-
-        <article class="card">
-          <h3>Hosted Free</h3>
-          <div class="price-row">
-            <div class="price">0 € <span>/ ${de ? "Monat" : "month"}</span></div>
-          </div>
-          <ul class="feat-list">
-            <li>${de ? `${config.freeDailyLimit} Tool-Calls / Tag` : `${config.freeDailyLimit} tool calls / day`}</li>
-            <li>${de ? "OAuth 2.1 für Claude.ai &amp; ChatGPT" : "OAuth 2.1 for Claude.ai &amp; ChatGPT"}</li>
-            <li>${de ? "Sofort startklar ohne Kreditkarte" : "Instant start, no credit card"}</li>
-          </ul>
-          <a class="btn-secondary w-full" href="/billing?lang=${lang}">${
-            de ? "Kostenlos starten" : "Start free"
-          }</a>
-        </article>
-
-        <article class="card card-featured">
-          ${
-            promoActive
-              ? `<div class="pill-promo">★ ${
-                  de ? "0 € bis 06.12.2026 · Code BLACKFRIDAY" : "€0 until Dec 6, 2026 · Code BLACKFRIDAY"
-                }</div>`
-              : ""
-          }
-          <h3>Hosted Pro</h3>
-          <div class="price-row">
-            ${promoActive ? `<span class="price-old">9 €</span>` : ""}
-            <div class="price">${promoActive ? "0 €" : "9 €"} <span>/ ${
-              promoActive
-                ? de
-                  ? "bis 06.12."
-                  : "until Dec 6"
-                : de
-                  ? "Monat"
-                  : "month"
-            }</span></div>
-          </div>
-          ${
-            promoActive
-              ? `<p class="price-note">${
-                  de
-                    ? "Danach 9 €/Monat · jederzeit im Stripe-Portal kündbar"
-                    : "Then €9/month · cancel anytime in Stripe Portal"
-                }</p>`
-              : ""
-          }
-          <ul class="feat-list">
-            <li>${de ? `${config.proDailyLimit} Tool-Calls / Tag` : `${config.proDailyLimit} tool calls / day`}</li>
-            <li>${
-              promoActive
-                ? de
-                  ? "Black-Friday-Launch: Volles Pro-Kontingent sofort gratis aktiv"
-                  : "Black Friday Launch: Full Pro quota active free immediately"
-                : de
-                  ? "Monatlich kündbar im Stripe-Portal"
-                  : "Cancel anytime via Stripe Portal"
-            }</li>
-            <li>${de ? "EU Cloud Run Infrastruktur (europe-west1)" : "EU Cloud Run infrastructure (europe-west1)"}</li>
-          </ul>
-          <a class="btn-primary w-full" href="/billing?lang=${lang}">${
-            promoActive
-              ? de
-                ? "Pro jetzt kostenlos sichern"
-                : "Claim free Pro access"
-              : de
-                ? "Auf Pro upgraden"
-                : "Upgrade to Pro"
-          }</a>
-        </article>
+      <div class="dev-links">
+        <a class="btn-secondary" href="${escapeHtml(config.repoUrl)}" target="_blank" rel="noopener noreferrer">GitHub · MIT</a>
+        <a class="btn-secondary" href="${escapeHtml(`${config.repoUrl}/blob/main/server.json`)}" target="_blank" rel="noopener noreferrer">server.json</a>
+        <a class="btn-secondary" href="/.well-known/mcp.json">mcp.json</a>
+        <a class="btn-secondary" href="/llms.txt">llms.txt</a>
+        <a class="btn-secondary" href="/llms-full.txt">llms-full.txt</a>
       </div>
     </div>
   </section>
@@ -905,13 +1163,14 @@ ${
     <div class="foot-row">
       <div class="foot-brand">
         <img class="foot-mark" src="/assets/walspro-mark.svg" alt="" width="20" height="20">
-        <span><strong>shopcart-mcp</strong> · by <a href="https://wals.pro" target="_blank" rel="noopener noreferrer">wals.pro</a></span>
+        <span><strong>ShopCart</strong> · by <a href="https://wals.pro" target="_blank" rel="noopener noreferrer">wals.pro</a></span>
       </div>
       <div class="foot-links">
-        <a href="/billing?lang=${lang}">${de ? "Konto &amp; Billing" : "Account &amp; Billing"}</a>
+        <a href="/billing?lang=${lang}">${de ? "Konto &amp; Abo" : "Account &amp; billing"}</a>
         <a href="${escapeHtml(config.repoUrl)}" target="_blank" rel="noopener noreferrer">GitHub</a>
         <a href="/privacy?lang=${lang}">${de ? "Datenschutz" : "Privacy"}</a>
         <a href="/terms?lang=${lang}">${de ? "Nutzungsbedingungen" : "Terms"}</a>
+        <a href="/llms.txt">llms.txt</a>
         <a href="/.well-known/security.txt">security.txt</a>
         <a href="https://wals.pro/policies/legal-notice" target="_blank" rel="noopener noreferrer">${
           de ? "Impressum" : "Legal Notice"
@@ -920,8 +1179,8 @@ ${
     </div>
     <p class="disclaimer">${
       de
-        ? "Unabhängiges Community-Tool für Shopify-Shops — nicht verbunden mit oder unterstützt von Shopify Inc. Alle Markennamen gehören ihren jeweiligen Eigentümern."
-        : "Independent community tool for Shopify stores — not affiliated with or endorsed by Shopify Inc. All trademarks belong to their respective owners."
+        ? `Unabhängiges Community-Tool für Shopify-Shops — nicht verbunden mit oder unterstützt von Shopify Inc. Genannte Shops und Marken (z. B. SNOCKS, KERNenergie, PURELEI) dienen nur als Beispiele; es besteht keine Partnerschaft. Beispielpreise Stand ${EXAMPLE_PRICES_VERIFIED_DE}, Preise und Verfügbarkeit können sich ändern. Alle Markennamen gehören ihren jeweiligen Eigentümern.`
+        : `Independent community tool for Shopify stores — not affiliated with or endorsed by Shopify Inc. Stores and brands mentioned (e.g. SNOCKS, KERNenergie, Allbirds) are examples only; no partnership exists. Example prices as of ${EXAMPLE_PRICES_VERIFIED_EN}; prices and availability may change. All trademarks belong to their respective owners.`
     }</p>
   </div>
 </footer>
