@@ -4,7 +4,14 @@ export interface Money {
   currency: string;
 }
 
-export type StorePlatform = "shopify" | "woocommerce" | "amazon";
+export type StorePlatform = "shopify" | "woocommerce" | "amazon" | "jsonld";
+
+export type ProductAvailability =
+  | "InStock"
+  | "OutOfStock"
+  | "PreOrder"
+  | "LimitedAvailability"
+  | "Unknown";
 
 export interface StoreInfo {
   platform: StorePlatform;
@@ -24,6 +31,9 @@ export interface StoreInfo {
     searchProvider?: "paapi" | "keepa" | "none";
     asinCartPermalink?: boolean;
     affiliateTagConfigured?: boolean;
+    jsonLdProduct?: boolean;
+    searchActionUrl?: string | null;
+    sitemaps?: string[];
   };
 }
 
@@ -48,12 +58,17 @@ export interface ProductVariant {
   id: string;
   title: string;
   sku: string | null;
+  gtin?: string | null;
+  ean?: string | null;
+  mpn?: string | null;
   available: boolean;
+  availability?: ProductAvailability;
   price: Money;
   compare_at_price: Money | null;
   discount_percent?: number | null;
   savings?: Money | null;
   option_values: string[];
+  url?: string | null;
 }
 
 export interface ProductDetail {
@@ -63,7 +78,15 @@ export interface ProductDetail {
   vendor: string | null;
   product_type: string | null;
   description_text: string;
+  sku?: string | null;
+  gtin?: string | null;
+  ean?: string | null;
+  mpn?: string | null;
   available: boolean;
+  availability?: ProductAvailability;
+  price_min?: Money;
+  price_max?: Money;
+  metadata_source?: "jsonld" | "jsonld+opengraph" | "opengraph";
   url: string;
   options: Array<{ name: string; values: string[] }>;
   images: string[];
@@ -84,6 +107,11 @@ export interface SearchProductsOptions {
   concurrencyKey?: string;
 }
 
+export interface SearchHints {
+  search_url?: string | null;
+  sitemaps?: string[];
+}
+
 export interface SearchProductsResult {
   store_origin: string;
   currency: string;
@@ -92,6 +120,7 @@ export interface SearchProductsResult {
   products: ProductSummary[];
   notices: string[];
   agent_guidance?: string;
+  search_hints?: SearchHints;
 }
 
 export interface CollectionSummary {
@@ -176,10 +205,13 @@ export interface AdditionalCartLink {
   cart_url: string;
 }
 
+export type CartMode = "cart_permalink" | "checkout_permalink" | "direct_product_link";
+
 export interface CartLinkResult {
   store_origin: string;
   cart_url: string;
   mode: "cart" | "checkout";
+  cart_mode?: CartMode;
   items: CartLinkItemResult[];
   additional_cart_links?: AdditionalCartLink[];
   affiliate_disclosure?: boolean;

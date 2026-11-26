@@ -1,5 +1,6 @@
 import { isSameStoreSite } from "../security/sanitize.js";
 import { AmazonAdapter } from "./amazon/adapter.js";
+import { UniversalJsonLdAdapter } from "./jsonld/adapter.js";
 import { ShopifyAdapter } from "./shopify/adapter.js";
 import { WooCommerceAdapter } from "./woocommerce/adapter.js";
 import type { StoreAdapter, StoreInfo } from "./types.js";
@@ -19,16 +20,21 @@ export class AdapterRegistry {
 
   constructor(adapters?: StoreAdapter[]) {
     // AmazonAdapter is registered first because its domain detection is purely synchronous (0 ms, no network probe),
-    // followed by ShopifyAdapter and WooCommerceAdapter.
+    // followed by dedicated platform adapters, with UniversalJsonLdAdapter strictly LAST as fallback.
     this.adapters = adapters ?? [
       new AmazonAdapter(),
       new ShopifyAdapter(),
-      new WooCommerceAdapter()
+      new WooCommerceAdapter(),
+      new UniversalJsonLdAdapter()
     ];
   }
 
   getDefault(): StoreAdapter {
     return this.adapters.find((a) => a.platform === "shopify") ?? this.adapters[0]!;
+  }
+
+  getFallback(): StoreAdapter {
+    return this.adapters[this.adapters.length - 1]!;
   }
 
   listPlatforms(): string[] {
@@ -93,8 +99,9 @@ export class AdapterRegistry {
     const now = Date.now();
     for (let i = 0; i < this.adapters.length; i++) {
       const adapter = this.adapters[i]!;
-      // If only the default fallback adapter remains, skip redundant network detection probes
-      if (i === this.adapters.length - 1 && adapter === this.getDefault()) {
+      // If only the universal JSON-LD fallback (or single default adapter) remains, skip redundant homepage probe
+      // so direct get_product(url) calls work in a single request.
+      if (i === this.adapters.length - 1 && (adapter.platform === "jsonld" || adapter === this.getDefault())) {
         return adapter;
       }
       const store = await adapter.detect(origin, concurrencyKey);
@@ -104,6 +111,6 @@ export class AdapterRegistry {
       }
     }
 
-    return this.getDefault();
+    return this.getFallback();
   }
 }
