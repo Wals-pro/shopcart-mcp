@@ -797,6 +797,7 @@ ${
       <a class="hide-sm" href="#pricing">${de ? "Preise" : "Pricing"}</a>
       <a class="hide-sm" href="#faq">FAQ</a>
       <a class="hide-md" href="/guides?lang=${lang}">${de ? "Ratgeber" : "Guides"}</a>
+      <a class="hide-md" href="${de ? "/for-merchants" : "/en/for-merchants"}">${de ? "Für Shops" : "For merchants"}</a>
       <a class="hide-md" href="#developers">${de ? "Für Entwickler" : "Developers"}</a>
       <div class="nav-actions">
         <a class="btn-nav" href="/billing?lang=${lang}">${de ? "Konto" : "Account"}</a>
@@ -997,6 +998,11 @@ ${
         de
           ? "Voraussetzung ist immer ein öffentlich erreichbarer Shop. Passwortgeschützte Shops und Shops, die automatische Abrufe sperren, funktionieren nicht. Bestellen und bezahlen kannst in jedem Fall nur du."
           : "The store always has to be publicly reachable. Password-protected stores and stores that block automated requests do not work. In every case, only you can order and pay."
+      }</p>
+      <p class="matrix-note">${
+        de
+          ? 'Sie betreiben selbst einen Online-Shop? <a class="desktop-link" href="/for-merchants">Für Shops: Agentic Storefront Readiness &amp; kostenloser Selbst-Check →</a>'
+          : 'Running an online store yourself? <a class="desktop-link" href="/en/for-merchants">For merchants: Agentic Storefront Readiness &amp; free self-check →</a>'
       }</p>
     </div>
   </section>
@@ -1540,6 +1546,7 @@ ${
       </div>
       <div class="foot-links">
         <a href="/guides?lang=${lang}">${de ? "Ratgeber" : "Guides"}</a>
+        <a href="${de ? "/for-merchants" : "/en/for-merchants"}">${de ? "Für Shops" : "For merchants"}</a>
         <a href="/billing?lang=${lang}">${de ? "Konto &amp; Abo" : "Account &amp; billing"}</a>
         <a href="${escapeHtml(config.repoUrl)}" target="_blank" rel="noopener noreferrer">GitHub</a>
         <a href="/privacy?lang=${lang}">${de ? "Datenschutz" : "Privacy"}</a>

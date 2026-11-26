@@ -14,10 +14,12 @@
     "landing",
     "guide",
     "guides_index",
+    "for_merchants",
     "billing",
     "oauth",
     "legal"
   ]);
+  const ALLOWED_FOR_MERCHANTS_CTAS = new Set(["self_check", "book_call"]);
   const ALLOWED_CLIENTS = new Set([
     "claude",
     "chatgpt",
@@ -459,6 +461,26 @@
         const promptId = (tracked.getAttribute("data-track-prompt-id") || "").trim().toLowerCase();
         if (SAFE_ID_RE.test(promptId)) {
           trackEvent("try_prompt_click", { prompt_id: promptId, transport_type: "beacon" });
+        }
+        return;
+      }
+    }
+
+    const analyticsEl = target.closest("[data-analytics-event]");
+    if (analyticsEl) {
+      const analyticsEvent = (analyticsEl.getAttribute("data-analytics-event") || "").trim();
+      if (analyticsEvent === "for_merchants_cta_click") {
+        const cta = (analyticsEl.getAttribute("data-analytics-cta") || "").trim().toLowerCase();
+        const rawCtaLang = (analyticsEl.getAttribute("data-analytics-lang") || cfg.pageLang)
+          .trim()
+          .toLowerCase();
+        const ctaLang = ALLOWED_PAGE_LANGS.has(rawCtaLang) ? rawCtaLang : cfg.pageLang;
+        if (ALLOWED_FOR_MERCHANTS_CTAS.has(cta)) {
+          trackEvent("for_merchants_cta_click", {
+            cta,
+            page_language: ctaLang,
+            transport_type: "beacon"
+          });
         }
         return;
       }
