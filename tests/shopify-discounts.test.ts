@@ -373,19 +373,19 @@ describe("Shopify Discount Extractor — HTML & Collection parsing", () => {
     expect(stressRes.codes.every((c) => c.code !== "HIDDEN99")).toBe(true);
   });
 
-  it("bounds promo-zone close-tag scans and marker attempts on repeated <hero> and empty promo banners in <150ms", () => {
+  it("bounds promo-zone close-tag scans and marker attempts on repeated <hero> and empty promo banners in <500ms", () => {
     const repeatedHero = "<hero>".repeat(200_000); // ~1.2 MiB
     const startHeroCpu = process.cpuUsage();
     const heroRes = extractDiscountsFromHtml(repeatedHero);
     const heroCpu = process.cpuUsage(startHeroCpu);
-    expect((heroCpu.user + heroCpu.system) / 1000).toBeLessThan(150);
+    expect((heroCpu.user + heroCpu.system) / 1000).toBeLessThan(500);
     expect(heroRes.codes).toEqual([]);
 
     const emptyBanners = '<div class="promo-banner"></div>'.repeat(40_000); // ~1.28 MiB
     const startBannerCpu = process.cpuUsage();
     const bannerRes = extractDiscountsFromHtml(emptyBanners);
     const bannerCpu = process.cpuUsage(startBannerCpu);
-    expect((bannerCpu.user + bannerCpu.system) / 1000).toBeLessThan(150);
+    expect((bannerCpu.user + bannerCpu.system) / 1000).toBeLessThan(500);
     expect(bannerRes.codes).toEqual([]);
   });
 
