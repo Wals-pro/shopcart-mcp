@@ -16,7 +16,13 @@ import {
   sanitizeText,
   stripHtmlToText
 } from "../security/sanitize.js";
-import { SsrfError, validateExternalUrl } from "../security/ssrf.js";
+import {
+  SELFCHECK_GLOBAL_MAX_CONCURRENT,
+  SELFCHECK_GLOBAL_SLOT_KEY,
+  SsrfError,
+  validateExternalUrl,
+  withFetchContext
+} from "../security/ssrf.js";
 
 export const STORE_CHECK_MAX_BODY_BYTES = 2048;
 export const STORE_CHECK_TIMEOUT_MS = 9000;
@@ -1502,12 +1508,23 @@ export interface RunStoreCheckOptions {
   concurrencyKey: string;
   timeoutMs?: number;
   signal?: AbortSignal;
+  globalConcurrencyKey?: string;
+  globalMaxConcurrency?: number;
 }
 
-export async function runStoreCheck(opts: RunStoreCheckOptions): Promise<StoreCheckResult> {
+export interface StartedStoreCheck {
+  /** Resolves with the StoreCheckResult or rejects promptly on timeout/abort/error for HTTP responses. */
+  result: Promise<StoreCheckResult>;
+  /** Resolves (never rejects) ONLY once the real underlying workPromise has completely settled. */
+  settled: Promise<void>;
+}
+
+export function startStoreCheck(opts: RunStoreCheckOptions): StartedStoreCheck {
   const totalTimeoutMs = opts.timeoutMs ?? STORE_CHECK_TIMEOUT_MS;
   const deadline = Date.now() + totalTimeoutMs;
   const { registry, input, concurrencyKey, signal: externalSignal } = opts;
+  const globalKey = opts.globalConcurrencyKey ?? SELFCHECK_GLOBAL_SLOT_KEY;
+  const globalMaxConcurrent = opts.globalMaxConcurrency ?? SELFCHECK_GLOBAL_MAX_CONCURRENT;
 
   const controller = new AbortController();
   const overallTimer = setTimeout(() => {
@@ -1529,11 +1546,40 @@ export async function runStoreCheck(opts: RunStoreCheckOptions): Promise<StoreCh
     }
   }
 
+  const runWithSubBudget = async <T>(budgetMs: number, fn: () => Promise<T>): Promise<T> => {
+    const subController = new AbortController();
+    const subTimer = setTimeout(() => {
+      subController.abort(new StoreCheckTimeoutError(budgetMs));
+    }, Math.max(1, budgetMs));
+    const onParentAbort = () => {
+      subController.abort(controller.signal.reason ?? new StoreCheckTimeoutError(totalTimeoutMs));
+    };
+    if (controller.signal.aborted) {
+      onParentAbort();
+    } else {
+      controller.signal.addEventListener("abort", onParentAbort, { once: true });
+    }
+    try {
+      return await withFetchContext(
+        {
+          signal: subController.signal,
+          globalKey,
+          globalMaxConcurrent
+        },
+        () => fn()
+      );
+    } finally {
+      clearTimeout(subTimer);
+      controller.signal.removeEventListener("abort", onParentAbort);
+    }
+  };
+
   const work = async (): Promise<StoreCheckResult> => {
-    const remainingForResolve = Math.max(1, deadline - Date.now());
-    const { adapter, store } = await withTimeout(
-      registry.resolve(input.storeOrigin, concurrencyKey, controller.signal),
-      remainingForResolve,
+    // Await the real registry.resolve promise (aborted via AsyncLocalStorage FetchContext signal
+    // inside safeFetch and between adapter hops) so `settled` never resolves while fetches still run.
+    const { adapter, store } = await registry.resolve(
+      input.storeOrigin,
+      concurrencyKey,
       controller.signal
     );
 
@@ -1590,17 +1636,18 @@ export async function runStoreCheck(opts: RunStoreCheckOptions): Promise<StoreCh
           (async () => {
             if (controller.signal.aborted) return;
             try {
-              productResult = await withTimeout(
+              productResult = await runWithSubBudget(Math.min(remainingMs - 100, 4500), () =>
                 adapter.getProduct(effectiveOrigin, input.productUrl!, {
                   currencyHint: store.currency,
                   concurrencyKey
-                }),
-                Math.min(remainingMs - 100, 4500),
-                controller.signal
+                })
               );
             } catch (err) {
               if (isHardSsrfError(err)) throw err;
-              if (err instanceof StoreCheckTimeoutError || (err instanceof SsrfError && err.code === "TIMEOUT")) {
+              if (
+                err instanceof StoreCheckTimeoutError ||
+                (err instanceof SsrfError && (err.code === "TIMEOUT" || err.code === "ABORTED"))
+              ) {
                 productError =
                   input.lang === "de"
                     ? "Zeitüberschreitung beim Abrufen der Produktseite."
@@ -1622,10 +1669,9 @@ export async function runStoreCheck(opts: RunStoreCheckOptions): Promise<StoreCh
             (async () => {
               if (controller.signal.aborted) return;
               try {
-                const pol: StorePoliciesResult = await withTimeout(
-                  adapter.getStorePolicies!(effectiveOrigin, { topic: "all", concurrencyKey }),
+                const pol: StorePoliciesResult = await runWithSubBudget(
                   Math.min(secondaryTimeout, 2500),
-                  controller.signal
+                  () => adapter.getStorePolicies!(effectiveOrigin, { topic: "all", concurrencyKey })
                 );
                 policyProbe = {
                   checked: true,
@@ -1645,14 +1691,14 @@ export async function runStoreCheck(opts: RunStoreCheckOptions): Promise<StoreCh
             (async () => {
               if (controller.signal.aborted) return;
               try {
-                const disc: StoreDiscountsResult = await withTimeout(
-                  adapter.findStoreDiscounts!(effectiveOrigin, {
-                    fastMode: true,
-                    timeoutMs: Math.min(secondaryTimeout, 2000),
-                    concurrencyKey
-                  }),
+                const disc: StoreDiscountsResult = await runWithSubBudget(
                   Math.min(secondaryTimeout, 2500),
-                  controller.signal
+                  () =>
+                    adapter.findStoreDiscounts!(effectiveOrigin, {
+                      fastMode: true,
+                      timeoutMs: Math.min(secondaryTimeout, 2000),
+                      concurrencyKey
+                    })
                 );
                 discountProbe = {
                   checked: true,
@@ -1691,12 +1737,35 @@ export async function runStoreCheck(opts: RunStoreCheckOptions): Promise<StoreCh
     });
   };
 
-  try {
-    return await withTimeout(work(), totalTimeoutMs, controller.signal);
-  } finally {
-    clearTimeout(overallTimer);
-    if (externalSignal) {
-      externalSignal.removeEventListener("abort", onExternalAbort);
-    }
-  }
+  // Propagate controller.signal & global selfcheck slot cap end-to-end into every safeFetch call
+  const workPromise = withFetchContext(
+    {
+      signal: controller.signal,
+      globalKey,
+      globalMaxConcurrent
+    },
+    () => work()
+  );
+
+  // Settled promise always resolves (never triggers unhandled rejection) ONLY after workPromise
+  // has truly finished unwinding — used to release activeChecks accurately.
+  const settled = workPromise
+    .then(
+      () => undefined,
+      () => undefined
+    )
+    .finally(() => {
+      clearTimeout(overallTimer);
+      if (externalSignal) {
+        externalSignal.removeEventListener("abort", onExternalAbort);
+      }
+    });
+
+  const result = withTimeout(workPromise, totalTimeoutMs, controller.signal);
+
+  return { result, settled };
+}
+
+export async function runStoreCheck(opts: RunStoreCheckOptions): Promise<StoreCheckResult> {
+  return startStoreCheck(opts).result;
 }

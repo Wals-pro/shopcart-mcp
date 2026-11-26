@@ -54,7 +54,10 @@ function isShopifyMetaPayload(data: MetaJsonPayload): boolean {
 }
 
 function isTransientFetchError(err: unknown): boolean {
-  return err instanceof SsrfError && (err.code === "CONCURRENCY_LIMIT" || err.code === "TIMEOUT");
+  return (
+    err instanceof SsrfError &&
+    (err.code === "CONCURRENCY_LIMIT" || err.code === "TIMEOUT" || err.code === "ABORTED")
+  );
 }
 
 function isInternalOrCheckoutHost(hostname: string): boolean {

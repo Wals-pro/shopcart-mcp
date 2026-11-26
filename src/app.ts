@@ -49,6 +49,7 @@ export interface CreateAppDeps {
   storeCheckRateLimiter?: StoreCheckRateLimiter;
   storeCheckTimeoutMs?: number;
   storeCheckMaxConcurrent?: number;
+  storeCheckGlobalMaxConcurrency?: number;
 }
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
@@ -484,7 +485,8 @@ export function createApp(deps: CreateAppDeps): Express {
       rateLimiter: deps.storeCheckRateLimiter,
       timeoutMs: deps.storeCheckTimeoutMs,
       trustedProxyHops: config.trustedProxyHops,
-      maxConcurrentChecks: deps.storeCheckMaxConcurrent
+      maxConcurrentChecks: deps.storeCheckMaxConcurrent,
+      globalMaxConcurrency: deps.storeCheckGlobalMaxConcurrency
     })
   );
   app.use(createGuidesRouter(config));

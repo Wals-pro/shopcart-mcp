@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
@@ -16,8 +17,14 @@ import type {
 } from "../src/adapters/types.js";
 import { createApp } from "../src/app.js";
 import { loadConfig, parseTrustedProxyHops } from "../src/config.js";
-import { safeFetch, SsrfError } from "../src/security/ssrf.js";
+import {
+  getInFlightSlotCount,
+  safeFetch,
+  SELFCHECK_GLOBAL_SLOT_KEY,
+  SsrfError
+} from "../src/security/ssrf.js";
 import { MemoryStore } from "../src/store/memory.js";
+import { createStoreCheckRouter } from "../src/web/store-check.js";
 import {
   buildStoreCheckAssessment,
   extractTrustedClientIp,
@@ -1093,6 +1100,199 @@ describe("POST /api/store-check — Security, Abuse Hardening & Functional API",
     // Wait past slowNullAdapter's 120ms delay to verify the abort signal stopped the loop
     await new Promise((r) => setTimeout(r, 160));
     expect(secondAdapterCalled).toBe(0);
+  });
+
+  it("keeps activeChecks held until underlying workPromise settles and propagates AbortSignal end-to-end into safeFetch", async () => {
+    // Part A: An uncooperative adapter that stays running after the 40ms HTTP timeout must keep
+    // activeChecks occupied until its workPromise actually settles (preventing cap bypass via timeout).
+    let releaseSlowWork!: () => void;
+    const uncooperativeAdapter = makeMockAdapter({
+      platform: "shopify",
+      store: makeShopifyStore(),
+      async onDetect() {
+        await new Promise<void>((resolve) => {
+          releaseSlowWork = resolve;
+        });
+        return makeShopifyStore();
+      }
+    });
+
+    const { app: capApp } = makeTestApp({
+      adapters: [uncooperativeAdapter],
+      timeoutMs: 40,
+      maxConcurrentChecks: 1
+    });
+
+    // First request times out at 40ms with HTTP 504 while workPromise is still running
+    await request(capApp)
+      .post("/api/store-check")
+      .set("Origin", "https://shopcart.wals.pro")
+      .set("X-Forwarded-For", "203.0.113.201")
+      .set("Content-Type", "application/json")
+      .send({ storeUrl: "snocks.com", lang: "en" })
+      .expect(504);
+
+    // Immediately sending a 2nd request while the 1st workPromise is still active MUST still hit the cap (429)!
+    await request(capApp)
+      .post("/api/store-check")
+      .set("Origin", "https://shopcart.wals.pro")
+      .set("X-Forwarded-For", "203.0.113.202")
+      .set("Content-Type", "application/json")
+      .send({ storeUrl: "snocks.com", lang: "en" })
+      .expect(429);
+
+    // Release the underlying workPromise and allow settled.finally() to run
+    releaseSlowWork();
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Part B: Real safeFetch inside an adapter receives the aborted AbortSignal via withFetchContext
+    // on timeout, aborts the hung fetch immediately, and releases all SSRF slots (0 leaks).
+    let fetchSignalAborted = false;
+    const safeFetchAdapter: StoreAdapter = {
+      platform: "shopify",
+      async detect(origin, concurrencyKey) {
+        await safeFetch(`${origin}/meta.json`, {
+          timeoutMs: 5000,
+          concurrencyKey,
+          lookupFn: async () => [{ address: "23.227.38.65", family: 4 as const }],
+          fetchImpl: (_url, init) =>
+            new Promise((_resolve, reject) => {
+              const sig = init.signal;
+              if (sig?.aborted) {
+                fetchSignalAborted = true;
+                reject(sig.reason ?? Object.assign(new Error("Aborted"), { name: "AbortError" }));
+                return;
+              }
+              sig?.addEventListener(
+                "abort",
+                () => {
+                  fetchSignalAborted = true;
+                  reject(sig.reason ?? Object.assign(new Error("Aborted"), { name: "AbortError" }));
+                },
+                { once: true }
+              );
+            })
+        });
+        return makeShopifyStore();
+      },
+      async searchProducts(origin) {
+        return { store_origin: origin, currency: "EUR", products: [], notices: [] };
+      },
+      async getProduct() {
+        throw new Error("unused");
+      },
+      async buildCartLink(origin) {
+        return { store_origin: origin, cart_url: `${origin}/cart`, mode: "cart", items: [], warnings: [], next_step: "" };
+      }
+    };
+
+    const { app: abortApp } = makeTestApp({
+      adapters: [safeFetchAdapter],
+      timeoutMs: 50,
+      maxConcurrentChecks: 1
+    });
+
+    await request(abortApp)
+      .post("/api/store-check")
+      .set("Origin", "https://shopcart.wals.pro")
+      .set("X-Forwarded-For", "203.0.113.203")
+      .set("Content-Type", "application/json")
+      .send({ storeUrl: "snocks.com", lang: "en" })
+      .expect(504);
+
+    await new Promise((r) => setTimeout(r, 30));
+    expect(fetchSignalAborted).toBe(true);
+    expect(getInFlightSlotCount("selfcheck:203.0.113.203")).toBe(0);
+    expect(getInFlightSlotCount(SELFCHECK_GLOBAL_SLOT_KEY)).toBe(0);
+  });
+
+  it("handles early client disconnect (res.destroyed / req.socket.destroyed) before listener registration by aborting immediately", async () => {
+    let observedAbortedOnEntry = false;
+    const config = loadConfig({
+      APP_ORIGIN: "https://shopcart.wals.pro",
+      STORAGE_BACKEND: "memory",
+      SESSION_SECRET: "test-session-secret-0123456789abcdef"
+    });
+    const registry = new AdapterRegistry([
+      {
+        platform: "shopify",
+        async detect(origin, concurrencyKey) {
+          try {
+            await safeFetch(`${origin}/meta.json`, {
+              timeoutMs: 5000,
+              concurrencyKey,
+              lookupFn: async () => [{ address: "23.227.38.65", family: 4 as const }],
+              fetchImpl: async () => {
+                throw new Error("Should never reach fetchImpl when already aborted");
+              }
+            });
+          } catch (err) {
+            if (err instanceof SsrfError && (err.code === "TIMEOUT" || err.code === "ABORTED")) {
+              observedAbortedOnEntry = true;
+            }
+            throw err;
+          }
+          return null;
+        },
+        async searchProducts(origin) {
+          return { store_origin: origin, currency: "EUR", products: [], notices: [] };
+        },
+        async getProduct() {
+          throw new Error("unused");
+        },
+        async buildCartLink(origin) {
+          return { store_origin: origin, cart_url: `${origin}/cart`, mode: "cart", items: [], warnings: [], next_step: "" };
+        }
+      }
+    ]);
+
+    const router = createStoreCheckRouter({ config, registry, timeoutMs: 2000 });
+    const postLayer = (router as unknown as { stack: Array<{ route?: { path: string; stack: Array<{ handle: (req: any, res: any, next: () => void) => Promise<void> | void }> } }> }).stack.find(
+      (l) => l.route?.path === "/api/store-check"
+    );
+    expect(postLayer).toBeDefined();
+
+    const fakeReq = Object.assign(new EventEmitter(), {
+      method: "POST",
+      url: "/api/store-check",
+      headers: {
+        origin: "https://shopcart.wals.pro",
+        "content-type": "application/json"
+      },
+      socket: { remoteAddress: "203.0.113.220", destroyed: true },
+      pause: () => undefined
+    });
+
+    const headers = new Map<string, string>();
+    let statusCode = 0;
+    let responseJson: unknown = null;
+    const fakeRes = Object.assign(new EventEmitter(), {
+      destroyed: true,
+      writableEnded: false,
+      headersSent: false,
+      setHeader: (k: string, v: string) => headers.set(k.toLowerCase(), v),
+      status(code: number) {
+        statusCode = code;
+        return this;
+      },
+      json(body: unknown) {
+        responseJson = body;
+        this.headersSent = true;
+        return this;
+      }
+    });
+
+    const handlerPromise = postLayer!.route!.stack[0]!.handle(fakeReq, fakeRes, () => undefined);
+    // Emit JSON body synchronously after handler attaches listeners
+    fakeReq.emit("data", Buffer.from(JSON.stringify({ storeUrl: "snocks.com", lang: "en" })));
+    fakeReq.emit("end");
+    await handlerPromise;
+
+    // Early-disconnect guard triggered reqAbort immediately before registry.resolve / safeFetch ran
+    expect(statusCode).toBe(504);
+    expect((responseJson as { error?: string })?.error).toBe("timeout");
+    expect(observedAbortedOnEntry).toBe(false);
+    expect(getInFlightSlotCount("selfcheck:203.0.113.220")).toBe(0);
   });
 });
 

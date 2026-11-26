@@ -18,7 +18,7 @@ import {
   INDEPENDENCE_DISCLAIMER,
   isAllowedStoreCheckOrigin,
   isJsonContentType,
-  runStoreCheck,
+  startStoreCheck,
   STORE_CHECK_MAX_BODY_BYTES,
   STORE_CHECK_TIMEOUT_MS,
   StoreCheckRateLimiter,
@@ -35,6 +35,8 @@ export interface StoreCheckRouterDeps {
   timeoutMs?: number;
   trustedProxyHops?: number;
   maxConcurrentChecks?: number;
+  globalConcurrencyKey?: string;
+  globalMaxConcurrency?: number;
 }
 
 class PayloadTooLargeError extends Error {
@@ -577,22 +579,46 @@ export function createStoreCheckRouter(deps: StoreCheckRouterDeps): Router {
       }
     };
     res.on("close", onClose);
+    // Early-disconnect guard: catch requests already closed before listener registration
+    if (res.destroyed || req.socket?.destroyed) {
+      onClose();
+    }
 
-    // 7. Execute SSRF-hardened read-only check under hard overall timeout
+    let released = false;
+    const releaseActiveCheck = () => {
+      if (released) return;
+      released = true;
+      res.off("close", onClose);
+      activeChecks = Math.max(0, activeChecks - 1);
+    };
+
+    let releaseAttachedToWork = false;
+
+    // 7. Execute SSRF-hardened read-only check under hard overall timeout & FetchContext AbortSignal
     try {
-      const result = await runStoreCheck({
+      const started = startStoreCheck({
         registry,
         input: validated.data,
         concurrencyKey: `selfcheck:${clientKey}`,
         timeoutMs,
-        signal: reqAbort.signal
+        signal: reqAbort.signal,
+        globalConcurrencyKey: deps.globalConcurrencyKey,
+        globalMaxConcurrency: deps.globalMaxConcurrency
       });
+      releaseAttachedToWork = true;
+      // Release activeChecks ONLY when the actual underlying workPromise settles (never prematurely on timeout race)
+      void started.settled.finally(releaseActiveCheck);
+
+      const result = await started.result;
       if (!res.headersSent) {
         res.status(200).json(result);
       }
     } catch (err) {
       if (res.headersSent) return;
-      if (err instanceof StoreCheckTimeoutError || (err instanceof SsrfError && err.code === "TIMEOUT")) {
+      if (
+        err instanceof StoreCheckTimeoutError ||
+        (err instanceof SsrfError && (err.code === "TIMEOUT" || err.code === "ABORTED"))
+      ) {
         res.status(504).json({
           error: "timeout",
           message: de
@@ -631,8 +657,9 @@ export function createStoreCheckRouter(deps: StoreCheckRouterDeps): Router {
           : "The store could not be checked right now. Please verify the domain and try again."
       });
     } finally {
-      res.off("close", onClose);
-      activeChecks = Math.max(0, activeChecks - 1);
+      if (!releaseAttachedToWork) {
+        releaseActiveCheck();
+      }
     }
   });
 
