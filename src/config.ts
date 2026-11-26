@@ -23,6 +23,7 @@ export interface AppConfig {
   openaiAppsChallenge: string | undefined;
   mcpRegistryAuth: string | undefined;
   indexNowKey: string | undefined;
+  ga4MeasurementId: string | undefined;
   demoVideoUrl: string | undefined;
   demoVideoUrlDe: string | undefined;
   demoVideoUrlEn: string | undefined;
@@ -75,11 +76,18 @@ function parseOptionalMediaUrl(raw: string | undefined): string | undefined {
 }
 
 const INDEXNOW_KEY_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{6,126}[A-Za-z0-9])$/;
+const GA4_MEASUREMENT_ID_RE = /^G-[A-Z0-9]{4,20}$/;
 
 export function parseIndexNowKey(raw: string | undefined): string | undefined {
   const val = raw?.trim();
   if (!val) return undefined;
   return INDEXNOW_KEY_RE.test(val) ? val : undefined;
+}
+
+export function parseGa4MeasurementId(raw: string | undefined): string | undefined {
+  const val = raw?.trim();
+  if (!val) return undefined;
+  return GA4_MEASUREMENT_ID_RE.test(val) ? val : undefined;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -133,6 +141,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     openaiAppsChallenge: env.OPENAI_APPS_CHALLENGE?.trim() || undefined,
     mcpRegistryAuth: env.MCP_REGISTRY_AUTH?.trim() || undefined,
     indexNowKey: parseIndexNowKey(env.INDEXNOW_KEY),
+    ga4MeasurementId: parseGa4MeasurementId(env.GA4_MEASUREMENT_ID),
     demoVideoUrl: parseOptionalMediaUrl(env.DEMO_VIDEO_URL),
     demoVideoUrlDe: parseOptionalMediaUrl(env.DEMO_VIDEO_URL_DE),
     demoVideoUrlEn: parseOptionalMediaUrl(env.DEMO_VIDEO_URL_EN),

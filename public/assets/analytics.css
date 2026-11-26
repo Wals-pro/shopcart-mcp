@@ -1,0 +1,238 @@
+/* ShopCart MCP — Dark-Mode EU/AT DSGVO Consent Banner & Footer Trigger
+ * Strict external stylesheet (zero inline styles).
+ * Uses canonical wals.pro Obsidian surfaces (#141414 / #1a1a1a) + #ff1f4d accent.
+ * Equal-weight buttons with zero dark patterns.
+ */
+
+/* Never set display on <dialog> unconditionally — scope strictly to [open] */
+dialog#sc-consent-banner {
+  position: fixed;
+  inset-block-start: auto;
+  inset-block-end: 20px;
+  inset-inline: 20px;
+  z-index: 1000;
+  width: min(860px, calc(100vw - 32px));
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 0;
+  border: 1px solid #343434;
+  border-radius: 16px;
+  background: rgba(24, 24, 24, 0.97);
+  color: #e6e6e6;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  font-family: "WALSPRO Body", "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+  overflow: hidden;
+  backdrop-filter: blur(12px);
+}
+
+dialog#sc-consent-banner[open] {
+  display: block;
+}
+
+dialog#sc-consent-banner::before {
+  content: "";
+  display: block;
+  height: 3px;
+  width: 100%;
+  background: linear-gradient(90deg, #ff1f4d 0%, #ff6b7a 55%, #ff8a5b 100%);
+}
+
+.sc-consent-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 22px;
+}
+
+.sc-consent-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sc-consent-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-block-end: 6px;
+}
+
+.sc-consent-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #ff1f4d;
+  box-shadow: 0 0 10px rgba(255, 31, 77, 0.65);
+  flex-shrink: 0;
+}
+
+.sc-consent-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #ffffff;
+}
+
+.sc-consent-close {
+  margin-inline-start: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #383838;
+  border-radius: 8px;
+  background: #141414;
+  color: #c8cdd3;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.sc-consent-close[hidden] {
+  display: none;
+}
+
+.sc-consent-close:hover {
+  border-color: #666666;
+  color: #ffffff;
+}
+
+.sc-consent-desc {
+  margin: 0;
+  font-size: 13.5px;
+  color: #c2c6cc;
+}
+
+.sc-consent-link {
+  color: #ff6b7a;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.sc-consent-link:hover {
+  color: #ffffff;
+}
+
+.sc-consent-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* Equal-weight buttons: identical height, padding, font-weight, and high contrast (zero dark patterns) */
+.sc-consent-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  min-width: 146px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.sc-consent-btn-essential {
+  background: #242424;
+  color: #f5f5f5;
+  border: 1.5px solid #595959;
+}
+
+.sc-consent-btn-essential:hover {
+  background: #2e2e2e;
+  border-color: #888888;
+  color: #ffffff;
+}
+
+.sc-consent-btn-accept {
+  background: #242424;
+  color: #ffffff;
+  border: 1.5px solid #ff1f4d;
+}
+
+.sc-consent-btn-accept:hover {
+  background: #ff1f4d;
+  border-color: #ff1f4d;
+  color: #000000;
+}
+
+.sc-consent-btn:focus-visible,
+.sc-consent-close:focus-visible,
+.sc-consent-link:focus-visible,
+.sc-cookie-settings-btn:focus-visible {
+  outline: 2px solid #ff1f4d;
+  outline-offset: 2px;
+}
+
+/* Seamless footer button matching surrounding footer links across all pages */
+.sc-cookie-settings-btn {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  color: var(--walspro-muted, #a7adb4);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.foot .sc-cookie-settings-btn,
+.foot-note .sc-cookie-settings-btn {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.sc-cookie-settings-btn:hover {
+  color: #ffffff;
+}
+
+@media (max-width: 720px) {
+  dialog#sc-consent-banner {
+    inset-block-end: 12px;
+    inset-inline: 12px;
+    width: calc(100vw - 24px);
+    border-radius: 14px;
+  }
+
+  .sc-consent-inner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+    padding: 16px;
+  }
+
+  .sc-consent-desc {
+    font-size: 13px;
+  }
+
+  .sc-consent-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .sc-consent-btn {
+    min-width: 0;
+    width: 100%;
+    padding: 10px 10px;
+    font-size: 13px;
+  }
+}

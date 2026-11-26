@@ -16,6 +16,12 @@ import {
   normalizeEmail
 } from "../auth/email-otp.js";
 import { WALSPRO_DARK_CSS, detectLang, escapeHtml, type Lang } from "../auth/pages.js";
+import {
+  buildBillingCsp,
+  renderAnalyticsHead,
+  renderConsentBanner,
+  renderCookieSettingsFooterLink
+} from "./analytics.js";
 import { renderFaviconHeadLinks, renderShopCartWordmark, renderSparkCartSvg } from "./brand.js";
 import { SESSION_COOKIE } from "../auth/router.js";
 import { getBerlinDayKey, getEffectiveEntitlement, isPromoFreeProActive } from "../billing/quota.js";
@@ -54,11 +60,8 @@ function getClientIp(req: Request): string {
   return req.socket.remoteAddress ?? "unknown";
 }
 
-function setBillingSecurityHeaders(res: Response): void {
-  res.setHeader(
-    "Content-Security-Policy",
-    "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self' https://checkout.stripe.com https://billing.stripe.com; frame-ancestors 'none'; base-uri 'none'"
-  );
+function setBillingSecurityHeaders(res: Response, config: AppConfig): void {
+  res.setHeader("Content-Security-Policy", buildBillingCsp(config.ga4MeasurementId));
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   // same-origin ensures browsers send the real Origin header on same-origin form POSTs
@@ -119,9 +122,16 @@ const BILLING_EXTRA_CSS = `
 }
 `;
 
-function renderBillingShell(lang: Lang, title: string, langHrefPath: string, bodyHtml: string): string {
+function renderBillingShell(
+  config: AppConfig,
+  lang: Lang,
+  title: string,
+  langHrefPath: string,
+  bodyHtml: string
+): string {
   const de = lang === "de";
   const otherLang = de ? "en" : "de";
+  const promoActive = isPromoFreeProActive(config);
   return `<!doctype html>
 <html lang="${lang}">
 <head>
@@ -132,6 +142,7 @@ function renderBillingShell(lang: Lang, title: string, langHrefPath: string, bod
 ${renderFaviconHeadLinks()}
 <title>${escapeHtml(title)} — ShopCart MCP</title>
 <style>${WALSPRO_DARK_CSS}${BILLING_EXTRA_CSS}</style>
+${renderAnalyticsHead(config, { lang, pageType: "billing", promoActive })}
 </head>
 <body>
 <div class="wrap">
@@ -146,9 +157,10 @@ ${renderFaviconHeadLinks()}
     <a href="/?lang=${lang}">${de ? "Startseite" : "Home"}</a> ·
     <a href="/privacy?lang=${lang}">${de ? "Datenschutz" : "Privacy Policy"}</a> ·
     <a href="/terms?lang=${lang}">${de ? "Nutzungsbedingungen" : "Terms"}</a> ·
-    <a href="https://wals.pro/policies/legal-notice" target="_blank" rel="noopener">${de ? "Impressum" : "Legal Notice"}</a>
+    <a href="https://wals.pro/policies/legal-notice" target="_blank" rel="noopener">${de ? "Impressum" : "Legal Notice"}</a>${renderCookieSettingsFooterLink(config, lang, { separator: " · " })}
   </p>
 </div>
+${renderConsentBanner(config, lang)}
 </body>
 </html>`;
 }
@@ -184,7 +196,7 @@ function renderBillingLoginStep1(params: {
         : ""
     }
     ${params.error ? `<div class="banner err" role="alert">${escapeHtml(params.error)}</div>` : ""}
-    <form method="POST" action="/billing/login" aria-labelledby="billing-heading">
+    <form method="POST" action="/billing/login" aria-labelledby="billing-heading" data-track-submit="signup_start" data-track-surface="billing">
       <input type="hidden" name="_csrf" value="${escapeHtml(params.csrfToken)}">
       <input type="hidden" name="lang" value="${params.lang}">
       <div class="hp" aria-hidden="true">
@@ -311,7 +323,7 @@ export function createBillingRouter(
     }
     const csrf = createCsrfPair(config.sessionSecret, BILLING_CSRF_CONTEXT);
     res.setHeader("Set-Cookie", formatCookie(BILLING_CSRF_COOKIE, csrf.cookieValue, 1800, isHttps));
-    setBillingSecurityHeaders(res);
+    setBillingSecurityHeaders(res, config);
     const prefillEmail = typeof req.query.email === "string" ? req.query.email : "";
     const body = renderBillingLoginStep1({
       lang,
@@ -322,7 +334,7 @@ export function createBillingRouter(
     res
       .status(200)
       .type("html")
-      .send(renderBillingShell(lang, de ? "Anmelden — Konto & Billing" : "Sign in — Account & Billing", "/billing/login", body));
+      .send(renderBillingShell(config, lang, de ? "Anmelden — Konto & Billing" : "Sign in — Account & Billing", "/billing/login", body));
   });
 
   router.get("/billing", async (req: Request, res: Response) => {
@@ -332,7 +344,7 @@ export function createBillingRouter(
     const csrfContext = user ? billingUserCsrfContext(user.id) : BILLING_CSRF_CONTEXT;
     const csrf = createCsrfPair(config.sessionSecret, csrfContext);
     res.setHeader("Set-Cookie", formatCookie(BILLING_CSRF_COOKIE, csrf.cookieValue, 1800, isHttps));
-    setBillingSecurityHeaders(res);
+    setBillingSecurityHeaders(res, config);
 
     if (!user) {
       const prefillEmail = typeof req.query.email === "string" ? req.query.email : "";
@@ -345,7 +357,7 @@ export function createBillingRouter(
       res
         .status(200)
         .type("html")
-        .send(renderBillingShell(lang, de ? "Konto & Billing" : "Account & Billing", "/billing", body));
+        .send(renderBillingShell(config, lang, de ? "Konto & Billing" : "Account & Billing", "/billing", body));
       return;
     }
 
@@ -366,7 +378,7 @@ export function createBillingRouter(
 
     const noticeHtml =
       checkoutParam === "success"
-        ? `<div class="banner ok" role="status">${
+        ? `<div class="banner ok" role="status" data-checkout-success="true" data-checkout-value="${ent.promoActive ? "0" : "9"}">${
             de
               ? "Vielen Dank! Dein Pro-Abo wird gerade über Stripe aktiviert."
               : "Thank you! Your Pro subscription is being activated via Stripe."
@@ -407,7 +419,7 @@ export function createBillingRouter(
       ${
         !ent.isPaidPro
           ? stripeReady
-            ? `<form method="POST" action="/billing/checkout">
+            ? `<form method="POST" action="/billing/checkout" data-track-submit="begin_checkout" data-track-value="9">
                 <input type="hidden" name="_csrf" value="${escapeHtml(csrf.token)}">
                 <input type="hidden" name="lang" value="${lang}">
                 <button class="btn primary" type="submit">${
@@ -448,7 +460,7 @@ export function createBillingRouter(
     res
       .status(200)
       .type("html")
-      .send(renderBillingShell(lang, de ? "Konto & Billing" : "Account & Billing", "/billing", body));
+      .send(renderBillingShell(config, lang, de ? "Konto & Billing" : "Account & Billing", "/billing", body));
   });
 
   const handleBillingEmailRequest = async (req: Request, res: Response): Promise<void> => {
@@ -461,7 +473,7 @@ export function createBillingRouter(
     const renderStep1Error = (msg: string, statusCode = 400) => {
       const freshCsrf = createCsrfPair(config.sessionSecret, BILLING_CSRF_CONTEXT);
       res.setHeader("Set-Cookie", formatCookie(BILLING_CSRF_COOKIE, freshCsrf.cookieValue, 1800, isHttps));
-      setBillingSecurityHeaders(res);
+      setBillingSecurityHeaders(res, config);
       const html = renderBillingLoginStep1({
         lang,
         csrfToken: freshCsrf.token,
@@ -472,7 +484,7 @@ export function createBillingRouter(
       res
         .status(statusCode)
         .type("html")
-        .send(renderBillingShell(lang, de ? "Konto & Billing" : "Account & Billing", "/billing/login", html));
+        .send(renderBillingShell(config, lang, de ? "Konto & Billing" : "Account & Billing", "/billing/login", html));
     };
 
     if ((body.website ?? "").trim() !== "") {
@@ -535,7 +547,7 @@ export function createBillingRouter(
       formatCookie(BILLING_CSRF_COOKIE, freshCsrf.cookieValue, 1800, isHttps),
       formatCookie(OTP_BIND_COOKIE, requested.browserBindCookieValue, 900, isHttps)
     ]);
-    setBillingSecurityHeaders(res);
+    setBillingSecurityHeaders(res, config);
 
     const html = renderBillingLoginStep2({
       lang,
@@ -546,7 +558,7 @@ export function createBillingRouter(
     res
       .status(200)
       .type("html")
-      .send(renderBillingShell(lang, de ? "Code bestätigen" : "Verify code", "/billing/login", html));
+      .send(renderBillingShell(config, lang, de ? "Code bestätigen" : "Verify code", "/billing/login", html));
   };
 
   router.post(
@@ -577,7 +589,7 @@ export function createBillingRouter(
       const renderStep1 = (msg: string, statusCode = 400) => {
         const freshCsrf = createCsrfPair(config.sessionSecret, BILLING_CSRF_CONTEXT);
         res.setHeader("Set-Cookie", formatCookie(BILLING_CSRF_COOKIE, freshCsrf.cookieValue, 1800, isHttps));
-        setBillingSecurityHeaders(res);
+        setBillingSecurityHeaders(res, config);
         const html = renderBillingLoginStep1({
           lang,
           csrfToken: freshCsrf.token,
@@ -588,13 +600,13 @@ export function createBillingRouter(
         res
           .status(statusCode)
           .type("html")
-          .send(renderBillingShell(lang, de ? "Konto & Billing" : "Account & Billing", "/billing/login", html));
+          .send(renderBillingShell(config, lang, de ? "Konto & Billing" : "Account & Billing", "/billing/login", html));
       };
 
       const renderStep2 = (msg: string, statusCode = 400) => {
         const freshCsrf = createCsrfPair(config.sessionSecret, BILLING_CSRF_CONTEXT);
         res.setHeader("Set-Cookie", formatCookie(BILLING_CSRF_COOKIE, freshCsrf.cookieValue, 1800, isHttps));
-        setBillingSecurityHeaders(res);
+        setBillingSecurityHeaders(res, config);
         const html = renderBillingLoginStep2({
           lang,
           csrfToken: freshCsrf.token,
@@ -605,7 +617,7 @@ export function createBillingRouter(
         res
           .status(statusCode)
           .type("html")
-          .send(renderBillingShell(lang, de ? "Code bestätigen" : "Verify code", "/billing/login", html));
+          .send(renderBillingShell(config, lang, de ? "Code bestätigen" : "Verify code", "/billing/login", html));
       };
 
       if ((body.website ?? "").trim() !== "") {

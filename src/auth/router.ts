@@ -2,6 +2,7 @@ import express, { type Request, type Response, type Router } from "express";
 import type { AppConfig } from "../config.js";
 import type { ClientAuthMethod, OAuthClientRecord, StorageBackend } from "../store/types.js";
 import { isPromoFreeProActive } from "../billing/quota.js";
+import { buildOAuthCsp } from "../web/analytics.js";
 import { CimdResolver, isCimdClientId, type ResolvedOAuthClient } from "./cimd.js";
 import {
   createCsrfPair,
@@ -66,12 +67,12 @@ function getClientIp(req: Request): string {
 
 function setSecurityHeadersForHtml(
   res: Response,
+  config: AppConfig,
   opts?: { formActionOrigin?: string; referrerPolicy?: "same-origin" | "no-referrer" }
 ): void {
-  const formAction = opts?.formActionOrigin ? `'self' ${opts.formActionOrigin}` : "'self'";
   res.setHeader(
     "Content-Security-Policy",
-    `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action ${formAction}; frame-ancestors 'none'; base-uri 'none'`
+    buildOAuthCsp(config.ga4MeasurementId, opts?.formActionOrigin)
   );
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
@@ -406,7 +407,7 @@ export function createOAuthRouter(
       "Set-Cookie",
       formatCookie(CSRF_COOKIE, csrf.cookieValue, { maxAge: 1800, secure: isHttps })
     );
-    setSecurityHeadersForHtml(res, {
+    setSecurityHeadersForHtml(res, config, {
       formActionOrigin: redirectUrl.origin,
       referrerPolicy: "same-origin"
     });
@@ -426,7 +427,8 @@ export function createOAuthRouter(
         state,
         csrfToken: csrf.token,
         promoActive: isPromoFreeProActive(config),
-        step: "email"
+        step: "email",
+        config
       })
     );
   });
@@ -484,7 +486,7 @@ export function createOAuthRouter(
         ];
         const redirectUrl = new URL(redirectUri);
         res.setHeader("Set-Cookie", cookiesToSet);
-        setSecurityHeadersForHtml(res, {
+        setSecurityHeadersForHtml(res, config, {
           formActionOrigin: redirectUrl.origin,
           referrerPolicy: "same-origin"
         });
@@ -506,7 +508,8 @@ export function createOAuthRouter(
             challengeId: opts.challengeId,
             email,
             error: opts.error,
-            info: opts.info
+            info: opts.info,
+            config
           })
         );
       };
@@ -722,7 +725,7 @@ export function createOAuthRouter(
   });
 
   router.get("/auth/magic", async (req, res) => {
-    setSecurityHeadersForHtml(res, { referrerPolicy: "no-referrer" });
+    setSecurityHeadersForHtml(res, config, { referrerPolicy: "no-referrer" });
     const rawToken = typeof req.query.token === "string" ? req.query.token : undefined;
     const cookies = parseCookies(req.headers.cookie);
     const fallbackLang = detectLang(req.query.lang, req.headers["accept-language"]);
@@ -738,7 +741,8 @@ export function createOAuthRouter(
           lang: verified.challenge.lang,
           kind: "browser_mismatch",
           email: verified.challenge.email,
-          clientName: verified.challenge.oauthParams?.clientName
+          clientName: verified.challenge.oauthParams?.clientName,
+          config
         })
       );
       return;
@@ -746,21 +750,21 @@ export function createOAuthRouter(
 
     if (verified.status === "expired") {
       res.status(410).type("html").send(
-        renderMagicLinkResultPage({ lang: fallbackLang, kind: "expired" })
+        renderMagicLinkResultPage({ lang: fallbackLang, kind: "expired", config })
       );
       return;
     }
 
     if (verified.status === "used") {
       res.status(410).type("html").send(
-        renderMagicLinkResultPage({ lang: fallbackLang, kind: "used" })
+        renderMagicLinkResultPage({ lang: fallbackLang, kind: "used", config })
       );
       return;
     }
 
     if (verified.status !== "ok") {
       res.status(400).type("html").send(
-        renderMagicLinkResultPage({ lang: fallbackLang, kind: "invalid" })
+        renderMagicLinkResultPage({ lang: fallbackLang, kind: "invalid", config })
       );
       return;
     }
@@ -791,7 +795,7 @@ export function createOAuthRouter(
     const oauthParams = ch.oauthParams;
     if (!oauthParams) {
       res.status(400).type("html").send(
-        renderMagicLinkResultPage({ lang: ch.lang, kind: "invalid" })
+        renderMagicLinkResultPage({ lang: ch.lang, kind: "invalid", config })
       );
       return;
     }
@@ -799,7 +803,7 @@ export function createOAuthRouter(
     const client = await resolveClient(oauthParams.clientId);
     if (!client || !matchRedirectUri(oauthParams.redirectUri, client.redirectUris)) {
       res.status(400).type("html").send(
-        renderMagicLinkResultPage({ lang: ch.lang, kind: "invalid" })
+        renderMagicLinkResultPage({ lang: ch.lang, kind: "invalid", config })
       );
       return;
     }

@@ -2,6 +2,12 @@ import { Router, type Request, type Response } from "express";
 import type { AppConfig } from "../config.js";
 import { detectLang, escapeHtml, type Lang } from "../auth/pages.js";
 import { isPromoFreeProActive } from "../billing/quota.js";
+import {
+  buildGuidesCsp,
+  renderAnalyticsHead,
+  renderConsentBanner,
+  renderCookieSettingsFooterLink
+} from "./analytics.js";
 import { renderFaviconHeadLinks, renderShopCartWordmark, renderSparkCartSvg } from "./brand.js";
 import { ANSWER_PAGE_GUIDES } from "./guides-answer-pages.js";
 import { GEMINI_GUIDES } from "./guides-gemini.js";
@@ -37,17 +43,6 @@ export type {
   GuideSource,
   GuideTable
 };
-
-const GUIDES_CSP = [
-  "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self'",
-  "img-src 'self' data: https:",
-  "connect-src 'self'",
-  "object-src 'none'",
-  "base-uri 'self'",
-  "frame-ancestors 'none'"
-].join("; ");
 
 const CORE_GUIDES: readonly GuideDefinition[] = [
   {
@@ -1940,6 +1935,7 @@ function renderFooter(config: AppConfig, lang: Lang): string {
         <a href="https://wals.pro/policies/legal-notice" target="_blank" rel="noopener noreferrer">${
           de ? "Impressum" : "Legal Notice"
         }</a>
+        ${renderCookieSettingsFooterLink(config, lang)}
       </div>
     </div>
     <p class="disclaimer">${
@@ -1962,16 +1958,16 @@ function renderOneClickButtons(
   const claudeUrl = buildClaudeDeeplink(prompt);
   const chatGptUrl = buildChatGptDeeplink(prompt);
 
-  const geminiBtn = `<a class="btn-primary" href="https://gemini.google.com/" target="_blank" rel="noopener noreferrer">${
+  const geminiBtn = `<a class="btn-primary" data-track-event="connect_ai_click" data-track-client="gemini" data-track-location="guide" href="https://gemini.google.com/" target="_blank" rel="noopener noreferrer">${
     de ? "In Google Gemini öffnen ↗" : "Open Google Gemini ↗"
   }</a>`;
-  const geminiSetupBtn = `<a class="btn-secondary" href="/?lang=${lang}#setup">${
+  const geminiSetupBtn = `<a class="btn-secondary" data-track-event="connect_ai_click" data-track-client="gemini" data-track-location="guide" href="/?lang=${lang}#setup">${
     de ? "Gemini-Setup (Web &amp; CLI) →" : "Gemini setup (Web &amp; CLI) →"
   }</a>`;
-  const claudeBtn = `<a class="${primaryAssistant === "claude" ? "btn-primary" : "btn-secondary"}" href="${escapeHtml(claudeUrl)}" target="_blank" rel="noopener noreferrer">${
+  const claudeBtn = `<a class="${primaryAssistant === "claude" ? "btn-primary" : "btn-secondary"}" data-track-event="connect_ai_click" data-track-client="claude" data-track-location="guide" href="${escapeHtml(claudeUrl)}" target="_blank" rel="noopener noreferrer">${
     de ? "In Claude öffnen ↗" : "Open in Claude ↗"
   }</a>`;
-  const chatGptBtn = `<a class="${primaryAssistant === "chatgpt" ? "btn-primary" : "btn-secondary"}" href="${escapeHtml(chatGptUrl)}" target="_blank" rel="noopener noreferrer">${
+  const chatGptBtn = `<a class="${primaryAssistant === "chatgpt" ? "btn-primary" : "btn-secondary"}" data-track-event="connect_ai_click" data-track-client="chatgpt" data-track-location="guide" href="${escapeHtml(chatGptUrl)}" target="_blank" rel="noopener noreferrer">${
     de ? "In ChatGPT öffnen ↗" : "Open in ChatGPT ↗"
   }</a>`;
 
@@ -2235,6 +2231,7 @@ ${renderFaviconHeadLinks()}
 <meta name="twitter:description" content="${escapeHtml(guide.metaDescription)}">
 <meta name="twitter:image" content="${escapeHtml(ogImage)}">
 <link rel="stylesheet" href="/assets/guides.css?v=${encodeURIComponent(config.version)}">
+${renderAnalyticsHead(config, { lang: guide.lang, pageType: "guide" })}
 <script type="application/ld+json">${safeJsonLd(articleLd)}</script>
 <script type="application/ld+json">${safeJsonLd(faqLd)}</script>
 <script type="application/ld+json">${safeJsonLd(howToLd)}</script>
@@ -2323,6 +2320,7 @@ ${renderHeader(config, guide.lang, switchHref, guide.path)}
 </main>
 
 ${renderFooter(config, guide.lang)}
+${renderConsentBanner(config, guide.lang)}
 </body>
 </html>`;
 }
@@ -2429,6 +2427,7 @@ ${renderFaviconHeadLinks()}
 <meta name="twitter:description" content="${escapeHtml(metaDescription)}">
 <meta name="twitter:image" content="${escapeHtml(ogImage)}">
 <link rel="stylesheet" href="/assets/guides.css?v=${encodeURIComponent(config.version)}">
+${renderAnalyticsHead(config, { lang, pageType: "guides_index" })}
 <script type="application/ld+json">${safeJsonLd(collectionLd)}</script>
 </head>
 <body>
@@ -2481,12 +2480,13 @@ ${renderHeader(config, lang, `/guides?lang=${otherLang}`, "/guides")}
 </main>
 
 ${renderFooter(config, lang)}
+${renderConsentBanner(config, lang)}
 </body>
 </html>`;
 }
 
-function sendGuideHtml(res: Response, html: string): void {
-  res.setHeader("Content-Security-Policy", GUIDES_CSP);
+function sendGuideHtml(res: Response, html: string, csp: string): void {
+  res.setHeader("Content-Security-Policy", csp);
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
@@ -2496,6 +2496,7 @@ function sendGuideHtml(res: Response, html: string): void {
 
 export function createGuidesRouter(config: AppConfig): Router {
   const router = Router();
+  const guidesCsp = buildGuidesCsp(config.ga4MeasurementId);
 
   router.get("/assets/guides.css", (_req: Request, res: Response) => {
     res.setHeader("Content-Type", "text/css; charset=utf-8");
@@ -2506,12 +2507,12 @@ export function createGuidesRouter(config: AppConfig): Router {
 
   router.get("/guides", (req: Request, res: Response) => {
     const lang = detectLang(req.query.lang, req.headers["accept-language"]);
-    sendGuideHtml(res, renderGuidesOverviewPage(config, lang));
+    sendGuideHtml(res, renderGuidesOverviewPage(config, lang), guidesCsp);
   });
 
   for (const guide of GUIDE_DEFINITIONS) {
     router.get(guide.path, (_req: Request, res: Response) => {
-      sendGuideHtml(res, renderGuidePage(config, guide));
+      sendGuideHtml(res, renderGuidePage(config, guide), guidesCsp);
     });
   }
 

@@ -23,6 +23,7 @@ import type { AppConfig } from "./config.js";
 import { createShopcartMcpServer } from "./mcp/create-server.js";
 import type { StorageBackend } from "./store/types.js";
 import { createBillingRouter } from "./web/billing.js";
+import { buildLandingCsp, buildLegalCsp } from "./web/analytics.js";
 import { renderLlmsFullTxt, renderLlmsTxt, renderRobotsTxt, renderSitemapXml } from "./web/discovery.js";
 import { createGuidesRouter } from "./web/guides.js";
 import { renderLandingPage } from "./web/landing.js";
@@ -67,21 +68,23 @@ const STATIC_LANDING_ASSETS: Array<{ route: string; file: string; contentType: s
     route: "/assets/hero-flow.js",
     file: "assets/hero-flow.js",
     contentType: "application/javascript; charset=utf-8"
+  },
+  {
+    route: "/assets/analytics.js",
+    file: "assets/analytics.js",
+    contentType: "application/javascript; charset=utf-8"
+  },
+  {
+    route: "/assets/analytics.css",
+    file: "assets/analytics.css",
+    contentType: "text/css; charset=utf-8"
+  },
+  {
+    route: "/assets/legal.css",
+    file: "assets/legal.css",
+    contentType: "text/css; charset=utf-8"
   }
 ];
-
-const LANDING_CSP = [
-  "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self'",
-  "img-src 'self' data: https:",
-  "media-src 'self' https:",
-  "frame-src https://www.youtube-nocookie.com https://www.youtube.com https://player.vimeo.com https://www.tiktok.com",
-  "connect-src 'self'",
-  "object-src 'none'",
-  "base-uri 'self'",
-  "frame-ancestors 'none'"
-].join("; ");
 
 function corsMiddleware(req: Request, res: Response, next: NextFunction): void {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -335,9 +338,12 @@ export function createApp(deps: CreateAppDeps): Express {
   });
 
   // 8. Landing Page (DE/EN), Product-specific Legal Routes, & Account/Billing Portal
+  const landingCsp = buildLandingCsp(config.ga4MeasurementId);
+  const legalCsp = buildLegalCsp(config.ga4MeasurementId);
+
   app.get("/", (req, res) => {
     const lang = detectLang(req.query.lang, req.headers["accept-language"]);
-    res.setHeader("Content-Security-Policy", LANDING_CSP);
+    res.setHeader("Content-Security-Policy", landingCsp);
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
@@ -392,16 +398,20 @@ export function createApp(deps: CreateAppDeps): Express {
 
   app.get("/privacy", (req, res) => {
     const lang = detectLang(req.query.lang, req.headers["accept-language"]);
+    res.setHeader("Content-Security-Policy", legalCsp);
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     res.setHeader("Cache-Control", "public, max-age=300");
     res.status(200).type("html").send(renderPrivacyPage(config, lang));
   });
 
   app.get("/terms", (req, res) => {
     const lang = detectLang(req.query.lang, req.headers["accept-language"]);
+    res.setHeader("Content-Security-Policy", legalCsp);
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     res.setHeader("Cache-Control", "public, max-age=300");
     res.status(200).type("html").send(renderTermsPage(config, lang));
   });
@@ -414,10 +424,12 @@ export function createApp(deps: CreateAppDeps): Express {
     const accept = String(req.headers.accept ?? "");
     if (req.method === "GET" && accept.includes("text/html") && !accept.includes("application/json")) {
       const lang = detectLang(req.query.lang, req.headers["accept-language"]);
+      res.setHeader("Content-Security-Policy", legalCsp);
       res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("X-Frame-Options", "DENY");
+      res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
       res.setHeader("Cache-Control", "no-store");
-      res.status(404).type("html").send(renderNotFoundPage(lang));
+      res.status(404).type("html").send(renderNotFoundPage(lang, config));
       return;
     }
     res.status(404).json({ error: "not_found" });
