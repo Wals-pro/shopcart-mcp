@@ -260,6 +260,10 @@ describe("SEO & GEO shopping guide pages (/guides, 11 DE/EN detail routes, sitem
     expect(geminiDe.text).toContain("gemini extensions install https://github.com/Wals-pro/shopcart-mcp");
     expect(geminiDe.text).toContain("httpUrl");
     expect(geminiDe.text).toContain("vertexaisearch.cloud.google.com/oauth-redirect");
+    expect(geminiDe.text).toContain("Instacart");
+    expect(geminiDe.text).toContain("Share-A-Cart");
+    expect(geminiDe.text).toContain("Produktfeed");
+    expect(geminiDe.text).toContain("/cart/...");
 
     const geminiEn = await request(app).get("/guides/gemini-shopping-cart").expect(200);
     expect(extractTagContent(geminiEn.text, "h1")).toBe(
@@ -268,6 +272,10 @@ describe("SEO & GEO shopping guide pages (/guides, 11 DE/EN detail routes, sitem
     expect(geminiEn.text).toContain("gemini extensions install https://github.com/Wals-pro/shopcart-mcp");
     expect(geminiEn.text).toContain("httpUrl");
     expect(geminiEn.text).toContain("mcpToTool");
+    expect(geminiEn.text).toContain("Instacart");
+    expect(geminiEn.text).toContain("Share-A-Cart");
+    expect(geminiEn.text).toContain("product-feed");
+    expect(geminiEn.text).toContain("/cart/...");
   });
 
   it("links all 11 DE + EN guides from /guides and supports ?lang=de and ?lang=en", async () => {
