@@ -772,7 +772,15 @@ describe("ShopifyAdapter UCP (/api/ucp/mcp) forward-compatibility", () => {
 describe("AdapterRegistry & SSRF protection across all adapters", () => {
   it("registers adapters in deterministic order and resolves each platform without breaking Shopify detection", async () => {
     const defaultRegistry = new AdapterRegistry();
-    expect(defaultRegistry.listPlatforms()).toEqual(["shopify", "magento", "shopware", "bigcommerce"]);
+    expect(defaultRegistry.listPlatforms()).toEqual([
+      "amazon",
+      "shopify",
+      "woocommerce",
+      "bigcommerce",
+      "shopware",
+      "magento",
+      "jsonld"
+    ]);
 
     const fetcher = makeFixtureFetcher({
       // Shopify store

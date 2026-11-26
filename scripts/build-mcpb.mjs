@@ -114,19 +114,19 @@ export function createMcpbManifest(version) {
     display_name: "ShopCart MCP",
     version,
     description:
-      "Search Shopify, WooCommerce & Amazon stores, browse deals, check store policies, inspect variants, and create cart links — local & zero-auth.",
+      "Search Shopify, WooCommerce, Amazon, BigCommerce, Shopware 6, Magento 2 & JSON-LD stores, browse deals, inspect variants, and build cart links — local & zero-auth.",
     long_description: [
-      "Connect Claude Desktop directly to public Shopify storefronts, WooCommerce stores, and Amazon marketplaces with zero login, zero API keys required for core features, and zero telemetry.",
+      "Connect Claude Desktop directly to public Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2, Universal JSON-LD storefronts, and Amazon marketplaces with zero login, zero API keys required for core features, and zero telemetry.",
       "",
       "**Included read-only tools:**",
-      "- `inspect_store` — Verify Shopify, WooCommerce, or Amazon storefront support, currency, country, WAF behavior, and capabilities.",
+      "- `inspect_store` — Detect platform (Amazon, Shopify incl. UCP, WooCommerce, BigCommerce, Shopware 6, Magento 2, or Universal JSON-LD), currency, country, WAF behavior, and capabilities.",
       "- `list_collections` — Browse Shopify store collections and automatically highlight Sale, Black Friday, Bestseller, and seasonal deal collections.",
-      "- `search_products` — Search public product catalogs (Shopify, WooCommerce, or Amazon via optional PA-API/Keepa) with availability, price, and discount sorting (`discount_desc`, `price_asc`, `price_desc`).",
-      "- `get_product` — Fetch sanitized product details, options, images, stock, compare-at discounts, and exact variant IDs or Amazon ASINs.",
+      "- `search_products` — Search public product catalogs across supported storefronts (or Amazon via optional PA-API/Keepa) with availability, price, and discount sorting (`discount_desc`, `price_asc`, `price_desc`).",
+      "- `get_product` — Fetch sanitized product details, options, images, stock, compare-at discounts, and exact variant/SKU IDs or Amazon ASINs.",
       "- `get_store_policies` — Check Shopify shipping thresholds, delivery times, and return/refund policies via native Storefront MCP and public `/policies` pages.",
-      "- `create_cart_link` — Build verified browser cart or checkout permalinks across Shopify, WooCommerce, and Amazon so you review and complete checkout yourself.",
+      "- `create_cart_link` — Build verified browser cart/checkout permalinks (Shopify, WooCommerce, BigCommerce, Amazon) or verified direct product links (Shopware 6, Magento 2, JSON-LD) so you review and complete checkout yourself.",
       "",
-      "Includes built-in SSRF protection and prompt-injection sanitization. Independent open-source project by Wals.pro (not affiliated with Shopify Inc., Automattic/WooCommerce, or Amazon)."
+      "Includes built-in SSRF protection and prompt-injection sanitization. Independent open-source project by Wals.pro (not affiliated with any storefront platform vendor)."
     ].join("\n"),
     author: {
       name: "Wals.pro",

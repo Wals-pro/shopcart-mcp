@@ -325,7 +325,10 @@ export function resolveAmazonAssociateTag(
 ): string | null {
   const marketplace = extractAmazonMarketplace(hostname);
   if (!marketplace) return null;
-  return config.amazonAssociateTags[marketplace] ?? config.amazonAssociateTag ?? null;
+  if (Object.hasOwn(config.amazonAssociateTags, marketplace)) {
+    return config.amazonAssociateTags[marketplace] ?? null;
+  }
+  return config.amazonAssociateTag ?? null;
 }
 
 /**

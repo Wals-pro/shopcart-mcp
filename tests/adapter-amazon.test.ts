@@ -578,9 +578,18 @@ describe("AdapterRegistry & MCP Tools integration (Amazon + Shopify isolation)",
       });
       expect(cartRes.isError).toBe(false);
       const cartData = JSON.parse((cartRes.content as Array<{ text: string }>)[0]!.text);
-      expect(cartData.cart_url).toBe(
-        "https://www.amazon.de/gp/aws/cart/add.html?ASIN.1=B08N5WRWNW&Quantity.1=1&ASIN.2=B09G9FPHY6&Quantity.2=2&AssociateTag=shopcart-21"
+      const parsedCartUrl = new URL(cartData.cart_url);
+      expect(`${parsedCartUrl.origin}${parsedCartUrl.pathname}`).toBe(
+        "https://www.amazon.de/gp/aws/cart/add.html"
       );
+      expect(parsedCartUrl.searchParams.get("ASIN.1")).toBe("B08N5WRWNW");
+      expect(parsedCartUrl.searchParams.get("Quantity.1")).toBe("1");
+      expect(parsedCartUrl.searchParams.get("ASIN.2")).toBe("B09G9FPHY6");
+      expect(parsedCartUrl.searchParams.get("Quantity.2")).toBe("2");
+      expect(parsedCartUrl.searchParams.get("AssociateTag")).toBe("shopcart-21");
+      expect(parsedCartUrl.searchParams.get("utm_source")).toBe("shopcart.wals.pro");
+      expect(parsedCartUrl.searchParams.get("utm_medium")).toBe("ai_mcp");
+      expect(parsedCartUrl.searchParams.get("utm_campaign")).toBe("shopcart_mcp");
       expect(cartData.affiliate_disclosure).toBe(true);
 
       // 3b. list_collections & get_store_policies return graceful notices on Amazon (no crash)

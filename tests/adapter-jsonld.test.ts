@@ -740,10 +740,19 @@ describe("UniversalJsonLdAdapter (get_product, search_products, create_cart_link
     ).rejects.toMatchObject({ code: "BLOCKED_IP" });
   });
 
-  it("keeps UniversalJsonLdAdapter strictly LAST in AdapterRegistry so Shopify always takes priority", async () => {
+  it("keeps UniversalJsonLdAdapter strictly LAST in AdapterRegistry so dedicated adapters always take priority", async () => {
     const defaultRegistry = new AdapterRegistry();
     const platforms = defaultRegistry.listPlatforms();
-    expect(platforms[0]).toBe("shopify");
+    expect(platforms).toEqual([
+      "amazon",
+      "shopify",
+      "woocommerce",
+      "bigcommerce",
+      "shopware",
+      "magento",
+      "jsonld"
+    ]);
+    expect(platforms.indexOf("shopify")).toBeLessThan(platforms.indexOf("jsonld"));
     expect(platforms[platforms.length - 1]).toBe("jsonld");
 
     const fetcher = makeFixtureFetcher({

@@ -800,4 +800,79 @@ describe("MCP tool integration & /privacy + /terms affiliate disclosure", () => 
     expect(dealsData.affiliate_disclosure).toBe(false);
     expect(dealsData.notices[0]).toContain("not configured");
   });
+
+  it("cleanly appends UTM params across all 7 adapter cart & product URL formats without breaking native query params", () => {
+    const cfg = loadAttributionConfig({});
+    const samples: Array<{
+      name: string;
+      url: string;
+      kind: "cart" | "product";
+      expectedParams: Record<string, string>;
+      expectedPathPrefix: string;
+    }> = [
+      {
+        name: "Shopify cart (?storefront=true)",
+        url: "https://snocks.com/cart/44123456789:2?storefront=true",
+        kind: "cart",
+        expectedParams: { storefront: "true" },
+        expectedPathPrefix: "/cart/44123456789:2"
+      },
+      {
+        name: "WooCommerce cart (?add-to-cart=)",
+        url: "https://8bar-bikes.com/cart/?add-to-cart=1234&quantity=2",
+        kind: "cart",
+        expectedParams: { "add-to-cart": "1234", quantity: "2" },
+        expectedPathPrefix: "/cart/"
+      },
+      {
+        name: "BigCommerce cart (/cart.php?action=add)",
+        url: "https://bc-shop.example/cart.php?action=add&product_id=77&qty=1",
+        kind: "cart",
+        expectedParams: { action: "add", product_id: "77", qty: "1" },
+        expectedPathPrefix: "/cart.php"
+      },
+      {
+        name: "Amazon cart (/gp/aws/cart/add.html)",
+        url: "https://www.amazon.de/gp/aws/cart/add.html?ASIN.1=B08N5WRWNW&Quantity.1=1",
+        kind: "cart",
+        expectedParams: { "ASIN.1": "B08N5WRWNW", "Quantity.1": "1" },
+        expectedPathPrefix: "/gp/aws/cart/add.html"
+      },
+      {
+        name: "Shopware 6 direct product link",
+        url: "https://sw-shop.example/detail/018f0000000070008000000000000001",
+        kind: "cart",
+        expectedParams: {},
+        expectedPathPrefix: "/detail/018f0000000070008000000000000001"
+      },
+      {
+        name: "Magento 2 direct product link",
+        url: "https://m2-shop.example/nordic-lamp.html",
+        kind: "cart",
+        expectedParams: {},
+        expectedPathPrefix: "/nordic-lamp.html"
+      },
+      {
+        name: "Universal JSON-LD direct product link",
+        url: "https://thomann.de/de/shure_sm7b.htm",
+        kind: "product",
+        expectedParams: {},
+        expectedPathPrefix: "/de/shure_sm7b.htm"
+      }
+    ];
+
+    for (const sample of samples) {
+      const res = applyAttribution(sample.url, cfg, { kind: sample.kind });
+      expect(res.utm_applied, sample.name).toBe(true);
+      expect(res.affiliate_disclosure, sample.name).toBe(false);
+      const parsed = new URL(res.url);
+      expect(parsed.pathname, sample.name).toBe(sample.expectedPathPrefix);
+      for (const [k, v] of Object.entries(sample.expectedParams)) {
+        expect(parsed.searchParams.get(k), `${sample.name} param ${k}`).toBe(v);
+      }
+      expect(parsed.searchParams.get("utm_source"), sample.name).toBe("shopcart.wals.pro");
+      expect(parsed.searchParams.get("utm_medium"), sample.name).toBe("ai_mcp");
+      expect(parsed.searchParams.get("utm_campaign"), sample.name).toBe("shopcart_mcp");
+    }
+  });
 });

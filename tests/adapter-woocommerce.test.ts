@@ -809,9 +809,17 @@ describe("WooCommerceAdapter (detect, search, variable products, cart links)", (
 });
 
 describe("AdapterRegistry auto-routing (Amazon, Shopify & WooCommerce)", () => {
-  it("registers AmazonAdapter -> ShopifyAdapter -> WooCommerceAdapter and routes each platform automatically", async () => {
+  it("registers all 7 adapters in deterministic priority order and routes each platform automatically", async () => {
     const defaultRegistry = new AdapterRegistry();
-    expect(defaultRegistry.listPlatforms()).toEqual(["amazon", "shopify", "woocommerce"]);
+    expect(defaultRegistry.listPlatforms()).toEqual([
+      "amazon",
+      "shopify",
+      "woocommerce",
+      "bigcommerce",
+      "shopware",
+      "magento",
+      "jsonld"
+    ]);
 
     const fetcher = makeFixtureFetcher({
       // Shopify store

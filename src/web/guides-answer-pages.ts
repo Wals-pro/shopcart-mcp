@@ -91,7 +91,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
               "Merchant onboarding required",
               "Merchant enrollment required",
               "Merchant partner program required",
-              "Zero merchant setup for public Shopify & WooCommerce stores + official Amazon cart permalinks"
+              "Zero merchant setup for public Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2 & Schema.org JSON-LD stores + official Amazon cart permalinks"
             ],
             [
               "Payment & account safety",
@@ -118,11 +118,11 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
         orderedSteps: [
           {
             lead: "Inspect store compatibility (inspect_store):",
-            text: "Detects whether a store is a public Shopify or WooCommerce storefront (or an Amazon marketplace for cart permalinks) and resolves currency, country, and firewall rules."
+            text: "Detects whether a store runs on Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2, Amazon, or Universal Schema.org JSON-LD and resolves currency, country, and firewall rules."
           },
           {
             lead: "Search live catalog (search_products):",
-            text: "Searches public Shopify and WooCommerce catalogs with exact availability and price filters in the store's native currency."
+            text: "Searches public Shopify, WooCommerce, BigCommerce, Shopware 6, and Magento 2 catalogs with exact availability and price filters in the store's native currency."
           },
           {
             lead: "Verify variants and stock (get_product):",
@@ -168,7 +168,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
     sources: SOURCES_EN,
     limitationsLabel: "Limitations:",
     limitationsText:
-      "ShopCart MCP is intentionally read-only: it never executes one-click in-chat payments or logs into private merchant accounts. Full live catalog, variant, and stock search works on public Shopify and WooCommerce storefronts without login gates; on Amazon, ShopCart MCP supports official multi-item cart permalinks paired with AI web search or optional Keepa/PA-API keys.",
+      "ShopCart MCP is intentionally read-only: it never executes one-click in-chat payments or logs into private merchant accounts. Full live catalog, variant, and stock checks work across public Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2, and Schema.org JSON-LD storefronts without login gates; on Amazon, ShopCart MCP supports official multi-item cart permalinks paired with AI web search or optional Keepa/PA-API keys.",
     faqHeading: "Frequently Asked Questions",
     faqs: [
       {
@@ -293,7 +293,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
               "Händler-Einrichtung nötig?",
               "Nein",
               "Ja — geschlossenes Partnerprogramm",
-              "Nein — öffentliche Shopify- & WooCommerce-Shops + Amazon-Cart-Links"
+              "Nein — öffentliche Shopify-, WooCommerce-, BigCommerce-, Shopware-6-, Magento-2- & JSON-LD-Shops + Amazon-Cart-Links"
             ],
             [
               "Zahlung & Datenschutz",
@@ -320,11 +320,11 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
         orderedSteps: [
           {
             lead: "Shop erkennen (inspect_store):",
-            text: "Prüft automatisch, ob ein öffentlicher Shopify- oder WooCommerce-Shop (oder ein Amazon-Marktplatz für Cart-Links) vorliegt, und liest Währung sowie Region aus."
+            text: "Prüft automatisch, ob ein öffentlicher Shopify-, WooCommerce-, BigCommerce-, Shopware-6-, Magento-2-, Amazon- oder Schema.org-JSON-LD-Shop vorliegt, und liest Währung sowie Region aus."
           },
           {
             lead: "Live-Katalog durchsuchen (search_products):",
-            text: "Filtert lieferbare Artikel auf öffentlichen Shopify- und WooCommerce-Storefronts nach Stichwort und Budget in Shop-Währung."
+            text: "Filtert lieferbare Artikel auf öffentlichen Shopify-, WooCommerce-, BigCommerce-, Shopware-6- und Magento-2-Storefronts nach Stichwort und Budget in Shop-Währung."
           },
           {
             lead: "Größen & Bestand verifizieren (get_product):",
@@ -370,7 +370,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
     sources: SOURCES_DE,
     limitationsLabel: "Grenzen:",
     limitationsText:
-      "ShopCart MCP führt bewusst keinen automatischen In-Chat-Kauf aus und speichert keine Zugangsdaten. Die vollständige Live-Katalog-, Varianten- und Bestandsprüfung läuft auf öffentlichen Shopify- und WooCommerce-Shops ohne Login-Pflicht; für Amazon unterstützt ShopCart MCP offizielle Multi-Artikel-Warenkorb-Links in Kombination mit KI-Websuche oder optionalen Keepa-/PA-API-Zugangsdaten.",
+      "ShopCart MCP führt bewusst keinen automatischen In-Chat-Kauf aus und speichert keine Zugangsdaten. Die vollständige Live-Katalog-, Varianten- und Bestandsprüfung läuft auf öffentlichen Shopify-, WooCommerce-, BigCommerce-, Shopware-6-, Magento-2- und Schema.org-JSON-LD-Shops ohne Login-Pflicht; für Amazon unterstützt ShopCart MCP offizielle Multi-Artikel-Warenkorb-Links in Kombination mit KI-Websuche oder optionalen Keepa-/PA-API-Zugangsdaten.",
     faqHeading: "Häufige Fragen zur offenen ChatGPT-Instant-Checkout-Alternative",
     faqs: [
       {
