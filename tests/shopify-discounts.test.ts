@@ -1287,4 +1287,247 @@ describe("MCP Integration — find_store_discounts & create_cart_link auto-apply
     expect(directExtractorRes.codes.map((c) => c.code)).not.toContain("PARTNER20");
     expect(directExtractorRes.codes.map((c) => c.code)).toContain("PUBLIC10");
   });
+
+  it("discloses affiliate monetization on Shopify reverse canonical host drift when a requested-host partner code is re-submitted", async () => {
+    let declareCrossSiteCanonical = false;
+    const emailSender = new MemoryEmailSender();
+    const config = loadConfig({
+      APP_ORIGIN: "https://shopcart.wals.pro",
+      STORAGE_BACKEND: "memory",
+      SESSION_SECRET: "test-session-secret-0123456789abcdef",
+      AFFILIATE_RULES_JSON: JSON.stringify([
+        { domain: "oldbrand.example", network: "direct_partner", discount: "PARTNER20" }
+      ])
+    });
+
+    const shopifyFetcher = async (url: string): Promise<SafeFetchResponse> => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/meta.json") {
+        if (parsed.hostname === "oldbrand.example") {
+          return makeResponse(
+            url,
+            declareCrossSiteCanonical
+              ? {
+                  shop_id: 1001,
+                  name: "Old Brand",
+                  currency: "EUR",
+                  country: "DE",
+                  domain: "newbrand.example"
+                }
+              : {
+                  shop_id: 1001,
+                  name: "Old Brand",
+                  currency: "EUR",
+                  country: "DE"
+                }
+          );
+        }
+        if (parsed.hostname === "newbrand.example") {
+          return makeResponse(url, {
+            shop_id: 2002,
+            name: "New Brand",
+            currency: "EUR",
+            country: "DE",
+            domain: "newbrand.example"
+          });
+        }
+      }
+      if (parsed.pathname === "/") {
+        return makeResponse(url, "<html><body>Storefront</body></html>", 200, "text/html");
+      }
+      if (parsed.pathname === "/collections.json") {
+        return makeResponse(url, { collections: [] });
+      }
+      return makeResponse(url, "Not Found", 404, "text/plain");
+    };
+
+    const app = createApp({
+      config,
+      store: new MemoryStore(),
+      registry: new AdapterRegistry([
+        new ShopifyAdapter(new ShopifyClient(shopifyFetcher)),
+        new WooCommerceAdapter(async (url) => makeResponse(url, "Not Found", 404, "text/plain"))
+      ]),
+      emailSender
+    });
+    const token = await issueBearerToken(app, emailSender);
+
+    const callTool = async (id: number, name: string, args: Record<string, unknown>) => {
+      const res = await request(app)
+        .post("/mcp")
+        .set("Authorization", `Bearer ${token}`)
+        .set("Accept", "application/json, text/event-stream")
+        .send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } })
+        .expect(200);
+      return {
+        isError: Boolean(res.body.result.isError),
+        payload: JSON.parse(res.body.result.content[0].text as string)
+      };
+    };
+
+    // T1: oldbrand.example resolves to itself -> PARTNER20 is surfaced as partner_rule
+    const disc = await callTool(61, "find_store_discounts", { store_url: "oldbrand.example" });
+    expect(disc.isError).toBe(false);
+    expect(disc.payload.store_origin).toBe("https://oldbrand.example");
+    expect(disc.payload.codes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "PARTNER20",
+          source: "partner_rule",
+          confidence: "high"
+        })
+      ])
+    );
+
+    // T2: After TTL expiry, oldbrand.example's meta.json drifts cross-site to newbrand.example
+    declareCrossSiteCanonical = true;
+    const baseNow = Date.now();
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(baseNow + 16 * 60 * 1000);
+    try {
+      const cart = await callTool(62, "create_cart_link", {
+        store_url: "oldbrand.example",
+        items: [{ variant_id: "123", quantity: 1 }],
+        mode: "cart",
+        discount_code: "PARTNER20"
+      });
+      expect(cart.isError).toBe(false);
+      const cartUrl = new URL(cart.payload.cart_url);
+      expect(cartUrl.hostname).toBe("newbrand.example");
+      expect(cartUrl.searchParams.get("discount")).toBe("PARTNER20");
+      expect(cart.payload.affiliate_disclosure).toBe(true);
+      expect(cart.payload.disclosure_note).toBe(AFFILIATE_DISCLOSURE_NOTE);
+
+      // Non-partner code on the drifted host must NOT falsely trigger affiliate disclosure
+      const nonPartnerCart = await callTool(63, "create_cart_link", {
+        store_url: "oldbrand.example",
+        items: [{ variant_id: "123", quantity: 1 }],
+        mode: "cart",
+        discount_code: "PUBLIC10"
+      });
+      expect(nonPartnerCart.isError).toBe(false);
+      expect(new URL(nonPartnerCart.payload.cart_url).hostname).toBe("newbrand.example");
+      expect(nonPartnerCart.payload.affiliate_disclosure).toBe(false);
+      expect(nonPartnerCart.payload.disclosure_note).toBeUndefined();
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("discloses affiliate monetization on WooCommerce cross-site redirect when a requested-host partner code is passed", async () => {
+    const emailSender = new MemoryEmailSender();
+    const config = loadConfig({
+      APP_ORIGIN: "https://shopcart.wals.pro",
+      STORAGE_BACKEND: "memory",
+      SESSION_SECRET: "test-session-secret-0123456789abcdef",
+      AFFILIATE_RULES_JSON: JSON.stringify([
+        { domain: "woo-a.example", network: "direct_partner", discount: "PARTNERA" }
+      ])
+    });
+
+    const wooFetcher = async (url: string): Promise<SafeFetchResponse> => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/wp-json/wc/store/v1/products") {
+        return makeResponse(
+          `https://woo-b.example${parsed.pathname}${parsed.search}`,
+          [
+            {
+              id: 101,
+              name: "Trail Pack",
+              slug: "trail-pack",
+              type: "simple",
+              permalink: "https://woo-b.example/product/trail-pack/",
+              is_in_stock: true,
+              is_purchasable: true,
+              prices: {
+                price: "8900",
+                regular_price: "8900",
+                currency_code: "EUR",
+                currency_minor_unit: 2
+              }
+            }
+          ],
+          200,
+          "application/json"
+        );
+      }
+      if (parsed.pathname === "/wp-json/wc/store/v1/cart") {
+        return makeResponse(
+          `https://woo-b.example${parsed.pathname}`,
+          {
+            items: [],
+            totals: { currency_code: "EUR", currency_minor_unit: 2 },
+            shipping_address: { country: "DE" }
+          },
+          200,
+          "application/json"
+        );
+      }
+      return makeResponse(url, "Not Found", 404, "text/plain");
+    };
+
+    const app = createApp({
+      config,
+      store: new MemoryStore(),
+      registry: new AdapterRegistry([
+        new WooCommerceAdapter(wooFetcher),
+        new ShopifyAdapter(new ShopifyClient(async (url) => makeResponse(url, "Not Found", 404, "text/plain")))
+      ]),
+      emailSender
+    });
+    const token = await issueBearerToken(app, emailSender);
+
+    const callTool = async (id: number, name: string, args: Record<string, unknown>) => {
+      const res = await request(app)
+        .post("/mcp")
+        .set("Authorization", `Bearer ${token}`)
+        .set("Accept", "application/json, text/event-stream")
+        .send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } })
+        .expect(200);
+      return {
+        isError: Boolean(res.body.result.isError),
+        payload: JSON.parse(res.body.result.content[0].text as string)
+      };
+    };
+
+    const disc = await callTool(71, "find_store_discounts", { store_url: "woo-a.example" });
+    expect(disc.isError).toBe(false);
+    expect(disc.payload.codes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "PARTNERA", source: "partner_rule" })
+      ])
+    );
+
+    const cart = await callTool(72, "create_cart_link", {
+      store_url: "woo-a.example",
+      items: [{ variant_id: "101", quantity: 1 }],
+      mode: "cart",
+      discount_code: "PARTNERA"
+    });
+    expect(cart.isError).toBe(false);
+    expect(cart.payload.store_origin).toBe("https://woo-b.example");
+    expect((cart.payload.warnings as string[]).some((w) => w.includes("PARTNERA"))).toBe(true);
+    expect(cart.payload.affiliate_disclosure).toBe(true);
+    expect(cart.payload.disclosure_note).toBe(AFFILIATE_DISCLOSURE_NOTE);
+
+    // Also verify www. alternate of requested host discloses, while non-partner code does not
+    const wwwCart = await callTool(73, "create_cart_link", {
+      store_url: "www.woo-a.example",
+      items: [{ variant_id: "101", quantity: 1 }],
+      mode: "cart",
+      discount_code: "PARTNERA"
+    });
+    expect(wwwCart.isError).toBe(false);
+    expect(wwwCart.payload.affiliate_disclosure).toBe(true);
+    expect(wwwCart.payload.disclosure_note).toBe(AFFILIATE_DISCLOSURE_NOTE);
+
+    const otherCart = await callTool(74, "create_cart_link", {
+      store_url: "woo-a.example",
+      items: [{ variant_id: "101", quantity: 1 }],
+      mode: "cart",
+      discount_code: "OTHER10"
+    });
+    expect(otherCart.isError).toBe(false);
+    expect(otherCart.payload.affiliate_disclosure).toBe(false);
+    expect(otherCart.payload.disclosure_note).toBeUndefined();
+  });
 });

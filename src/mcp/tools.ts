@@ -731,10 +731,10 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           }
 
           if (finalDiscounts.size > 0) {
-            const candidateOrigins = new Set<string>([result.store_origin]);
-            if (isSameStoreSite(result.store_origin, origin)) {
-              candidateOrigins.add(origin);
-            }
+            // Always include the requested origin alongside result.store_origin so a partner code
+            // surfaced for host A still triggers affiliate disclosure if the cart host redirects
+            // or drifts cross-site to host B.
+            const candidateOrigins = new Set<string>([result.store_origin, origin]);
             for (const orig of [...candidateOrigins]) {
               try {
                 const u = new URL(orig);

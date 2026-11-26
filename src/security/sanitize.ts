@@ -265,25 +265,42 @@ export function stripHiddenStyleBlocksLinear(html: string): string {
         }
       } else {
         let quote = 0;
+        let afterEq = false;
+        let firstRawGt = -1;
+        let firstRawLt = -1;
         for (let j = nameEnd; j < searchEnd; j++) {
           const c = lower.charCodeAt(j);
+          if (firstRawGt === -1 && firstRawLt === -1) {
+            if (c === 62) firstRawGt = j;
+            else if (c === 60) firstRawLt = j;
+          }
           if (quote !== 0) {
-            if (c === quote) quote = 0;
-          } else if (c === 34 || c === 39) {
+            if (c === quote) {
+              quote = 0;
+              afterEq = false;
+            }
+          } else if (afterEq && (c === 34 || c === 39)) {
             quote = c;
+            afterEq = false;
+          } else if (c === 61) {
+            afterEq = true;
           } else if (c === 62) {
             openEnd = j;
             break;
           } else if (c === 60) {
             unquotedLt = j;
             break;
+          } else if (c !== 32 && c !== 9 && c !== 10 && c !== 12 && c !== 13) {
+            afterEq = false;
           }
         }
 
         if (openEnd === -1 && unquotedLt === -1) {
+          // Unclosed quote or oversized attribute: enable raw fallback across the scanned window
+          // to stay strictly O(N), and still evaluate the current tag via its first raw '>'/'<'.
           rawFallbackUntil = Math.max(rawFallbackUntil, searchEnd);
-          pos = lt + 1;
-          continue;
+          openEnd = firstRawGt;
+          unquotedLt = firstRawLt;
         }
       }
 
