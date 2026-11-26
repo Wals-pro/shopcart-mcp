@@ -6,8 +6,12 @@ import {
   loadAttributionConfig,
   type AttributionConfig
 } from "../attribution/links.js";
+import {
+  sanitizeGenericVariantId,
+  sanitizeSafeHandle
+} from "../security/identifiers.js";
 import { sanitizeText, SOURCE_NOTICE_CATALOG, SOURCE_NOTICE_PRODUCT } from "../security/sanitize.js";
-import { normalizeStoreOrigin, SsrfError } from "../security/ssrf.js";
+import { normalizeStoreOrigin, SsrfError, validateExternalUrl } from "../security/ssrf.js";
 
 export const CLI_VERSION = "0.5.1";
 
@@ -24,7 +28,8 @@ const VALID_SORT_VALUES: readonly ProductSortBy[] = [
 const VALID_POLICY_TOPICS: readonly PolicyTopic[] = ["shipping", "returns", "all"];
 const VALID_CART_MODES = ["cart", "checkout"] as const;
 const DISCOUNT_CODE_RE = /^[A-Za-z0-9._-]{1,64}$/;
-const INVALID_VARIANT_ID_RE = /[\x00-\x1f\s]/;
+const SHELL_META_RE = /[\x00-\x1f\s$`'"\\;|&<>(){}[\]!#*?]/;
+const SAFE_RELATIVE_PRODUCT_PATH_RE = /^\/?(?:[A-Za-z0-9._~-]+\/){0,5}[A-Za-z0-9._~-]+$/;
 
 export class CliUsageError extends Error {
   readonly usage?: string;
@@ -93,39 +98,43 @@ export function renderCliHelp(version = CLI_VERSION): string {
   return `shopcart-mcp v${version} — Read-only Shopping & Cart CLI + stdio MCP server (by wals.pro)
 
 Zero-argument mode (default for Claude Desktop, Cursor, OpenClaw, MCP hosts):
-  shopcart-mcp                                    Start stdio MCP server
+  shopcart-mcp                                          Start stdio MCP server
 
 One-shot CLI subcommands (deterministic JSON on stdout, zero OAuth popup):
-  shopcart-mcp inspect <store>                    Detect store platform, currency, country & WAF rules
-  shopcart-mcp search <store> "<query>" [opts]    Search products with live price & stock filters
-  shopcart-mcp product <store> <handle|url>       Fetch exact variant IDs, sizes, prices & stock
-  shopcart-mcp policies <store> [opts]            Fetch Shopify shipping & return policies
-  shopcart-mcp collections <store> [opts]         List Shopify collections & highlighted deals
-  shopcart-mcp cart <store> <id:qty> [...] [opts] Build verified read-only /cart/... checkout link
+  shopcart-mcp inspect '<store>'                        Detect store platform, currency, country & WAF rules
+  shopcart-mcp search '<store>' '<query>' [opts]        Search products with live price & stock filters
+  shopcart-mcp product '<store>' '<handle-or-url>'      Fetch exact variant IDs, sizes, prices & stock
+  shopcart-mcp policies '<store>' [opts]                Fetch Shopify shipping & return policies
+  shopcart-mcp collections '<store>' [opts]             List Shopify collections & highlighted deals
+  shopcart-mcp cart '<store>' '<id:qty>' [...] [opts]   Build verified read-only /cart/... checkout link
 
 Options:
   search:
     --limit <1-20>               Max results (default: 10)
     --sort <order>               relevance | price_asc | price_desc | discount_desc
-    --collection <handle>        Optional Shopify collection handle (e.g. sale, bestseller)
+    --collection '<handle>'      Optional Shopify collection handle (e.g. 'sale', 'bestseller')
     --min-price <n>              Minimum price in store currency
     --max-price <n>              Maximum price in store currency
     --available                  Only return in-stock products
   policies:
     --topic <topic>              shipping | returns | all (default: all)
-    --question "<text>"          Optional Storefront MCP FAQ question
+    --question '<text>'          Optional Storefront MCP FAQ question
   collections:
     --limit <1-100>              Max collections (default: 30)
     --deals-only                 Only highlighted Sale/Black Friday/Bestseller collections
   cart:
-    --discount <CODE>            User-supplied discount code (Shopify)
-    --note "<TEXT>"              Optional order note (Shopify cart permalinks, max 500 chars)
+    --discount '<CODE>'          User-supplied discount code (Shopify)
+    --note '<TEXT>'              Optional order note (Shopify cart permalinks, max 500 chars)
     --mode <cart|checkout>       cart (default) or checkout
-    --verify <handle>            Verify live stock & price for product handle (repeatable)
+    --verify '<handle>'          Verify live stock & price for product handle (repeatable)
   Global:
     --json                       Explicit JSON output (default for one-shot subcommands)
     -h, --help                   Show this help message
     -v, --version                Print version
+
+Shell safety:
+  Always single-quote store-derived arguments (or pass via argv array) when invoking via a shell.
+  Only forward safe identifiers (^[A-Za-z0-9._~-]+$ for handles; ^[A-Za-z0-9._:-]+$ for variant IDs).
 
 Exit codes:
   0  Success
@@ -133,10 +142,10 @@ Exit codes:
   2  CLI usage or argument validation error (JSON error on stderr)
 
 Examples:
-  npx -y shopcart-mcp inspect snocks.com
-  npx -y shopcart-mcp search snocks.com "socken" --limit 3 --available
-  npx -y shopcart-mcp product snocks.com sneaker-socken-weiss
-  npx -y shopcart-mcp cart snocks.com 44434567725323:2 19729211981894:1 --discount SAVE10
+  npx -y shopcart-mcp inspect 'snocks.com'
+  npx -y shopcart-mcp search 'snocks.com' 'socken' --limit 3 --available
+  npx -y shopcart-mcp product 'snocks.com' 'sneaker-socken-weiss'
+  npx -y shopcart-mcp cart 'snocks.com' '44434567725323:2' '19729211981894:1' --discount 'SAVE10'
 
 Remote Streamable HTTP MCP (OAuth 2.1): https://shopcart.wals.pro/mcp
 Agent instructions: https://shopcart.wals.pro/SKILL.md
@@ -194,6 +203,39 @@ function parseNonNegativeNumber(raw: string, flagName: string): number {
   return value;
 }
 
+function validateSafeHandleOrUrlArg(raw: string, label: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > 1000) {
+    throw new CliUsageError(`Invalid ${label}: must be 1..1000 characters.`);
+  }
+  if (/^https:\/\//i.test(trimmed)) {
+    if (/[\x00-\x1f\s$`'"\\;|&<>]/.test(trimmed)) {
+      throw new CliUsageError(`Invalid ${label} URL: contains unsafe characters.`);
+    }
+    try {
+      validateExternalUrl(trimmed);
+    } catch {
+      throw new CliUsageError(`Invalid ${label} URL: must be a valid public https:// URL.`);
+    }
+    return trimmed;
+  }
+  const safeHandle = sanitizeSafeHandle(trimmed);
+  if (safeHandle) {
+    return safeHandle;
+  }
+  if (
+    trimmed.length <= 256 &&
+    !trimmed.includes("..") &&
+    !SHELL_META_RE.test(trimmed) &&
+    SAFE_RELATIVE_PRODUCT_PATH_RE.test(trimmed)
+  ) {
+    return trimmed;
+  }
+  throw new CliUsageError(
+    `Invalid ${label} '${raw}': must be a safe identifier matching ^[A-Za-z0-9._~-]+$ (no '..') or a valid https:// product URL.`
+  );
+}
+
 export function parseCartItemSpec(raw: string): { variantId: string; quantity: number } {
   const trimmed = raw.trim();
   const sepIdx = trimmed.lastIndexOf(":");
@@ -205,9 +247,22 @@ export function parseCartItemSpec(raw: string): { variantId: string; quantity: n
   const variantId = trimmed.slice(0, sepIdx).trim();
   const qtyRaw = trimmed.slice(sepIdx + 1).trim();
 
-  if (!variantId || variantId.length > 1000 || INVALID_VARIANT_ID_RE.test(variantId)) {
+  if (/^https:\/\//i.test(variantId)) {
+    if (variantId.length > 1000 || /[\x00-\x1f\s$`'"\\;|&<>]/.test(variantId)) {
+      throw new CliUsageError(
+        `Invalid variantId URL in '${raw}': contains unsafe characters.`
+      );
+    }
+    try {
+      validateExternalUrl(variantId);
+    } catch {
+      throw new CliUsageError(
+        `Invalid variantId URL in '${raw}': must be a valid public https:// URL.`
+      );
+    }
+  } else if (!sanitizeGenericVariantId(variantId)) {
     throw new CliUsageError(
-      `Invalid variantId in '${raw}': must be 1..1000 characters without whitespace or control characters.`
+      `Invalid variantId in '${raw}': must match ^[A-Za-z0-9._:-]{1,128}$ (no '..') or be a valid https:// URL.`
     );
   }
   if (!/^\d+$/.test(qtyRaw)) {
@@ -283,8 +338,8 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliCommand {
     }
     if (positional.length !== 1) {
       throw new CliUsageError(
-        "Usage: shopcart-mcp inspect <store> [--json]",
-        "shopcart-mcp inspect <store> [--json]"
+        "Usage: shopcart-mcp inspect '<store>' [--json]",
+        "shopcart-mcp inspect '<store>' [--json]"
       );
     }
     return { kind: "inspect", store: validateStoreArg(positional[0], "inspect"), json };
@@ -337,11 +392,13 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliCommand {
         }
         if (name === "--collection") {
           const { value, nextIndex } = consumeFlagValue(rest, i, name, inlineValue);
-          const trimmed = value.trim();
-          if (!trimmed || trimmed.length > 200) {
-            throw new CliUsageError("--collection must be 1..200 characters.");
+          const safeCol = sanitizeSafeHandle(value);
+          if (!safeCol) {
+            throw new CliUsageError(
+              `Invalid --collection handle '${value}': must match ^[A-Za-z0-9._~-]{1,200}$ (no '..').`
+            );
           }
-          collection = trimmed;
+          collection = safeCol;
           i = nextIndex;
           continue;
         }
@@ -370,8 +427,8 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliCommand {
 
     if (positional.length < 1 || positional.length > 2) {
       throw new CliUsageError(
-        'Usage: shopcart-mcp search <store> ["<query>"] [--limit <n>] [--sort <order>] [--collection <handle>] [--min-price <n>] [--max-price <n>] [--available] [--json]',
-        'shopcart-mcp search <store> "<query>" [--limit <n>] [--sort <order>] [--min-price <n>] [--max-price <n>] [--available]'
+        "Usage: shopcart-mcp search '<store>' ['<query>'] [--limit <n>] [--sort <order>] [--collection '<handle>'] [--min-price <n>] [--max-price <n>] [--available] [--json]",
+        "shopcart-mcp search '<store>' '<query>' [--limit <n>] [--sort <order>] [--min-price <n>] [--max-price <n>] [--available]"
       );
     }
     const store = validateStoreArg(positional[0], "search");
@@ -419,15 +476,12 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliCommand {
     }
     if (positional.length !== 2) {
       throw new CliUsageError(
-        "Usage: shopcart-mcp product <store> <handle-or-url> [--json]",
-        "shopcart-mcp product <store> <handle-or-url> [--json]"
+        "Usage: shopcart-mcp product '<store>' '<handle-or-url>' [--json]",
+        "shopcart-mcp product '<store>' '<handle-or-url>' [--json]"
       );
     }
     const store = validateStoreArg(positional[0], "product");
-    const handleOrUrl = positional[1]!.trim();
-    if (!handleOrUrl || handleOrUrl.length > 1000) {
-      throw new CliUsageError("Product handle or URL must be 1..1000 characters.");
-    }
+    const handleOrUrl = validateSafeHandleOrUrlArg(positional[1]!, "product handle");
     return { kind: "product", store, handleOrUrl, json };
   }
 
@@ -477,8 +531,8 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliCommand {
 
     if (positional.length !== 1) {
       throw new CliUsageError(
-        'Usage: shopcart-mcp policies <store> [--topic shipping|returns|all] [--question "<text>"] [--json]',
-        "shopcart-mcp policies <store> [--topic shipping|returns|all]"
+        "Usage: shopcart-mcp policies '<store>' [--topic shipping|returns|all] [--question '<text>'] [--json]",
+        "shopcart-mcp policies '<store>' [--topic shipping|returns|all]"
       );
     }
     return {
@@ -526,8 +580,8 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliCommand {
 
     if (positional.length !== 1) {
       throw new CliUsageError(
-        "Usage: shopcart-mcp collections <store> [--limit <1-100>] [--deals-only] [--json]",
-        "shopcart-mcp collections <store> [--limit <1-100>] [--deals-only]"
+        "Usage: shopcart-mcp collections '<store>' [--limit <1-100>] [--deals-only] [--json]",
+        "shopcart-mcp collections '<store>' [--limit <1-100>] [--deals-only]"
       );
     }
     return {
@@ -601,10 +655,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliCommand {
           for (const part of value.split(",")) {
             const h = part.trim();
             if (!h) continue;
-            if (h.length > 1000) {
-              throw new CliUsageError("Invalid --verify handle: exceeds 1000 characters.");
-            }
-            verifyHandles.push(h);
+            verifyHandles.push(validateSafeHandleOrUrlArg(h, "--verify handle"));
           }
           i = nextIndex;
           continue;
@@ -616,8 +667,8 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliCommand {
 
     if (positional.length < 2) {
       throw new CliUsageError(
-        'Usage: shopcart-mcp cart <store> <variantId:qty> [<variantId:qty> ...] [--discount <CODE>] [--note "<TEXT>"] [--mode cart|checkout] [--verify <handle>] [--json]',
-        "shopcart-mcp cart <store> <variantId:qty> [<variantId:qty> ...]"
+        "Usage: shopcart-mcp cart '<store>' '<variantId:qty>' ['<variantId:qty>' ...] [--discount '<CODE>'] [--note '<TEXT>'] [--mode cart|checkout] [--verify '<handle>'] [--json]",
+        "shopcart-mcp cart '<store>' '<variantId:qty>' ['<variantId:qty>' ...]"
       );
     }
 
@@ -891,6 +942,111 @@ async function executeParsedCommand(
   };
 }
 
+function isSafeVariantIdOrHttpsUrl(raw: unknown): boolean {
+  if (typeof raw !== "string") return false;
+  if (sanitizeGenericVariantId(raw)) return true;
+  if (/^https:\/\//i.test(raw) && !/[\x00-\x1f\s$`'"\\;|&<>]/.test(raw)) {
+    try {
+      validateExternalUrl(raw);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/**
+ * Defense-in-depth CLI output emission gate: guarantees that emitted stdout JSON
+ * never propagates shell metacharacters in product handles, collection handles,
+ * or variant IDs regardless of which adapter produced the payload.
+ */
+export function sanitizeCliOutput(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return payload;
+  }
+  const obj = { ...(payload as Record<string, unknown>) };
+
+  // Collections & highlighted_deals arrays
+  for (const key of ["collections", "highlighted_deals"] as const) {
+    if (Array.isArray(obj[key])) {
+      const cleaned = (obj[key] as Array<Record<string, unknown>>).flatMap((entry) => {
+        if (!entry || typeof entry !== "object") return [];
+        const safeHandle = sanitizeSafeHandle(entry.handle);
+        if (!safeHandle) return [];
+        return [
+          {
+            ...entry,
+            id: sanitizeGenericVariantId(entry.id) ?? safeHandle,
+            handle: safeHandle
+          }
+        ];
+      });
+      obj[key] = cleaned;
+    }
+  }
+
+  // Search products array
+  if (Array.isArray(obj.products)) {
+    const cleanedProducts = (obj.products as Array<Record<string, unknown>>).flatMap((entry) => {
+      if (!entry || typeof entry !== "object") return [];
+      const safeHandle = sanitizeSafeHandle(entry.handle);
+      if (!safeHandle) return [];
+      return [
+        {
+          ...entry,
+          id: sanitizeGenericVariantId(entry.id) ?? safeHandle,
+          handle: safeHandle
+        }
+      ];
+    });
+    obj.products = cleanedProducts;
+    if (typeof obj.total_returned === "number") {
+      obj.total_returned = cleanedProducts.length;
+    }
+  }
+
+  // Single product detail + variants
+  if (obj.product && typeof obj.product === "object" && !Array.isArray(obj.product)) {
+    const product = { ...(obj.product as Record<string, unknown>) };
+    const safeHandle = sanitizeSafeHandle(product.handle);
+    if (safeHandle) {
+      product.handle = safeHandle;
+    } else {
+      delete product.handle;
+    }
+    const safeProdId = sanitizeGenericVariantId(product.id) ?? safeHandle;
+    if (safeProdId) {
+      product.id = safeProdId;
+    } else {
+      delete product.id;
+    }
+    if (Array.isArray(product.variants)) {
+      product.variants = (product.variants as Array<Record<string, unknown>>).flatMap((v) => {
+        if (!v || typeof v !== "object") return [];
+        const safeVarId = sanitizeGenericVariantId(v.id);
+        if (!safeVarId) return [];
+        return [{ ...v, id: safeVarId }];
+      });
+    }
+    obj.product = product;
+  }
+
+  // Cart items & additional_cart_links
+  if (Array.isArray(obj.items)) {
+    obj.items = (obj.items as Array<Record<string, unknown>>).filter(
+      (i) => i && typeof i === "object" && isSafeVariantIdOrHttpsUrl(i.variant_id)
+    );
+  }
+  if (Array.isArray(obj.additional_cart_links)) {
+    obj.additional_cart_links = (
+      obj.additional_cart_links as Array<Record<string, unknown>>
+    ).filter((l) => l && typeof l === "object" && isSafeVariantIdOrHttpsUrl(l.variant_id));
+  }
+
+  return obj;
+}
+
 export async function runCli(argv: readonly string[], deps: CliRunDeps = {}): Promise<number> {
   const stdout = deps.stdout ?? process.stdout;
   const stderr = deps.stderr ?? process.stderr;
@@ -962,7 +1118,9 @@ export async function runCli(argv: readonly string[], deps: CliRunDeps = {}): Pr
   const attribution = deps.attribution ?? loadAttributionConfig();
 
   try {
-    const payload = await executeParsedCommand(parsed, registry, attribution);
+    const payload = sanitizeCliOutput(
+      await executeParsedCommand(parsed, registry, attribution)
+    );
     stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
     return 0;
   } catch (err) {

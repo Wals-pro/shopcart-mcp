@@ -8,6 +8,11 @@ import {
   stripHtmlToText,
   stripTagBlocksLinear
 } from "../../security/sanitize.js";
+import {
+  sanitizeGenericVariantId,
+  sanitizeNumericVariantId,
+  sanitizeSafeHandle
+} from "../../security/identifiers.js";
 import { SsrfError } from "../../security/ssrf.js";
 import type {
   CartLinkItemInput,
@@ -556,7 +561,7 @@ export class ShopifyAdapter implements StoreAdapter {
 
     const mapped: CollectionSummary[] = [];
     for (const raw of res.data.collections.slice(0, limit)) {
-      const handle = sanitizeText(raw.handle, 200);
+      const handle = sanitizeSafeHandle(sanitizeText(raw.handle, 200));
       const title = sanitizeText(raw.title, 200);
       if (!handle || !title) continue;
       const productsCount =
@@ -565,7 +570,7 @@ export class ShopifyAdapter implements StoreAdapter {
           : null;
       const { isDeal, tags } = classifyDealCollection(handle, title);
       mapped.push({
-        id: sanitizeText(raw.id != null ? String(raw.id) : handle, 64) || handle,
+        id: sanitizeGenericVariantId(raw.id) ?? handle,
         handle,
         title,
         products_count: productsCount,
@@ -796,7 +801,7 @@ export class ShopifyAdapter implements StoreAdapter {
     currency: string,
     raw: SuggestProductRaw
   ): ProductSummary | null {
-    const handle = sanitizeText(raw.handle, 200);
+    const handle = sanitizeSafeHandle(sanitizeText(raw.handle, 200));
     const title = sanitizeText(raw.title, 200);
     if (!handle || !title) return null;
 
@@ -815,7 +820,7 @@ export class ShopifyAdapter implements StoreAdapter {
     const imageUrl = sanitizeSafeUrl(imageRaw, origin, { allowShopifyCdn: true });
 
     return {
-      id: sanitizeText(raw.id != null ? String(raw.id) : handle, 64) || handle,
+      id: sanitizeGenericVariantId(raw.id) ?? handle,
       handle,
       title,
       vendor: sanitizeOptionalText(raw.vendor, 100),
@@ -868,7 +873,7 @@ export class ShopifyAdapter implements StoreAdapter {
 
     const products: ProductSummary[] = [];
     for (const raw of res.data.products) {
-      const handle = sanitizeText(raw.handle, 200);
+      const handle = sanitizeSafeHandle(sanitizeText(raw.handle, 200));
       const title = sanitizeText(raw.title, 200);
       if (!handle || !title) continue;
 
@@ -921,7 +926,7 @@ export class ShopifyAdapter implements StoreAdapter {
       const available = variants.length > 0 ? variants.some((v) => v.available !== false) : true;
 
       products.push({
-        id: sanitizeText(raw.id != null ? String(raw.id) : handle, 64) || handle,
+        id: sanitizeGenericVariantId(raw.id) ?? handle,
         handle,
         title,
         vendor: sanitizeOptionalText(raw.vendor, 100),
@@ -1005,11 +1010,17 @@ export class ShopifyAdapter implements StoreAdapter {
     fallbackHandle: string,
     raw: ProductJsRaw
   ): ProductDetail {
-    const handle = sanitizeText(raw.handle, 200) || fallbackHandle;
+    const handle =
+      sanitizeSafeHandle(sanitizeText(raw.handle, 200)) ??
+      sanitizeSafeHandle(fallbackHandle) ??
+      "";
     const rawVariants = (raw.variants ?? []).slice(0, 100);
     const positionalSlots: Array<Array<string | null>> = [];
 
-    const variants: ProductVariant[] = rawVariants.map((v) => {
+    const variants: ProductVariant[] = [];
+    for (const v of rawVariants) {
+      const variantId = sanitizeNumericVariantId(v.id);
+      if (!variantId) continue;
       const slots: Array<string | null> = (
         Array.isArray(v.options) ? v.options : [v.option1, v.option2, v.option3]
       ).map((o) => {
@@ -1023,8 +1034,8 @@ export class ShopifyAdapter implements StoreAdapter {
       const compareAt = moneyFromMinorUnits(v.compare_at_price, currency, true);
       const { discount_percent, savings } = computeDiscount(price, compareAt);
 
-      return {
-        id: sanitizeText(v.id != null ? String(v.id) : "", 64),
+      variants.push({
+        id: variantId,
         title: sanitizeText(v.title, 120) || "Default",
         sku: sanitizeOptionalText(v.sku, 80),
         available: v.available !== false,
@@ -1033,8 +1044,8 @@ export class ShopifyAdapter implements StoreAdapter {
         discount_percent,
         savings,
         option_values: optValues
-      };
-    });
+      });
+    }
 
     const options = (raw.options ?? [])
       .slice(0, 10)
@@ -1062,7 +1073,7 @@ export class ShopifyAdapter implements StoreAdapter {
       .slice(0, 10);
 
     return {
-      id: sanitizeText(raw.id != null ? String(raw.id) : handle, 64) || handle,
+      id: sanitizeGenericVariantId(raw.id) ?? handle,
       handle,
       title: sanitizeText(raw.title, 200),
       vendor: sanitizeOptionalText(raw.vendor, 100),
@@ -1084,17 +1095,23 @@ export class ShopifyAdapter implements StoreAdapter {
     fallbackHandle: string,
     raw: NonNullable<ProductsJsonRaw["products"]>[number]
   ): ProductDetail {
-    const handle = sanitizeText(raw.handle, 200) || fallbackHandle;
+    const handle =
+      sanitizeSafeHandle(sanitizeText(raw.handle, 200)) ??
+      sanitizeSafeHandle(fallbackHandle) ??
+      "";
     const rawVariants = (raw.variants ?? []).slice(0, 100);
-    const variants: ProductVariant[] = rawVariants.map((v) => {
+    const variants: ProductVariant[] = [];
+    for (const v of rawVariants) {
+      const variantId = sanitizeNumericVariantId(v.id);
+      if (!variantId) continue;
       const optValues = [v.option1, v.option2, v.option3]
         .map((o) => sanitizeText(o, 100))
         .filter(Boolean);
       const price = moneyFromDecimalString(v.price, currency) ?? formatMoney(0, currency);
       const compareAt = moneyFromDecimalString(v.compare_at_price, currency, true);
       const { discount_percent, savings } = computeDiscount(price, compareAt);
-      return {
-        id: sanitizeText(v.id != null ? String(v.id) : "", 64),
+      variants.push({
+        id: variantId,
         title: sanitizeText(v.title, 120) || "Default",
         sku: sanitizeOptionalText(v.sku, 80),
         available: v.available !== false,
@@ -1103,8 +1120,8 @@ export class ShopifyAdapter implements StoreAdapter {
         discount_percent,
         savings,
         option_values: optValues
-      };
-    });
+      });
+    }
 
     const options = (raw.options ?? [])
       .slice(0, 10)
@@ -1120,7 +1137,7 @@ export class ShopifyAdapter implements StoreAdapter {
       .slice(0, 10);
 
     return {
-      id: sanitizeText(raw.id != null ? String(raw.id) : handle, 64) || handle,
+      id: sanitizeGenericVariantId(raw.id) ?? handle,
       handle,
       title: sanitizeText(raw.title, 200),
       vendor: sanitizeOptionalText(raw.vendor, 100),

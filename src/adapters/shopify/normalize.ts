@@ -1,3 +1,4 @@
+import { sanitizeSafeHandle } from "../../security/identifiers.js";
 import type { Money } from "../types.js";
 
 const ZERO_DECIMAL_CURRENCIES = new Set([
@@ -138,18 +139,12 @@ export function extractProductPathInfo(handleOrUrl: string): ProductPathInfo {
   // Remove optional .js / .json suffix
   candidate = candidate.replace(/\.(js|json)$/i, "").trim();
 
-  if (
-    !candidate ||
-    candidate.length > 200 ||
-    candidate.includes("/") ||
-    candidate.includes("\\") ||
-    candidate.includes("..") ||
-    /[\x00-\x1f\s]/.test(candidate)
-  ) {
+  const safeHandle = sanitizeSafeHandle(candidate);
+  if (!safeHandle) {
     throw new Error(`Invalid product handle: ${candidate}`);
   }
 
-  return { handle: candidate, localePrefix };
+  return { handle: safeHandle, localePrefix };
 }
 
 export function extractProductHandle(handleOrUrl: string): string {
@@ -262,18 +257,12 @@ export function extractCollectionHandle(handleOrUrl: string): string {
 
   candidate = candidate.replace(/\.json$/i, "").trim();
 
-  if (
-    !candidate ||
-    candidate.length > 200 ||
-    candidate.includes("/") ||
-    candidate.includes("\\") ||
-    candidate.includes("..") ||
-    /[\x00-\x1f\s?#&%]/.test(candidate)
-  ) {
+  const safeHandle = sanitizeSafeHandle(candidate);
+  if (!safeHandle) {
     throw new Error(`Invalid collection handle: ${candidate}`);
   }
 
-  return candidate;
+  return safeHandle;
 }
 
 const DEAL_COLLECTION_PATTERNS: Array<{ tag: string; re: RegExp }> = [

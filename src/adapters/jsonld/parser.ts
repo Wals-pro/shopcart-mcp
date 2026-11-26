@@ -1,4 +1,9 @@
 import {
+  extractSafeHandleFromUrl,
+  sanitizeGenericVariantId,
+  sanitizeSafeHandle
+} from "../../security/identifiers.js";
+import {
   asciiLowerCase,
   isSameStoreSite,
   isSameStoreSiteOrSubdomain,
@@ -1153,21 +1158,27 @@ function deriveHandleFromUrl(url: string, fallbackSku: string | null): string {
       .split("/")
       .map((s) => s.trim())
       .filter(Boolean);
-    const last = segments[segments.length - 1];
-    if (last) {
-      let decoded = last;
-      try {
-        decoded = decodeURIComponent(last);
-      } catch {
-        // keep raw segment
-      }
-      const cleaned = sanitizeCatalogText(decoded.replace(/\.(html?|php|aspx?)$/i, ""), 200);
-      if (cleaned) return cleaned;
+    if (segments.length > 0) {
+      const fromUrl = extractSafeHandleFromUrl(url, { stripFileExtension: true });
+      if (fromUrl) return fromUrl;
+      // Path segment existed but decoded to unsafe characters — fall back only to safe SKU or omit (empty)
+      return sanitizeSafeHandle(fallbackSku) ?? "";
     }
   } catch {
     // ignore
   }
-  return fallbackSku ?? "product";
+  return sanitizeSafeHandle(fallbackSku) ?? "product";
+}
+
+function pickSafeJsonLdVariantId(
+  candidates: ReadonlyArray<string | null | undefined>,
+  fallback: string
+): string {
+  for (const c of candidates) {
+    const safe = sanitizeGenericVariantId(c);
+    if (safe) return safe;
+  }
+  return fallback;
 }
 
 function scoreProductCandidate(
@@ -1305,8 +1316,10 @@ function buildFromProductGroup(
       const gtin = offer.gtin ?? vIds.gtin ?? groupIds.gtin;
       const ean = offer.ean ?? vIds.ean ?? groupIds.ean;
       const mpn = offer.mpn ?? vIds.mpn ?? groupIds.mpn;
-      const id =
-        sku ?? gtin ?? mpn ?? `variant-${variants.length + 1}`;
+      const id = pickSafeJsonLdVariantId(
+        [sku, gtin, mpn],
+        `variant-${variants.length + 1}`
+      );
       const displayTitle =
         optionValues.length > 0
           ? optionValues.join(" / ")
@@ -1353,7 +1366,7 @@ function buildFromProductGroup(
       const ean = offer.ean ?? groupIds.ean;
       const mpn = offer.mpn ?? groupIds.mpn;
       variants.push({
-        id: sku ?? gtin ?? mpn ?? `variant-${variants.length + 1}`,
+        id: pickSafeJsonLdVariantId([sku, gtin, mpn], `variant-${variants.length + 1}`),
         title: offer.title ?? "Default",
         sku,
         gtin,
@@ -1403,14 +1416,17 @@ function buildFromProductGroup(
   }));
 
   const handle = deriveHandleFromUrl(canonicalUrl, groupIds.sku ?? variants[0]?.sku ?? null);
-  const productId =
-    sanitizeCatalogOptionalText(
-      typeof group["productGroupID"] === "string" ? group["productGroupID"] : null,
-      80
-    ) ??
-    groupIds.sku ??
-    groupIds.gtin ??
-    handle;
+  const productId = pickSafeJsonLdVariantId(
+    [
+      typeof group["productGroupID"] === "string"
+        ? sanitizeCatalogOptionalText(group["productGroupID"], 80)
+        : null,
+      groupIds.sku,
+      groupIds.gtin,
+      handle
+    ],
+    "product"
+  );
 
   return {
     currency: finalCurrency,
@@ -1546,7 +1562,10 @@ function buildFromProductNode(
     }
 
     variants.push({
-      id: vSku ?? vGtin ?? vMpn ?? (offers.length === 1 ? deriveHandleFromUrl(canonicalUrl, null) : `offer-${i + 1}`),
+      id: pickSafeJsonLdVariantId(
+        [vSku, vGtin, vMpn, offers.length === 1 ? deriveHandleFromUrl(canonicalUrl, null) : null],
+        `offer-${i + 1}`
+      ),
       title: offer.title ?? (optionValues.length > 0 ? optionValues.join(" / ") : "Default"),
       sku: vSku,
       gtin: vGtin,
@@ -1577,7 +1596,10 @@ function buildFromProductNode(
       const avail = normalizeSchemaAvailability(hints.ogAvailability);
       usedOpenGraphFallback = true;
       variants.push({
-        id: skuFallback ?? productIds.gtin ?? deriveHandleFromUrl(canonicalUrl, null),
+        id: pickSafeJsonLdVariantId(
+          [skuFallback, productIds.gtin, deriveHandleFromUrl(canonicalUrl, null)],
+          "offer-1"
+        ),
         title: optionValues.length > 0 ? optionValues.join(" / ") : "Default",
         sku: skuFallback,
         gtin: productIds.gtin,
@@ -1611,7 +1633,10 @@ function buildFromProductNode(
   }
 
   const handle = deriveHandleFromUrl(canonicalUrl, skuFallback);
-  const productId = skuFallback ?? productIds.gtin ?? productIds.mpn ?? handle;
+  const productId = pickSafeJsonLdVariantId(
+    [skuFallback, productIds.gtin, productIds.mpn, handle],
+    "product"
+  );
   const overallAvailability = pickOverallAvailability(variants);
 
   return {
@@ -1681,11 +1706,12 @@ function buildFromOpenGraphOnly(
   }
 
   const money = formatMoney(parsedPrice.amount, currency);
+  const safeOgId = pickSafeJsonLdVariantId([sku, handle], "product");
 
   return {
     currency,
     product: {
-      id: sku ?? handle,
+      id: safeOgId,
       handle,
       title,
       vendor: sanitizeCatalogOptionalText(hints.productBrand ?? hints.ogSiteName, 100),
@@ -1708,7 +1734,7 @@ function buildFromOpenGraphOnly(
       images,
       variants: [
         {
-          id: sku ?? handle,
+          id: safeOgId,
           title: "Default",
           sku,
           gtin: null,

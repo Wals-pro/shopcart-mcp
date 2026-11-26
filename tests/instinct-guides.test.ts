@@ -77,7 +77,7 @@ describe("Instinct & Autonomous Agent support (DE/EN guides, #setup tab, /SKILL.
       expect(res.text).toContain('id="tab-instinct"');
       expect(res.text).toContain('aria-labelledby="tab-instinct"');
       expect(res.text).toContain("Instinct / CLI");
-      expect(res.text).toContain("npx -y shopcart-mcp inspect snocks.com");
+      expect(res.text).toContain("npx -y shopcart-mcp inspect &#39;snocks.com&#39;");
       expect(res.text).toContain("Open Instinct");
       expect(res.text).toContain("MewCP");
       expect(res.text).toContain("Agensi");
@@ -100,12 +100,14 @@ describe("Instinct & Autonomous Agent support (DE/EN guides, #setup tab, /SKILL.
 
     for (const required of [
       "https://shopcart.wals.pro/mcp",
-      "npx -y shopcart-mcp inspect <store>",
-      'npx -y shopcart-mcp search <store> "<query>"',
-      "npx -y shopcart-mcp product <store> <handle-or-url>",
-      "npx -y shopcart-mcp policies <store>",
-      "npx -y shopcart-mcp collections <store>",
-      "npx -y shopcart-mcp cart <store> <variantId:qty>",
+      "npx -y shopcart-mcp inspect '<store>'",
+      "npx -y shopcart-mcp search '<store>' '<query>'",
+      "npx -y shopcart-mcp product '<store>' '<handle-or-url>'",
+      "npx -y shopcart-mcp policies '<store>'",
+      "npx -y shopcart-mcp collections '<store>'",
+      "npx -y shopcart-mcp cart '<store>' '<variantId:qty>'",
+      "Always single-quote",
+      "^[A-Za-z0-9._~-]+$",
       "Instinct",
       "Open Instinct",
       "MewCP",
@@ -129,8 +131,9 @@ describe("Instinct & Autonomous Agent support (DE/EN guides, #setup tab, /SKILL.
 
     const llms = await request(app).get("/llms.txt").expect(200);
     expect(llms.text).toContain("https://shopcart.wals.pro/SKILL.md");
-    expect(llms.text).toContain("npx -y shopcart-mcp inspect <store>");
-    expect(llms.text).toContain("npx -y shopcart-mcp cart <store> <variantId:qty>");
+    expect(llms.text).toContain("npx -y shopcart-mcp inspect '<store>'");
+    expect(llms.text).toContain("npx -y shopcart-mcp cart '<store>' '<variantId:qty>'");
+    expect(llms.text).toContain("single-quote");
     expect(llms.text).toContain("Instinct");
     expect(llms.text).toContain("MewCP");
     expect(llms.text).toContain("Agensi");

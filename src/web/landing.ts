@@ -582,10 +582,10 @@ export function renderLandingPage(config: AppConfig, lang: Lang): string {
     ? "/guides/instinct-warenkorb-erstellen"
     : "/guides/instinct-shopping-cart";
   const instinctCliSnippet = [
-    "npx -y shopcart-mcp inspect snocks.com",
-    'npx -y shopcart-mcp search snocks.com "socken" --limit 3 --available',
-    "npx -y shopcart-mcp product snocks.com <handle>",
-    "npx -y shopcart-mcp cart snocks.com <variantId>:1"
+    "npx -y shopcart-mcp inspect 'snocks.com'",
+    "npx -y shopcart-mcp search 'snocks.com' 'socken' --limit 3 --available",
+    "npx -y shopcart-mcp product 'snocks.com' '<handle>'",
+    "npx -y shopcart-mcp cart 'snocks.com' '<variantId>:1'"
   ].join("\n");
   const instinctPromptSnippet = de
     ? `Lies ${skillUrl} und nutze die ShopCart One-Shot CLI (npx -y shopcart-mcp). Suche mir bei snocks.com 2x weiße Sneaker-Socken in Gr. 43-46 und schick mir den fertigen /cart/-Link — nicht selbst bestellen.`

@@ -18,7 +18,7 @@ metadata:
   license: MIT
   mcp_remote_url: https://shopcart.wals.pro/mcp
   mcp_stdio_command: npx -y shopcart-mcp
-  cli_oneshot_command: npx -y shopcart-mcp inspect <store>
+  cli_oneshot_command: npx -y shopcart-mcp inspect '<store>'
   skill_url: https://shopcart.wals.pro/SKILL.md
 ---
 
@@ -55,23 +55,29 @@ If you have shell access (for example on Instinct's cloud computer or an Open In
 
 ```bash
 # 1. Detect store platform (Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2, JSON-LD), currency & WAF rules
-npx -y shopcart-mcp inspect <store>
+npx -y shopcart-mcp inspect '<store>'
 
 # 2. Search products with optional price, stock, collection, and sort filters
-npx -y shopcart-mcp search <store> "<query>" [--limit <1-20>] [--sort relevance|price_asc|price_desc|discount_desc] [--collection <handle>] [--min-price <n>] [--max-price <n>] [--available]
+npx -y shopcart-mcp search '<store>' '<query>' [--limit <1-20>] [--sort relevance|price_asc|price_desc|discount_desc] [--collection '<handle>'] [--min-price <n>] [--max-price <n>] [--available]
 
 # 3. Fetch exact variant IDs, sizes/colors, live stock, and real compare-at discounts
-npx -y shopcart-mcp product <store> <handle-or-url>
+npx -y shopcart-mcp product '<store>' '<handle-or-url>'
 
 # 4. (Shopify) Check shipping thresholds, delivery times & return policies before checkout
-npx -y shopcart-mcp policies <store> [--topic shipping|returns|all] [--question "<text>"]
+npx -y shopcart-mcp policies '<store>' [--topic shipping|returns|all] [--question '<text>']
 
 # 5. (Shopify) Discover Sale, Black Friday, Bestseller, Outlet & Bundle collections
-npx -y shopcart-mcp collections <store> [--limit <1-100>] [--deals-only]
+npx -y shopcart-mcp collections '<store>' [--limit <1-100>] [--deals-only]
 
 # 6. Build a verified read-only /cart/... checkout link (supports multiple variantId:qty items)
-npx -y shopcart-mcp cart <store> <variantId:qty> [<variantId:qty> ...] [--discount <CODE>] [--note "<TEXT>"] [--mode cart|checkout] [--verify <handle>]
+npx -y shopcart-mcp cart '<store>' '<variantId:qty>' ['<variantId:qty>' ...] [--discount '<CODE>'] [--note '<TEXT>'] [--mode cart|checkout] [--verify '<handle>']
 ```
+
+### Shell Quoting & Safe-Identifier Rule (Mandatory for CLI Agents)
+
+When invoking `shopcart-mcp` through a shell:
+- **Always single-quote** (or pass via an `argv` array without a shell — **never** unquoted and **never** double-quoted where `$()` or backtick expansion can occur) every store-derived argument (`handle`, `variantId`, `collection`, product URLs, queries, notes).
+- **Only forward safe identifiers** matching strict allowlists: `^[A-Za-z0-9._~-]+$` for handles/collections (no `..`), and `^[A-Za-z0-9._:-]+$` (digits `^\d+$` on Shopify/WooCommerce) for variant IDs. Reject or skip any untrusted value containing whitespace, quotes, or shell metacharacters.
 
 Always send the returned `cart_url` (plus itemized variant titles, quantities, unit prices, and currency) back to the user in WhatsApp, iMessage, or chat so the human reviews and completes payment in 1 click. Never log into stores or enter payment credentials.
 

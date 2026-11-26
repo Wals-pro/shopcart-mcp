@@ -1,4 +1,9 @@
 import {
+  extractSafeHandleFromUrl,
+  sanitizeGenericVariantId,
+  sanitizeSafeHandle
+} from "../../security/identifiers.js";
+import {
   sanitizeOptionalText,
   sanitizeSafeUrl,
   sanitizeText,
@@ -127,13 +132,11 @@ function extractAttr(tag: string, attrName: string): string | null {
 }
 
 function handleFromProductUrl(url: string): string {
-  try {
-    const parsed = new URL(url);
-    const cleaned = parsed.pathname.replace(/^\/+|\/+$/g, "");
-    return sanitizeText(cleaned, 200) || "product";
-  } catch {
-    return sanitizeText(url.replace(/^\/+|\/+$/g, ""), 200) || "product";
-  }
+  return (
+    extractSafeHandleFromUrl(url, { stripFileExtension: true }) ??
+    sanitizeSafeHandle(url.replace(/^\/+|\/+$/g, "")) ??
+    ""
+  );
 }
 
 function extractBigCommerceProductIdFromHtml(html: string): string | null {
@@ -467,10 +470,11 @@ export class BigCommerceAdapter implements StoreAdapter {
         />\s*(?:out of stock|sold out|ausverkauft)\s*</i.test(body);
 
       const handle = handleFromProductUrl(safeUrl);
+      if (!handle) continue;
       seenUrls.add(safeUrl);
 
       products.push({
-        id: entityId ?? handle,
+        id: sanitizeGenericVariantId(entityId) ?? handle,
         handle,
         title,
         vendor: vendorRaw ? sanitizeOptionalText(stripHtmlToText(vendorRaw, 100), 100) : null,
@@ -526,9 +530,11 @@ export class BigCommerceAdapter implements StoreAdapter {
               })
             : null;
           const handle = handleFromProductUrl(safeUrl);
+          if (!handle) continue;
           seenUrls.add(safeUrl);
+          const rawSku = sanitizeOptionalText(typeof item.sku === "string" ? item.sku : offer.sku, 80);
           products.push({
-            id: sanitizeOptionalText(typeof item.sku === "string" ? item.sku : offer.sku, 80) ?? handle,
+            id: sanitizeGenericVariantId(rawSku) ?? handle,
             handle,
             title,
             vendor: extractJsonLdBrand(item.brand),
@@ -671,21 +677,28 @@ export class BigCommerceAdapter implements StoreAdapter {
     ).slice(0, 10);
 
     const options = extractBigCommerceOptions(html);
-    const variantId = productId ?? sku ?? handle;
+    const variantId =
+      sanitizeGenericVariantId(productId) ??
+      sanitizeGenericVariantId(sku) ??
+      sanitizeGenericVariantId(handle);
 
-    const variant: ProductVariant = {
-      id: variantId,
-      title: "Default",
-      sku,
-      available,
-      price: priceMoney,
-      compare_at_price: compareAtMoney,
-      discount_percent: computeDiscountPercent(priceMoney.amount, compareAtMoney?.amount),
-      option_values: []
-    };
+    const variants: ProductVariant[] = variantId
+      ? [
+          {
+            id: variantId,
+            title: "Default",
+            sku,
+            available,
+            price: priceMoney,
+            compare_at_price: compareAtMoney,
+            discount_percent: computeDiscountPercent(priceMoney.amount, compareAtMoney?.amount),
+            option_values: []
+          }
+        ]
+      : [];
 
     const product: ProductDetail = {
-      id: productId ?? sku ?? handle,
+      id: variantId ?? "",
       handle,
       title,
       vendor: extractJsonLdBrand(productLd?.brand),
@@ -698,7 +711,7 @@ export class BigCommerceAdapter implements StoreAdapter {
       url: canonicalUrl,
       options,
       images,
-      variants: [variant]
+      variants
     };
 
     return {

@@ -99,15 +99,15 @@ export const INSTINCT_GUIDES: readonly GuideDefinition[] = [
           },
           {
             lead: "Shop erkennen & sortiert suchen:",
-            text: "Instinct startet auf seinem Cloud-Computer npx -y shopcart-mcp inspect snocks.com und npx -y shopcart-mcp search snocks.com \"socken\" --limit 5 --available (optional mit --sort discount_desc oder --max-price)."
+            text: "Instinct startet auf seinem Cloud-Computer npx -y shopcart-mcp inspect 'snocks.com' und npx -y shopcart-mcp search 'snocks.com' 'socken' --limit 5 --available (optional mit --sort discount_desc oder --max-price)."
           },
           {
             lead: "Exakte Varianten-ID prüfen:",
-            text: "Mit npx -y shopcart-mcp product snocks.com <handle> liest Instinct echte Varianten-IDs, Größe, Farbe, Live-Preis und Bestand aus — ohne Raten und ohne Browser-CAPTCHA."
+            text: "Mit npx -y shopcart-mcp product 'snocks.com' '<handle>' liest Instinct echte Varianten-IDs, Größe, Farbe, Live-Preis und Bestand aus — ohne Raten und ohne Browser-CAPTCHA."
           },
           {
             lead: "Geprüften /cart/-Link zurück in WhatsApp/iMessage erhalten:",
-            text: "Mit npx -y shopcart-mcp cart snocks.com <variantId>:2 --verify <handle> (optional --discount CODE oder --note \"...\") entsteht ein verifizierter Warenkorb-Link, den du mit einem Tipp auf dem Smartphone öffnest und selbst bezahlst."
+            text: "Mit npx -y shopcart-mcp cart 'snocks.com' '<variantId>:2' --verify '<handle>' (optional --discount '<CODE>' oder --note '<TEXT>') entsteht ein verifizierter Warenkorb-Link, den du mit einem Tipp auf dem Smartphone öffnest und selbst bezahlst."
           }
         ],
         takeaway:
@@ -226,7 +226,7 @@ export const INSTINCT_GUIDES: readonly GuideDefinition[] = [
       {
         question: "Welche Befehle bietet die ShopCart One-Shot CLI?",
         answer:
-          "Die CLI stellt sechs deterministische JSON-Befehle bereit: inspect <store>, search <store> \"<query>\", product <store> <handle>, policies <store>, collections <store> und cart <store> <variantId:qty> (mit optionalem --discount, --note und --verify). Ohne Argumente startet npx -y shopcart-mcp weiterhin den klassischen stdio-MCP-Server."
+          "Die CLI stellt sechs deterministische JSON-Befehle bereit: inspect '<store>', search '<store>' '<query>', product '<store>' '<handle>', policies '<store>', collections '<store>' und cart '<store>' '<variantId:qty>' (mit optionalem --discount '<CODE>', --note '<TEXT>' und --verify '<handle>'). Ohne Argumente startet npx -y shopcart-mcp weiterhin den klassischen stdio-MCP-Server."
       },
       {
         question: "Was kostet die Nutzung mit Instinct oder Open Instinct?",
@@ -312,15 +312,15 @@ export const INSTINCT_GUIDES: readonly GuideDefinition[] = [
           },
           {
             lead: "Inspect the store & search live stock:",
-            text: "Instinct runs npx -y shopcart-mcp inspect snocks.com and npx -y shopcart-mcp search snocks.com \"socken\" --limit 5 --available (with optional --sort discount_desc or --max-price)."
+            text: "Instinct runs npx -y shopcart-mcp inspect 'snocks.com' and npx -y shopcart-mcp search 'snocks.com' 'socken' --limit 5 --available (with optional --sort discount_desc or --max-price)."
           },
           {
             lead: "Verify exact variant IDs & pricing:",
-            text: "Instinct calls npx -y shopcart-mcp product snocks.com <handle> to retrieve exact numeric variant IDs, sizes, live stock, and real compare-at discounts — no DOM clicking required."
+            text: "Instinct calls npx -y shopcart-mcp product 'snocks.com' '<handle>' to retrieve exact numeric variant IDs, sizes, live stock, and real compare-at discounts — no DOM clicking required."
           },
           {
             lead: "Receive a verified /cart/... link in WhatsApp or iMessage:",
-            text: "Running npx -y shopcart-mcp cart snocks.com <variantId>:2 --verify <handle> (optionally with --discount CODE or --note \"...\") produces a verified cart permalink you tap to review and pay yourself."
+            text: "Running npx -y shopcart-mcp cart 'snocks.com' '<variantId>:2' --verify '<handle>' (optionally with --discount '<CODE>' or --note '<TEXT>') produces a verified cart permalink you tap to review and pay yourself."
           }
         ],
         takeaway:
@@ -439,7 +439,7 @@ export const INSTINCT_GUIDES: readonly GuideDefinition[] = [
       {
         question: "What subcommands does the ShopCart One-Shot CLI support?",
         answer:
-          "The CLI provides six deterministic JSON subcommands: inspect <store>, search <store> \"<query>\", product <store> <handle>, policies <store>, collections <store>, and cart <store> <variantId:qty> (with optional --discount, --note, and --verify). Running npx -y shopcart-mcp with no arguments continues to start the stdio MCP server unchanged."
+          "The CLI provides six deterministic JSON subcommands: inspect '<store>', search '<store>' '<query>', product '<store>' '<handle>', policies '<store>', collections '<store>', and cart '<store>' '<variantId:qty>' (with optional --discount '<CODE>', --note '<TEXT>', and --verify '<handle>'). Running npx -y shopcart-mcp with no arguments continues to start the stdio MCP server unchanged."
       },
       {
         question: "How much does ShopCart cost for Instinct or Open Instinct?",

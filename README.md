@@ -128,12 +128,13 @@ const response = await ai.models.generateContent({
 npx -y shopcart-mcp
 
 # One-Shot CLI subcommands (deterministic JSON on stdout, zero OAuth popup)
-npx -y shopcart-mcp inspect snocks.com
-npx -y shopcart-mcp search snocks.com "socken" --limit 3 --available
-npx -y shopcart-mcp product snocks.com <handle>
-npx -y shopcart-mcp policies snocks.com
-npx -y shopcart-mcp collections snocks.com --deals-only
-npx -y shopcart-mcp cart snocks.com <variantId>:1 [--discount CODE] [--note "Gift"]
+# Always single-quote store-derived arguments (or pass via argv array) when invoking via a shell.
+npx -y shopcart-mcp inspect 'snocks.com'
+npx -y shopcart-mcp search 'snocks.com' 'socken' --limit 3 --available
+npx -y shopcart-mcp product 'snocks.com' '<handle>'
+npx -y shopcart-mcp policies 'snocks.com'
+npx -y shopcart-mcp collections 'snocks.com' --deals-only
+npx -y shopcart-mcp cart 'snocks.com' '<variantId>:1' [--discount '<CODE>'] [--note '<TEXT>']
 ```
 
 For **Instinct** (cloud computer via WhatsApp/iMessage), point your agent to [`https://shopcart.wals.pro/SKILL.md`](https://shopcart.wals.pro/SKILL.md). For **Open Instinct**, **MewCP**, and **Agensi** gateways, connect the Streamable HTTP MCP endpoint `https://shopcart.wals.pro/mcp`.

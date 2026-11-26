@@ -81,13 +81,13 @@ Users arrive from ${origin} with a prompt like "Connect ShopCart (${mcpUrl}) for
 - **Other hosted clients (Perplexity, Manus, Mistral, Notion):** add \`${mcpUrl}\` as a custom remote MCP connector; OAuth 2.1 is discovered automatically.
 - **Claude Desktop (1-click):** download the desktop extension \`${origin}/downloads/shopcart-mcp.mcpb\` and double-click it.
 - **Local open source (OpenClaw, Claude Desktop/Code, Cursor, Goose, Raycast):** run \`npx -y shopcart-mcp\` with no arguments over \`stdio\` (MIT License, unlimited calls, zero telemetry, no account needed).
-- **Instinct & shell-capable autonomous agents (One-Shot CLI, zero OAuth popup):** read \`${origin}/SKILL.md\` and run deterministic JSON subcommands directly in the shell:
-  - \`npx -y shopcart-mcp inspect <store>\`
-  - \`npx -y shopcart-mcp search <store> "<query>" [--limit <n>] [--sort <order>] [--min-price <n>] [--max-price <n>] [--available]\`
-  - \`npx -y shopcart-mcp product <store> <handle>\`
-  - \`npx -y shopcart-mcp policies <store>\`
-  - \`npx -y shopcart-mcp collections <store>\`
-  - \`npx -y shopcart-mcp cart <store> <variantId:qty> [<variantId:qty> ...] [--discount <CODE>] [--note "<TEXT>"]\`
+- **Instinct & shell-capable autonomous agents (One-Shot CLI, zero OAuth popup):** read \`${origin}/SKILL.md\` and run deterministic JSON subcommands directly in the shell (always single-quote store-derived arguments or pass via \`argv\` array; only forward safe identifiers \`^[A-Za-z0-9._~-]+$\` for handles and \`^[A-Za-z0-9._:-]+$\` for variant IDs):
+  - \`npx -y shopcart-mcp inspect '<store>'\`
+  - \`npx -y shopcart-mcp search '<store>' '<query>' [--limit <n>] [--sort <order>] [--collection '<handle>'] [--min-price <n>] [--max-price <n>] [--available]\`
+  - \`npx -y shopcart-mcp product '<store>' '<handle>'\`
+  - \`npx -y shopcart-mcp policies '<store>'\`
+  - \`npx -y shopcart-mcp collections '<store>'\`
+  - \`npx -y shopcart-mcp cart '<store>' '<variantId:qty>' ['<variantId:qty>' ...] [--discount '<CODE>'] [--note '<TEXT>']\`
 - **Open Instinct & MCP Gateways (MewCP, Agensi):** connect \`${mcpUrl}\` via Streamable HTTP + OAuth 2.1 PKCE.
 - Pricing: ${pricingLine(config)}.
 
@@ -150,13 +150,13 @@ export function renderLlmsFullTxt(config: AppConfig): string {
       : ""
   } |
 | **Local Open Source \`stdio\` MCP** | \`npx -y shopcart-mcp\` (zero args, \`stdio\`) | None (zero telemetry, no account) | Unlimited | Free (MIT License) |
-| **One-Shot Shell CLI (Instinct & Autonomous Agents)** | \`npx -y shopcart-mcp inspect/search/product/policies/collections/cart\` | None (zero OAuth popup, JSON on \`stdout\`) | Unlimited | Free (MIT License) |
+| **One-Shot Shell CLI (Instinct & Autonomous Agents)** | \`npx -y shopcart-mcp inspect '<store>'\` (\`search\`, \`product\`, \`policies\`, \`collections\`, \`cart\`) | None (zero OAuth popup, JSON on \`stdout\`, single-quote store-derived args) | Unlimited | Free (MIT License) |
 
 - **Discovery Endpoints:** \`/.well-known/oauth-protected-resource/mcp\`, \`/.well-known/oauth-authorization-server\`, \`/.well-known/mcp.json\`, \`/.well-known/security.txt\`, \`/SKILL.md\`, \`/llms.txt\`, \`/llms-full.txt\`, \`/sitemap.xml\`
 - **Source Code:** \`${config.repoUrl}\` (package \`shopcart-mcp\`, \`mcpName\`: \`io.github.Wals-pro/shopcart-mcp\`)
 
 ### Autonomous Agents: Instinct, Open Instinct & MCP Gateways (MewCP, Agensi)
-- **Instinct (Spear Street Technology):** Invite-only personal AI agent via WhatsApp, iMessage/SMS, and voice running on a persistent cloud computer (no public self-serve Custom MCP Settings UI as of Nov 2026). Works immediately via **Path A (One-Shot CLI + \`${origin}/SKILL.md\`)**: text Instinct to read \`${origin}/SKILL.md\` and run \`npx -y shopcart-mcp inspect/search/product/policies/collections/cart\`, returning a verified \`/cart/...\` link straight in WhatsApp/iMessage with zero browser CAPTCHA loops and zero shared logins or credit cards.
+- **Instinct (Spear Street Technology):** Invite-only personal AI agent via WhatsApp, iMessage/SMS, and voice running on a persistent cloud computer (no public self-serve Custom MCP Settings UI as of Nov 2026). Works immediately via **Path A (One-Shot CLI + \`${origin}/SKILL.md\`)**: text Instinct to read \`${origin}/SKILL.md\` and run \`npx -y shopcart-mcp inspect '<store>'\` / \`search\` / \`product\` / \`cart\` (always single-quoting store-derived handles and variant IDs, or passing via \`argv\` array, and forwarding only allowlisted identifiers), returning a verified \`/cart/...\` link straight in WhatsApp/iMessage with zero browser CAPTCHA loops and zero shared logins or credit cards.
 - **Open Instinct (\`mariagorskikh/open-instinct\`), MewCP (\`mewcp.com\`), Agensi (\`agensi.io\`):** Connect **Path B (Streamable HTTP MCP)** at \`${mcpUrl}\` with managed OAuth 2.1 + PKCE, or run the One-Shot CLI inside Open Instinct's microVM.
 
 ### Self-Setup Instructions for AI Assistants
