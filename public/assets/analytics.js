@@ -101,6 +101,22 @@
     }
   };
 
+  /**
+   * Strip query strings and fragments from document.referrer so same-origin
+   * navigations from /oauth/authorize?... or /billing/login?email=... NEVER leak
+   * OAuth parameters, tokens, or email PII to Google Analytics via dr / page_referrer.
+   */
+  const sanitizeReferrer = (rawRef) => {
+    if (!rawRef || typeof rawRef !== "string") return "";
+    try {
+      const parsed = new URL(rawRef);
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
+      return `${parsed.origin}${parsed.pathname}`;
+    } catch {
+      return "";
+    }
+  };
+
   const readStoredConsent = () => {
     try {
       const raw = window.localStorage.getItem(CONSENT_STORAGE_KEY);
@@ -178,16 +194,20 @@
 
   const cleanLocation = sanitizePageLocation(window.location.href);
   const cleanPath = getCleanPath(window.location.href);
+  const cleanReferrer = sanitizeReferrer(document.referrer);
 
   let analyticsEnabled = false;
   let consentDefaultPushed = false;
   let gaConfigured = false;
   let scriptLoaded = false;
   let initialPageViewSent = false;
+  let purchaseSent = false;
   let demoVideoPlaySent = false;
 
   const ensureGtag = () => {
-    window.dataLayer = window.dataLayer || [];
+    if (!Array.isArray(window.dataLayer)) {
+      window.dataLayer = [];
+    }
     if (typeof window.gtag !== "function") {
       window.gtag = function gtag() {
         window.dataLayer.push(arguments);
@@ -197,35 +217,31 @@
 
   const trackEvent = (eventName, params) => {
     if (!analyticsEnabled || typeof window.gtag !== "function") return;
-    const payload = Object.assign({ page_location: cleanLocation }, params || {});
+    const payload = Object.assign(
+      { page_location: cleanLocation, page_referrer: cleanReferrer },
+      params || {}
+    );
     window.gtag("event", eventName, payload);
   };
 
   const maybeTrackPurchase = () => {
-    if (!analyticsEnabled || cfg.pageType !== "billing") return;
+    if (!analyticsEnabled || purchaseSent || cfg.pageType !== "billing") return;
     const successEl = document.querySelector('[data-checkout-success="true"]');
-    let isCheckoutSuccess = Boolean(successEl);
-    if (!isCheckoutSuccess) {
-      try {
-        const params = new URLSearchParams(window.location.search);
-        isCheckoutSuccess = params.get("checkout") === "success";
-      } catch {
-        isCheckoutSuccess = false;
-      }
-    }
-    if (!isCheckoutSuccess) return;
+    if (!successEl) return;
 
     const dedupToken = `${cleanPath}:success`;
     try {
       if (window.sessionStorage.getItem(PURCHASE_DEDUP_KEY) === dedupToken) {
+        purchaseSent = true;
         return;
       }
       window.sessionStorage.setItem(PURCHASE_DEDUP_KEY, dedupToken);
     } catch {
-      // sessionStorage unavailable -> still avoid firing twice in the same page lifetime
+      // sessionStorage unavailable -> purchaseSent boolean prevents duplicate firing in page lifetime
     }
+    purchaseSent = true;
 
-    let rawValue = successEl ? successEl.getAttribute("data-checkout-value") : null;
+    let rawValue = successEl.getAttribute("data-checkout-value");
     if (rawValue === null || rawValue === "") {
       rawValue = cfg.promoActive ? "0" : "9";
     }
@@ -276,13 +292,19 @@
     });
 
     if (!gaConfigured) {
+      const cookieFlags =
+        window.location && window.location.protocol === "https:"
+          ? "SameSite=Lax;Secure"
+          : "SameSite=Lax";
       window.gtag("js", new Date());
       window.gtag("config", cfg.ga4Id, {
         anonymize_ip: true,
         allow_google_signals: false,
         allow_ad_personalization_signals: false,
         send_page_view: false,
-        page_location: cleanLocation
+        cookie_flags: cookieFlags,
+        page_location: cleanLocation,
+        page_referrer: cleanReferrer
       });
       gaConfigured = true;
     }

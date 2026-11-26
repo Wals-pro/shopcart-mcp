@@ -58,12 +58,14 @@ async function openOAuthPage(app: ReturnType<typeof createApp>, lang: "de" | "en
 // Minimal DOM + browser harness to unit-test public/assets/analytics.js in isolation
 function createAnalyticsHarness(opts: {
   href: string;
+  referrer?: string;
   ga4Id: string;
   pageLang: "de" | "en";
   pageType: string;
   promoActive?: boolean;
   initialConsent?: string | null;
   initialSession?: Record<string, string>;
+  throwSessionStorage?: boolean;
   initialCookies?: string[];
   checkoutSuccessEl?: { value?: string } | null;
 }) {
@@ -185,8 +187,12 @@ function createAnalyticsHarness(opts: {
       }
     },
     sessionStorage: {
-      getItem: (k: string) => sessionStore.get(k) ?? null,
+      getItem: (k: string) => {
+        if (opts.throwSessionStorage) throw new Error("storage blocked");
+        return sessionStore.get(k) ?? null;
+      },
       setItem: (k: string, v: string) => {
+        if (opts.throwSessionStorage) throw new Error("storage blocked");
         sessionStore.set(k, v);
       }
     }
@@ -194,6 +200,7 @@ function createAnalyticsHarness(opts: {
 
   const fakeDocument: Record<string, any> = {
     currentScript: scriptEl,
+    referrer: opts.referrer ?? "",
     documentElement: { lang: opts.pageLang },
     head: {
       appendChild: (node: FakeScriptElement) => {
@@ -474,9 +481,10 @@ describe("GA4 env validation, CSP, consent banner, privacy policy & zero-pre-con
     expect(en.text).toContain("shopcart_consent_v1");
   });
 
-  it("enforces zero-pre-consent, exact Consent Mode v2 order, URL sanitization, revocation & cookie deletion in analytics.js", () => {
+  it("enforces zero-pre-consent, exact Consent Mode v2 order, URL & referrer sanitization, revocation & cookie deletion in analytics.js", () => {
     const h = createAnalyticsHarness({
       href: "https://shopcart.wals.pro/oauth/authorize?code=SECRET_CODE&email=user@example.com&token=TOK123",
+      referrer: "https://shopcart.wals.pro/billing/login?lang=de&email=referrer-pii@example.com&state=OAUTH_STATE_99&code_challenge=PKCE_CHAL",
       ga4Id: "G-TEST123456",
       pageLang: "de",
       pageType: "oauth",
@@ -527,7 +535,9 @@ describe("GA4 env validation, CSP, consent banner, privacy policy & zero-pre-con
         allow_google_signals: false,
         allow_ad_personalization_signals: false,
         send_page_view: false,
-        page_location: "https://shopcart.wals.pro/oauth/authorize"
+        cookie_flags: "SameSite=Lax;Secure",
+        page_location: "https://shopcart.wals.pro/oauth/authorize",
+        page_referrer: "https://shopcart.wals.pro/billing/login"
       }
     ]);
     expect(calls[4]).toEqual([
@@ -535,16 +545,20 @@ describe("GA4 env validation, CSP, consent banner, privacy policy & zero-pre-con
       "page_view",
       {
         page_location: "https://shopcart.wals.pro/oauth/authorize",
+        page_referrer: "https://shopcart.wals.pro/billing/login",
         page_path: "/oauth/authorize",
         page_language: "de",
         page_type: "oauth"
       }
     ]);
-    // Zero query string / PII anywhere in dataLayer
+    // Zero query string / PII anywhere in dataLayer (including document.referrer)
     const serialized = JSON.stringify(calls);
     expect(serialized).not.toContain("SECRET_CODE");
     expect(serialized).not.toContain("user@example.com");
     expect(serialized).not.toContain("TOK123");
+    expect(serialized).not.toContain("referrer-pii@example.com");
+    expect(serialized).not.toContain("OAUTH_STATE_99");
+    expect(serialized).not.toContain("PKCE_CHAL");
 
     // 3. Reopening settings and clicking Accept again does NOT double-fire page_view or reload gtag/js
     h.dispatchClick({ "data-open-consent-settings": "" });
@@ -664,7 +678,19 @@ describe("GA4 env validation, CSP, consent banner, privacy policy & zero-pre-con
     const purchases2 = billing2.getDataLayerCalls().filter((c) => c[0] === "event" && c[1] === "purchase");
     expect(purchases2).toHaveLength(0);
 
-    // Non-promo purchase sends value: 9
+    // Unauthenticated /billing?checkout=success (no server-rendered data-checkout-success) must NOT fire purchase
+    const billingUnauth = createAnalyticsHarness({
+      href: "https://shopcart.wals.pro/billing?checkout=success&lang=en",
+      ga4Id: "G-TEST123456",
+      pageLang: "en",
+      pageType: "billing",
+      promoActive: false,
+      initialConsent: grantedJson,
+      checkoutSuccessEl: null
+    });
+    expect(billingUnauth.getDataLayerCalls().filter((c) => c[0] === "event" && c[1] === "purchase")).toHaveLength(0);
+
+    // Non-promo purchase sends value: 9 and deduplicates in-memory even if sessionStorage throws
     const billingPaid = createAnalyticsHarness({
       href: "https://shopcart.wals.pro/billing?checkout=success&lang=en",
       ga4Id: "G-TEST123456",
@@ -672,10 +698,23 @@ describe("GA4 env validation, CSP, consent banner, privacy policy & zero-pre-con
       pageType: "billing",
       promoActive: false,
       initialConsent: grantedJson,
+      throwSessionStorage: true,
       checkoutSuccessEl: { value: "9" }
     });
+    billingPaid.dispatchClick({ "data-open-consent-settings": "" });
+    billingPaid.dispatchClick({ "data-consent-action": "accept" });
     const purchasesPaid = billingPaid.getDataLayerCalls().filter((c) => c[0] === "event" && c[1] === "purchase");
     expect(purchasesPaid).toHaveLength(1);
     expect(purchasesPaid[0]?.[2]).toMatchObject({ currency: "EUR", value: 9 });
+  });
+
+  it("keeps /auth/magic strictly zero-script even when GA4_MEASUREMENT_ID is configured", async () => {
+    const { app } = makeApp({ GA4_MEASUREMENT_ID: "G-TEST123456" });
+    const res = await request(app).get("/auth/magic?token=invalid_tok&lang=de").expect(400);
+    const csp = String(res.headers["content-security-policy"] ?? "");
+    expect(csp).toContain("default-src 'none'");
+    expect(csp).not.toContain("googletagmanager.com");
+    expect(csp).not.toContain("script-src");
+    expect(res.text).not.toContain("/assets/analytics.js");
   });
 });

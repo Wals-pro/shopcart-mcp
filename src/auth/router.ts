@@ -68,11 +68,18 @@ function getClientIp(req: Request): string {
 function setSecurityHeadersForHtml(
   res: Response,
   config: AppConfig,
-  opts?: { formActionOrigin?: string; referrerPolicy?: "same-origin" | "no-referrer" }
+  opts?: {
+    formActionOrigin?: string;
+    referrerPolicy?: "same-origin" | "no-referrer";
+    allowAnalytics?: boolean;
+  }
 ): void {
   res.setHeader(
     "Content-Security-Policy",
-    buildOAuthCsp(config.ga4MeasurementId, opts?.formActionOrigin)
+    buildOAuthCsp(
+      opts?.allowAnalytics === false ? undefined : config.ga4MeasurementId,
+      opts?.formActionOrigin
+    )
   );
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
@@ -725,7 +732,12 @@ export function createOAuthRouter(
   });
 
   router.get("/auth/magic", async (req, res) => {
-    setSecurityHeadersForHtml(res, config, { referrerPolicy: "no-referrer" });
+    // Keep /auth/magic strictly zero-script so an unconsumed magic-link token in
+    // window.location.search (browser_mismatch HTTP 200) is never exposed to third-party scripts.
+    setSecurityHeadersForHtml(res, config, {
+      referrerPolicy: "no-referrer",
+      allowAnalytics: false
+    });
     const rawToken = typeof req.query.token === "string" ? req.query.token : undefined;
     const cookies = parseCookies(req.headers.cookie);
     const fallbackLang = detectLang(req.query.lang, req.headers["accept-language"]);
@@ -741,8 +753,7 @@ export function createOAuthRouter(
           lang: verified.challenge.lang,
           kind: "browser_mismatch",
           email: verified.challenge.email,
-          clientName: verified.challenge.oauthParams?.clientName,
-          config
+          clientName: verified.challenge.oauthParams?.clientName
         })
       );
       return;
@@ -750,21 +761,21 @@ export function createOAuthRouter(
 
     if (verified.status === "expired") {
       res.status(410).type("html").send(
-        renderMagicLinkResultPage({ lang: fallbackLang, kind: "expired", config })
+        renderMagicLinkResultPage({ lang: fallbackLang, kind: "expired" })
       );
       return;
     }
 
     if (verified.status === "used") {
       res.status(410).type("html").send(
-        renderMagicLinkResultPage({ lang: fallbackLang, kind: "used", config })
+        renderMagicLinkResultPage({ lang: fallbackLang, kind: "used" })
       );
       return;
     }
 
     if (verified.status !== "ok") {
       res.status(400).type("html").send(
-        renderMagicLinkResultPage({ lang: fallbackLang, kind: "invalid", config })
+        renderMagicLinkResultPage({ lang: fallbackLang, kind: "invalid" })
       );
       return;
     }
@@ -795,7 +806,7 @@ export function createOAuthRouter(
     const oauthParams = ch.oauthParams;
     if (!oauthParams) {
       res.status(400).type("html").send(
-        renderMagicLinkResultPage({ lang: ch.lang, kind: "invalid", config })
+        renderMagicLinkResultPage({ lang: ch.lang, kind: "invalid" })
       );
       return;
     }
@@ -803,7 +814,7 @@ export function createOAuthRouter(
     const client = await resolveClient(oauthParams.clientId);
     if (!client || !matchRedirectUri(oauthParams.redirectUri, client.redirectUris)) {
       res.status(400).type("html").send(
-        renderMagicLinkResultPage({ lang: ch.lang, kind: "invalid", config })
+        renderMagicLinkResultPage({ lang: ch.lang, kind: "invalid" })
       );
       return;
     }

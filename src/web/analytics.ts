@@ -1,4 +1,4 @@
-import type { AppConfig } from "../config.js";
+import { parseGa4MeasurementId, type AppConfig } from "../config.js";
 import { escapeHtml, type Lang } from "../auth/pages.js";
 
 export type AnalyticsPageType =
@@ -15,10 +15,26 @@ export const GA4_CSP_CONNECT_SRC =
 export const GA4_CSP_IMG_SRC =
   "https://*.google-analytics.com https://www.googletagmanager.com";
 
+function hasValidGa4Id(raw: string | undefined): boolean {
+  return Boolean(parseGa4MeasurementId(raw));
+}
+
+function normalizeFormActionOrigin(raw: string | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
 export function buildLandingCsp(ga4MeasurementId: string | undefined): string {
-  const scriptSrc = ga4MeasurementId ? `script-src 'self' ${GA4_CSP_SCRIPT_SRC}` : "script-src 'self'";
-  const imgSrc = ga4MeasurementId ? `img-src 'self' data: https: ${GA4_CSP_IMG_SRC}` : "img-src 'self' data: https:";
-  const connectSrc = ga4MeasurementId ? `connect-src 'self' ${GA4_CSP_CONNECT_SRC}` : "connect-src 'self'";
+  const enabled = hasValidGa4Id(ga4MeasurementId);
+  const scriptSrc = enabled ? `script-src 'self' ${GA4_CSP_SCRIPT_SRC}` : "script-src 'self'";
+  const imgSrc = enabled ? `img-src 'self' data: https: ${GA4_CSP_IMG_SRC}` : "img-src 'self' data: https:";
+  const connectSrc = enabled ? `connect-src 'self' ${GA4_CSP_CONNECT_SRC}` : "connect-src 'self'";
   return [
     "default-src 'self'",
     scriptSrc,
@@ -34,9 +50,10 @@ export function buildLandingCsp(ga4MeasurementId: string | undefined): string {
 }
 
 export function buildGuidesCsp(ga4MeasurementId: string | undefined): string {
-  const scriptSrc = ga4MeasurementId ? `script-src 'self' ${GA4_CSP_SCRIPT_SRC}` : "script-src 'self'";
-  const imgSrc = ga4MeasurementId ? `img-src 'self' data: https: ${GA4_CSP_IMG_SRC}` : "img-src 'self' data: https:";
-  const connectSrc = ga4MeasurementId ? `connect-src 'self' ${GA4_CSP_CONNECT_SRC}` : "connect-src 'self'";
+  const enabled = hasValidGa4Id(ga4MeasurementId);
+  const scriptSrc = enabled ? `script-src 'self' ${GA4_CSP_SCRIPT_SRC}` : "script-src 'self'";
+  const imgSrc = enabled ? `img-src 'self' data: https: ${GA4_CSP_IMG_SRC}` : "img-src 'self' data: https:";
+  const connectSrc = enabled ? `connect-src 'self' ${GA4_CSP_CONNECT_SRC}` : "connect-src 'self'";
   return [
     "default-src 'self'",
     scriptSrc,
@@ -50,9 +67,10 @@ export function buildGuidesCsp(ga4MeasurementId: string | undefined): string {
 }
 
 export function buildLegalCsp(ga4MeasurementId: string | undefined): string {
-  const scriptSrc = ga4MeasurementId ? `script-src 'self' ${GA4_CSP_SCRIPT_SRC}` : "script-src 'self'";
-  const imgSrc = ga4MeasurementId ? `img-src 'self' data: ${GA4_CSP_IMG_SRC}` : "img-src 'self' data:";
-  const connectSrc = ga4MeasurementId ? `connect-src 'self' ${GA4_CSP_CONNECT_SRC}` : "connect-src 'self'";
+  const enabled = hasValidGa4Id(ga4MeasurementId);
+  const scriptSrc = enabled ? `script-src 'self' ${GA4_CSP_SCRIPT_SRC}` : "script-src 'self'";
+  const imgSrc = enabled ? `img-src 'self' data: ${GA4_CSP_IMG_SRC}` : "img-src 'self' data:";
+  const connectSrc = enabled ? `connect-src 'self' ${GA4_CSP_CONNECT_SRC}` : "connect-src 'self'";
   return [
     "default-src 'self'",
     scriptSrc,
@@ -66,7 +84,7 @@ export function buildLegalCsp(ga4MeasurementId: string | undefined): string {
 }
 
 export function buildBillingCsp(ga4MeasurementId: string | undefined): string {
-  if (!ga4MeasurementId) {
+  if (!hasValidGa4Id(ga4MeasurementId)) {
     return "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self' https://checkout.stripe.com https://billing.stripe.com; frame-ancestors 'none'; base-uri 'none'";
   }
   return [
@@ -85,8 +103,9 @@ export function buildOAuthCsp(
   ga4MeasurementId: string | undefined,
   formActionOrigin?: string
 ): string {
-  const formAction = formActionOrigin ? `'self' ${formActionOrigin}` : "'self'";
-  if (!ga4MeasurementId) {
+  const safeOrigin = normalizeFormActionOrigin(formActionOrigin);
+  const formAction = safeOrigin ? `'self' ${safeOrigin}` : "'self'";
+  if (!hasValidGa4Id(ga4MeasurementId)) {
     return `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action ${formAction}; frame-ancestors 'none'; base-uri 'none'`;
   }
   return [
@@ -105,19 +124,22 @@ export function renderAnalyticsHead(
   config: AppConfig,
   opts: { lang: Lang; pageType: AnalyticsPageType; promoActive?: boolean }
 ): string {
-  if (!config.ga4MeasurementId) return "";
+  const validId = parseGa4MeasurementId(config.ga4MeasurementId);
+  if (!validId) return "";
   const v = encodeURIComponent(config.version);
-  const id = escapeHtml(config.ga4MeasurementId);
+  const id = escapeHtml(validId);
+  const lang = escapeHtml(opts.lang);
+  const pageType = escapeHtml(opts.pageType);
   const promoAttr = opts.promoActive ? ' data-promo-active="true"' : "";
   return [
     `<meta name="shopcart-ga4" content="${id}">`,
     `<link rel="stylesheet" href="/assets/analytics.css?v=${v}">`,
-    `<script defer src="/assets/analytics.js?v=${v}" data-ga4-id="${id}" data-page-lang="${opts.lang}" data-page-type="${opts.pageType}"${promoAttr}></script>`
+    `<script defer src="/assets/analytics.js?v=${v}" data-ga4-id="${id}" data-page-lang="${lang}" data-page-type="${pageType}"${promoAttr}></script>`
   ].join("\n");
 }
 
 export function renderConsentBanner(config: AppConfig, lang: Lang): string {
-  if (!config.ga4MeasurementId) return "";
+  if (!hasValidGa4Id(config.ga4MeasurementId)) return "";
   const de = lang === "de";
   const privacyHref = `/privacy?lang=${lang}`;
 
@@ -153,8 +175,8 @@ export function renderCookieSettingsFooterLink(
   lang: Lang,
   opts?: { separator?: string }
 ): string {
-  if (!config.ga4MeasurementId) return "";
+  if (!hasValidGa4Id(config.ga4MeasurementId)) return "";
   const label = lang === "de" ? "Cookie-Einstellungen" : "Cookie settings";
-  const sep = opts?.separator ?? "";
+  const sep = opts?.separator ? escapeHtml(opts.separator) : "";
   return `${sep}<button type="button" class="sc-cookie-settings-btn" data-open-consent-settings>${label}</button>`;
 }
