@@ -751,6 +751,7 @@ describe("UniversalJsonLdAdapter (get_product, search_products, create_cart_link
       "bigcommerce",
       "shopware",
       "magento",
+      "ucp",
       "jsonld"
     ]);
     expect(platforms.indexOf("shopify")).toBeLessThan(platforms.indexOf("jsonld"));

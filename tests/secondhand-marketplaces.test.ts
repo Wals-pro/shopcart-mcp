@@ -501,6 +501,7 @@ describe("SecondhandMarketplaceAdapter & AdapterRegistry integration", () => {
       "bigcommerce",
       "shopware",
       "magento",
+      "ucp",
       "jsonld"
     ]);
 

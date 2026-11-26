@@ -12,6 +12,7 @@ export type StorePlatform =
   | "bigcommerce"
   | "shopware"
   | "magento"
+  | "ucp"
   | "jsonld";
 
 export type ProductCondition =
@@ -27,6 +28,31 @@ export type HandoffTier =
   | "item_cart_sequence"
   | "direct_product_link"
   | "search_handoff";
+
+export interface UcpServiceSummary {
+  version?: string | null;
+  restEndpoint?: string | null;
+  mcpEndpoint?: string | null;
+  a2aEndpoint?: string | null;
+}
+
+export interface UcpMetadata {
+  supported: boolean;
+  manifestUrl: string;
+  version: string | null;
+  capabilities: string[];
+  services: Record<string, UcpServiceSummary>;
+  endpoints: {
+    rest?: string | null;
+    mcp?: string | null;
+    a2a?: string | null;
+  };
+  checkoutHandoffSupported: boolean;
+  catalogSearchSupported: boolean;
+  liabilityModel: "zero_liability_handoff";
+  rejectedEndpointCount?: number;
+  warnings?: string[];
+}
 
 export type ProductAvailability =
   | "InStock"
@@ -69,7 +95,13 @@ export interface StoreInfo {
     singleItemLookup?: boolean;
     liveApiConfigured?: boolean;
     marketplaceId?: string;
+    ucp?: boolean;
+    ucpVersion?: string | null;
+    ucpCapabilities?: string[];
+    ucpCheckoutHandoff?: boolean;
+    ucpCatalogSearch?: boolean;
   };
+  ucp?: UcpMetadata;
 }
 
 export interface ProductSummary {
@@ -127,7 +159,7 @@ export interface ProductDetail {
   condition_raw?: string | null;
   price_min?: Money;
   price_max?: Money;
-  metadata_source?: "jsonld" | "jsonld+opengraph" | "opengraph";
+  metadata_source?: "jsonld" | "jsonld+opengraph" | "opengraph" | "ucp";
   url: string;
   options: Array<{ name: string; values: string[] }>;
   images: string[];
@@ -296,7 +328,16 @@ export type CartMode =
   | "cart_permalink"
   | "checkout_permalink"
   | "direct_product_link"
-  | "search_handoff";
+  | "search_handoff"
+  | "ucp_checkout_handoff";
+
+export interface UcpCheckoutHandoffMeta {
+  session_id?: string | null;
+  status: string;
+  continue_url: string;
+  merchant_of_record: "merchant";
+  liability_model: "zero_liability_handoff";
+}
 
 export interface CartLinkResult {
   store_origin: string;
@@ -306,6 +347,7 @@ export interface CartLinkResult {
   handoff_tier?: HandoffTier;
   items: CartLinkItemResult[];
   additional_cart_links?: AdditionalCartLink[];
+  ucp_checkout?: UcpCheckoutHandoffMeta;
   applied_discount_code?: string;
   discount_source?: DiscountSource | "user_supplied";
   discount_context?: string;

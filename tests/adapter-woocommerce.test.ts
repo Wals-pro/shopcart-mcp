@@ -809,7 +809,7 @@ describe("WooCommerceAdapter (detect, search, variable products, cart links)", (
 });
 
 describe("AdapterRegistry auto-routing (Amazon, Shopify & WooCommerce)", () => {
-  it("registers all 7 adapters in deterministic priority order and routes each platform automatically", async () => {
+  it("registers all 9 adapters in deterministic priority order and routes each platform automatically", async () => {
     const defaultRegistry = new AdapterRegistry();
     expect(defaultRegistry.listPlatforms()).toEqual([
       "amazon",
@@ -819,6 +819,7 @@ describe("AdapterRegistry auto-routing (Amazon, Shopify & WooCommerce)", () => {
       "bigcommerce",
       "shopware",
       "magento",
+      "ucp",
       "jsonld"
     ]);
 
