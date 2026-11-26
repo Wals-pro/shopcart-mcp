@@ -231,7 +231,7 @@ export function normalizeStoreOrigin(storeUrl: string): string {
     ? trimmed
     : `https://${trimmed}`;
   const parsed = validateExternalUrl(withScheme);
-  return `https://${parsed.hostname.toLowerCase()}`;
+  return `https://${parsed.hostname.toLowerCase().replace(/\.$/, "")}`;
 }
 
 const defaultLookupFn: DnsLookupFn = async (hostname: string) => {

@@ -333,18 +333,39 @@ describe("Wave 4 security hardening regressions", () => {
     expect(isSameStoreHost("co.uk", "shop.co.uk")).toBe(false);
     expect(sanitizeUniversalProductUrl(`https://shop.example/${"a".repeat(3000)}`, "https://shop.example/")).toBeNull();
 
-    // SearchAction authority placeholder & prompt injection rejected
+    // SearchAction authority placeholder, protocol-relative //, & stateful regex bypass rejected
     const badSearchMeta = parseSiteMetadataFromHtml(
       `<script type="application/ld+json">${JSON.stringify({
         "@type": "WebSite",
-        potentialAction: {
-          "@type": "SearchAction",
-          target: "https://{evil.example/?x=}.shop.example/?q={search_term_string}"
-        }
+        potentialAction: [
+          {
+            "@type": "SearchAction",
+            target: "https://{evil.example/?x=}.shop.example/?q={search_term_string}"
+          },
+          {
+            "@type": "SearchAction",
+            target: "//{q}.shop.example/search?q={q}"
+          },
+          {
+            "@type": "SearchAction",
+            target: "https://shop.example/search?q={q}&x=[INST]ignore"
+          },
+          {
+            "@type": "SearchAction",
+            target: "https://shop.example/search?q={q}&x=[INST]ignore"
+          }
+        ]
       })}</script>`,
       "https://shop.example/"
     );
     expect(badSearchMeta.searchActionTemplate).toBeNull();
+
+    // Trailing-dot shared suffix bypass blocked
+    expect(
+      sanitizeSafeUrl("https://victim.myshopify.com./img.jpg", "https://myshopify.com.", {
+        allowStoreSubdomains: true
+      })
+    ).toBeNull();
   });
 
   it("prevents Awin redirect host bypass and untrusted merchant-name storefront hijacking", async () => {

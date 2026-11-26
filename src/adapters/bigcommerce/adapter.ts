@@ -97,10 +97,13 @@ function extractBalancedJsonObject(source: string, startBraceIndex: number): str
   return null;
 }
 
+const MAX_BCDATA_ATTEMPTS = 16;
+
 export function extractBcData(html: string): BcDataPayload | null {
   const re = /(?:window\.|var\s+|let\s+|const\s+)?BCData\s*=\s*\{/g;
   let match: RegExpExecArray | null;
-  while ((match = re.exec(html)) !== null) {
+  let attempts = 0;
+  while ((match = re.exec(html)) !== null && attempts++ < MAX_BCDATA_ATTEMPTS) {
     const braceIdx = match.index + match[0].length - 1;
     const rawJson = extractBalancedJsonObject(html, braceIdx);
     if (!rawJson) continue;

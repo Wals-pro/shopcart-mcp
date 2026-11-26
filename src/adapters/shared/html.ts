@@ -351,10 +351,16 @@ export function extractTextByClassLinear(
     const idx = lower.indexOf(needle, pos);
     if (idx === -1) return null;
 
-    // Walk back at most MAX_ATTR_WINDOW to find enclosing '<'
+    // Walk back at most MAX_ATTR_WINDOW to find enclosing '<' (strictly O(1) bounded)
     const searchStart = Math.max(0, idx - MAX_ATTR_WINDOW);
-    const lt = lower.lastIndexOf("<", idx);
-    if (lt === -1 || lt < searchStart) {
+    let lt = -1;
+    for (let i = idx - 1; i >= searchStart; i--) {
+      if (lower.charCodeAt(i) === 60) {
+        lt = i;
+        break;
+      }
+    }
+    if (lt === -1) {
       pos = idx + needle.length;
       continue;
     }

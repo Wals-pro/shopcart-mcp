@@ -274,8 +274,8 @@ export function isSameStoreSite(originA: string, originB: string): boolean {
     const a = new URL(originA);
     const b = new URL(originB);
     if (a.protocol !== b.protocol) return false;
-    const hostA = a.hostname.toLowerCase();
-    const hostB = b.hostname.toLowerCase();
+    const hostA = a.hostname.toLowerCase().replace(/\.$/, "");
+    const hostB = b.hostname.toLowerCase().replace(/\.$/, "");
     return hostA === hostB || hostA === `www.${hostB}` || `www.${hostA}` === hostB;
   } catch {
     return false;
@@ -370,8 +370,8 @@ export function isSameStoreSiteOrSubdomain(storeOrigin: string, candidateOrigin:
     const a = new URL(storeOrigin);
     const b = new URL(candidateOrigin);
     if (a.protocol !== b.protocol) return false;
-    const baseDomain = a.hostname.toLowerCase().replace(/^www\./, "");
-    const candidateHost = b.hostname.toLowerCase();
+    const baseDomain = a.hostname.toLowerCase().replace(/\.$/, "").replace(/^www\./, "");
+    const candidateHost = b.hostname.toLowerCase().replace(/\.$/, "");
     const isSharedSuffix = SHARED_PLATFORM_SUFFIXES.some(
       (suffix) => baseDomain === suffix || baseDomain.endsWith(`.${suffix}`)
     );
@@ -414,8 +414,8 @@ export function sanitizeSafeUrl(
   if (parsed.port !== "" && parsed.port !== "443") return null;
   if (parsed.username || parsed.password) return null;
 
-  const storeHost = new URL(storeOrigin).hostname.toLowerCase();
-  const host = parsed.hostname.toLowerCase();
+  const storeHost = new URL(storeOrigin).hostname.toLowerCase().replace(/\.$/, "");
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
   const hostMatchesStore = host === storeHost || host === `www.${storeHost}` || `www.${host}` === storeHost;
 
   let hostMatchesSubdomain = false;

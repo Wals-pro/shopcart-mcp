@@ -1,4 +1,5 @@
 import {
+  asciiLowerCase,
   isSameStoreSite,
   isSameStoreSiteOrSubdomain,
   sanitizeOptionalText,
@@ -39,6 +40,7 @@ const TRACKING_PARAMS = new Set([
 ]);
 
 const LLM_CONTROL_TOKEN_RE = /<\|[^|\r\n]{1,40}\|>|<<\/?SYS>>|\[\/?INST\]/gi;
+const LLM_CONTROL_TOKEN_TEST_RE = /<\|[^|\r\n]{1,40}\|>|<<\/?SYS>>|\[\/?INST\]/i;
 
 type JsonObject = Record<string, unknown>;
 
@@ -245,7 +247,7 @@ function findTagClose(html: string, openPos: number): number {
  */
 export function extractJsonLdScriptBodies(rawHtml: string): string[] {
   const html = capHtmlInput(rawHtml);
-  const lower = html.toLowerCase();
+  const lower = asciiLowerCase(html);
   const bodies: string[] = [];
   let pos = 0;
 
@@ -298,7 +300,7 @@ export function extractJsonLdScriptBodies(rawHtml: string): string[] {
  */
 function extractHtmlMetaHints(rawHtml: string): HtmlMetaHints {
   const html = capHtmlInput(rawHtml);
-  const lower = html.toLowerCase();
+  const lower = asciiLowerCase(html);
   const hints: HtmlMetaHints = {
     title: null,
     lang: null,
@@ -1796,9 +1798,11 @@ function extractSearchActionTemplate(
 
       const cleaned = stripControlAndInvisible(template).trim();
       if (!cleaned || cleaned.length > 500) continue;
-      if (/[\r\n\t#]/.test(cleaned)) continue;
-      if (LLM_CONTROL_TOKEN_RE.test(cleaned)) continue;
-      if (!cleaned.startsWith("https://") && !cleaned.startsWith("/")) continue;
+      if (/[\s#]/.test(cleaned)) continue;
+      if (LLM_CONTROL_TOKEN_TEST_RE.test(cleaned)) continue;
+      if (!cleaned.startsWith("https://") && !(cleaned.startsWith("/") && !cleaned.startsWith("//"))) {
+        continue;
+      }
 
       // Forbid placeholders inside scheme/authority (must appear only in path or query)
       if (cleaned.startsWith("https://")) {
