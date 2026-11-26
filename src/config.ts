@@ -1,4 +1,12 @@
 import crypto from "node:crypto";
+import {
+  loadAffiliateFeedConfig,
+  type AffiliateFeedConfig
+} from "./adapters/affiliate-feed/index.js";
+import {
+  loadAttributionConfig,
+  type AttributionConfig
+} from "./attribution/links.js";
 
 export interface AppConfig {
   port: number;
@@ -22,6 +30,8 @@ export interface AppConfig {
   smtpSenderName: string;
   reviewerTestEmail: string | undefined;
   reviewerTestCode: string | undefined;
+  attribution: AttributionConfig;
+  affiliateFeed: AffiliateFeedConfig;
   sessionSecret: string;
   appName: string;
   repoUrl: string;
@@ -118,6 +128,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     smtpSenderName: env.SMTP_SENDER_NAME?.trim() || "ShopCart by wals.pro",
     reviewerTestEmail: reviewerEnabled ? rawReviewerEmail : undefined,
     reviewerTestCode: reviewerEnabled ? rawReviewerCode : undefined,
+    attribution: loadAttributionConfig(env),
+    affiliateFeed: loadAffiliateFeedConfig(env),
     sessionSecret,
     appName: "shopcart-mcp",
     repoUrl: "https://github.com/Wals-pro/shopcart-mcp",

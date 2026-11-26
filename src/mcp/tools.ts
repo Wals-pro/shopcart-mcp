@@ -1,6 +1,16 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import {
+  isCrossStoreAlias,
+  type AffiliateFeedProvider
+} from "../adapters/affiliate-feed/index.js";
 import { AdapterRegistry } from "../adapters/registry.js";
+import {
+  AFFILIATE_DISCLOSURE_NOTE,
+  applyAttribution,
+  loadAttributionConfig,
+  type AttributionConfig
+} from "../attribution/links.js";
 import { SOURCE_NOTICE_CATALOG, SOURCE_NOTICE_PRODUCT } from "../security/sanitize.js";
 import { normalizeStoreOrigin, SsrfError } from "../security/ssrf.js";
 
@@ -16,6 +26,8 @@ export interface QuotaCheckResult {
 
 export interface ToolRuntimeContext {
   registry: AdapterRegistry;
+  attribution?: AttributionConfig;
+  affiliateFeed?: AffiliateFeedProvider;
   concurrencyKey?: string;
   consumeQuota?: (toolName: string) => Promise<QuotaCheckResult>;
 }
@@ -90,6 +102,9 @@ async function runGuardedTool<T>(
 }
 
 export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext): void {
+  const attribution = ctx.attribution ?? loadAttributionConfig();
+  const affiliateFeed = ctx.affiliateFeed;
+
   server.registerTool(
     "inspect_store",
     {
@@ -166,6 +181,53 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     },
     async ({ store_url, query, limit, available_only, min_price, max_price }) =>
       runGuardedTool(ctx, "search_products", async () => {
+        const trimmedStore = store_url.trim();
+        const feedTarget = affiliateFeed
+          ? await affiliateFeed.resolveStoreTarget(trimmedStore, ctx.concurrencyKey)
+          : isCrossStoreAlias(trimmedStore)
+            ? ({ mode: "all" } as const)
+            : null;
+
+        if (feedTarget) {
+          if (!affiliateFeed || !affiliateFeed.isConfigured()) {
+            return {
+              store_origin: "affiliate_feed:unconfigured",
+              currency: "EUR",
+              source_notice: SOURCE_NOTICE_CATALOG,
+              affiliate_disclosure: false,
+              total_returned: 0,
+              products: [],
+              notices: [
+                "Cross-store affiliate product feeds are not configured on this instance. Pass a specific online store domain (e.g. 'snocks.com') instead."
+              ]
+            };
+          }
+
+          const feedRes = await affiliateFeed.search({
+            query,
+            merchant: feedTarget.mode === "merchant" ? feedTarget.merchant : undefined,
+            limit: limit ?? 10,
+            availableOnly: available_only,
+            minPrice: min_price,
+            maxPrice: max_price,
+            concurrencyKey: ctx.concurrencyKey
+          });
+          return {
+            store_origin:
+              feedTarget.mode === "merchant"
+                ? `affiliate_feed:${feedTarget.merchant}`
+                : "affiliate_feed:awin",
+            currency: feedRes.currency,
+            source_notice: SOURCE_NOTICE_CATALOG,
+            affiliate_disclosure: feedRes.affiliate_disclosure,
+            ...(feedRes.disclosure_note ? { disclosure_note: feedRes.disclosure_note } : {}),
+            merchants_searched: feedRes.merchants_searched,
+            total_returned: feedRes.products.length,
+            products: feedRes.products,
+            ...(feedRes.notices.length > 0 ? { notices: feedRes.notices } : {})
+          };
+        }
+
         const origin = normalizeStoreOrigin(store_url);
         const adapter = ctx.registry.getDefault();
         const result = await adapter.searchProducts(origin, {
@@ -176,12 +238,31 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           maxPrice: max_price,
           concurrencyKey: ctx.concurrencyKey
         });
+
+        let anyAffiliate = false;
+        let disclosureNote: string | undefined;
+        const decoratedProducts = result.products.map((product) => {
+          const decorated = applyAttribution(product.url, attribution, { kind: "product" });
+          if (decorated.affiliate_disclosure) {
+            anyAffiliate = true;
+            disclosureNote = disclosureNote ?? decorated.disclosure_note;
+          }
+          return {
+            ...product,
+            url: decorated.url
+          };
+        });
+
         return {
           store_origin: result.store_origin,
           currency: result.currency,
           source_notice: SOURCE_NOTICE_CATALOG,
-          total_returned: result.products.length,
-          products: result.products,
+          affiliate_disclosure: anyAffiliate,
+          ...(anyAffiliate
+            ? { disclosure_note: disclosureNote ?? AFFILIATE_DISCLOSURE_NOTE }
+            : {}),
+          total_returned: decoratedProducts.length,
+          products: decoratedProducts,
           ...(result.notices.length > 0 ? { notices: result.notices } : {})
         };
       })
@@ -210,11 +291,19 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
         const result = await adapter.getProduct(origin, handle_or_url, {
           concurrencyKey: ctx.concurrencyKey
         });
+        const decorated = applyAttribution(result.product.url, attribution, { kind: "product" });
         return {
           store_origin: result.store_origin,
           currency: result.currency,
           source_notice: SOURCE_NOTICE_PRODUCT,
-          product: result.product
+          affiliate_disclosure: decorated.affiliate_disclosure,
+          ...(decorated.affiliate_disclosure
+            ? { disclosure_note: decorated.disclosure_note ?? AFFILIATE_DISCLOSURE_NOTE }
+            : {}),
+          product: {
+            ...result.product,
+            url: decorated.url
+          }
         };
       })
   );
@@ -265,7 +354,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
       runGuardedTool(ctx, "create_cart_link", async () => {
         const origin = normalizeStoreOrigin(store_url);
         const adapter = ctx.registry.getDefault();
-        return adapter.buildCartLink(
+        const result = await adapter.buildCartLink(
           origin,
           items.map((i) => ({ variantId: i.variant_id, quantity: i.quantity })),
           {
@@ -275,6 +364,82 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
             concurrencyKey: ctx.concurrencyKey
           }
         );
+        const decorated = applyAttribution(result.cart_url, attribution, { kind: "cart" });
+        return {
+          ...result,
+          cart_url: decorated.url,
+          affiliate_disclosure: decorated.affiliate_disclosure,
+          ...(decorated.affiliate_disclosure
+            ? { disclosure_note: decorated.disclosure_note ?? AFFILIATE_DISCLOSURE_NOTE }
+            : {})
+        };
       })
   );
+
+  if (affiliateFeed?.isConfigured()) {
+    server.registerTool(
+      "search_affiliate_deals",
+      {
+        title: "Search Partner Deals & EAN Prices",
+        description:
+          "Search active Awin partner product feeds across multiple EU/DACH merchants by keyword or EAN/GTIN barcode, returning normalized prices, availability, and disclosed partner links.",
+        inputSchema: {
+          query: z
+            .string()
+            .max(120)
+            .optional()
+            .describe("Product keyword(s) or model name, e.g. 'Sony WH-1000XM5'"),
+          ean: z
+            .string()
+            .regex(/^[\d\s-]{8,20}$/, "ean must be an 8-14 digit EAN/GTIN barcode")
+            .optional()
+            .describe("Optional 8-14 digit EAN/GTIN barcode for exact cross-merchant price comparison"),
+          merchant: z
+            .string()
+            .max(100)
+            .optional()
+            .describe("Optional merchant filter, e.g. 'MediaMarkt', 'OTTO', 'Cyberport', 'Alternate', 'Decathlon'"),
+          limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(20)
+            .default(10)
+            .optional()
+            .describe("Max number of offers to return (1-20, default 10)."),
+          available_only: z
+            .boolean()
+            .optional()
+            .describe("If true, only return offers currently marked in stock."),
+          min_price: z.number().min(0).optional().describe("Minimum price filter in major currency units."),
+          max_price: z.number().min(0).optional().describe("Maximum price filter in major currency units.")
+        },
+        annotations: makeAnnotations("Search Partner Deals & EAN Prices")
+      },
+      async ({ query, ean, merchant, limit, available_only, min_price, max_price }) =>
+        runGuardedTool(ctx, "search_affiliate_deals", async () => {
+          const result = await affiliateFeed.search({
+            query,
+            ean,
+            merchant,
+            limit: limit ?? 10,
+            availableOnly: available_only,
+            minPrice: min_price,
+            maxPrice: max_price,
+            concurrencyKey: ctx.concurrencyKey
+          });
+          return {
+            provider: result.provider,
+            currency: result.currency,
+            source_notice: SOURCE_NOTICE_CATALOG,
+            affiliate_disclosure: result.affiliate_disclosure,
+            ...(result.disclosure_note ? { disclosure_note: result.disclosure_note } : {}),
+            merchants_searched: result.merchants_searched,
+            total_returned: result.products.length,
+            products: result.products,
+            ...(result.notices.length > 0 ? { notices: result.notices } : {})
+          };
+        })
+    );
+  }
 }
