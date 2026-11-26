@@ -155,6 +155,7 @@ ${renderAnalyticsHead(config, { lang, pageType: "billing", promoActive })}
   </main>
   <p class="foot">
     <a href="/?lang=${lang}">${de ? "Startseite" : "Home"}</a> ·
+    <a href="${de ? "/check" : "/en/check"}">${de ? "Shop prüfen" : "Check store"}</a> ·
     <a href="/privacy?lang=${lang}">${de ? "Datenschutz" : "Privacy Policy"}</a> ·
     <a href="/terms?lang=${lang}">${de ? "Nutzungsbedingungen" : "Terms"}</a> ·
     <a href="https://wals.pro/policies/legal-notice" target="_blank" rel="noopener">${de ? "Impressum" : "Legal Notice"}</a>${renderCookieSettingsFooterLink(config, lang, { separator: " · " })}

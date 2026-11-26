@@ -1910,6 +1910,7 @@ function renderHeader(config: AppConfig, lang: Lang, switchHref: string, current
     </a>
     <nav class="nav-links" aria-label="${de ? "Hauptnavigation" : "Main navigation"}">
       <a href="/?lang=${lang}">${de ? "Startseite" : "Home"}</a>
+      <a href="${de ? "/check" : "/en/check"}">${de ? "Shop prüfen" : "Check store"}</a>
       <a href="/guides?lang=${lang}"${isOverview ? ' aria-current="page"' : ""}>Guides</a>
       <a href="${de ? "/for-merchants" : "/en/for-merchants"}">${de ? "Für Shops" : "For merchants"}</a>
       <a href="/billing?lang=${lang}">${de ? "Konto &amp; Billing" : "Account &amp; Billing"}</a>
@@ -1930,6 +1931,7 @@ function renderFooter(config: AppConfig, lang: Lang): string {
         <span><strong>Shop<span class="brand-accent">Cart</span> MCP</strong> · by <a href="https://wals.pro" target="_blank" rel="noopener noreferrer">wals.pro</a></span>
       </div>
       <div class="foot-links">
+        <a href="${de ? "/check" : "/en/check"}">${de ? "Shop prüfen" : "Check store"}</a>
         <a href="/guides?lang=${lang}">Guides</a>
         <a href="${de ? "/for-merchants" : "/en/for-merchants"}">${de ? "Für Shops" : "For merchants"}</a>
         <a href="/billing?lang=${lang}">${de ? "Konto &amp; Billing" : "Account &amp; Billing"}</a>

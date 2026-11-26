@@ -32,6 +32,8 @@ import { createGuidesRouter } from "./web/guides.js";
 import { renderLandingPage } from "./web/landing.js";
 import { renderNotFoundPage, renderPrivacyPage, renderSecurityTxt, renderTermsPage } from "./web/legal.js";
 import { createStoresRouter } from "./web/stores.js";
+import { createStoreCheckRouter } from "./web/store-check.js";
+import type { StoreCheckRateLimiter } from "./web/store-check-core.js";
 
 export interface CreateAppDeps {
   config: AppConfig;
@@ -43,6 +45,8 @@ export interface CreateAppDeps {
   emailSender?: EmailSender;
   otpService?: EmailOtpService;
   stripeClient?: BillingStripeClient;
+  storeCheckRateLimiter?: StoreCheckRateLimiter;
+  storeCheckTimeoutMs?: number;
 }
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
@@ -104,6 +108,16 @@ const STATIC_LANDING_ASSETS: Array<{ route: string; file: string; contentType: s
   {
     route: "/assets/stores.js",
     file: "assets/stores.js",
+    contentType: "application/javascript; charset=utf-8"
+  },
+  {
+    route: "/assets/store-check.css",
+    file: "assets/store-check.css",
+    contentType: "text/css; charset=utf-8"
+  },
+  {
+    route: "/assets/store-check.js",
+    file: "assets/store-check.js",
     contentType: "application/javascript; charset=utf-8"
   }
 ];
@@ -458,6 +472,14 @@ export function createApp(deps: CreateAppDeps): Express {
 
   app.use(createForMerchantsRouter(config));
   app.use(createStoresRouter(config));
+  app.use(
+    createStoreCheckRouter({
+      config,
+      registry,
+      rateLimiter: deps.storeCheckRateLimiter,
+      timeoutMs: deps.storeCheckTimeoutMs
+    })
+  );
   app.use(createGuidesRouter(config));
   app.use(createBillingRouter(config, store, otpService, deps.stripeClient));
 

@@ -796,6 +796,7 @@ ${
       <a class="hide-md" href="#examples">${de ? "Beispiele" : "Examples"}</a>
       <a class="hide-sm" href="#pricing">${de ? "Preise" : "Pricing"}</a>
       <a class="hide-sm" href="#faq">FAQ</a>
+      <a class="hide-sm" href="${de ? "/check" : "/en/check"}">${de ? "Shop prüfen" : "Check store"}</a>
       <a class="hide-md" href="/guides?lang=${lang}">${de ? "Ratgeber" : "Guides"}</a>
       <a class="hide-md" href="${de ? "/for-merchants" : "/en/for-merchants"}">${de ? "Für Shops" : "For merchants"}</a>
       <a class="hide-md" href="#developers">${de ? "Für Entwickler" : "Developers"}</a>
@@ -1004,6 +1005,20 @@ ${
           ? 'Sie betreiben selbst einen Online-Shop? <a class="desktop-link" href="/for-merchants">Für Shops: Agentic Storefront Readiness &amp; kostenloser Selbst-Check →</a>'
           : 'Running an online store yourself? <a class="desktop-link" href="/en/for-merchants">For merchants: Agentic Storefront Readiness &amp; free self-check →</a>'
       }</p>
+
+      <div class="check-teaser">
+        <div class="check-teaser-copy">
+          <strong>${de ? "Eigener Online-Shop?" : "Run an online store?"}</strong>
+          <span>${
+            de
+              ? "Prüfe kostenlos und ohne Login in wenigen Sekunden, was Claude, ChatGPT &amp; Gemini in deinem Shop lesen können."
+              : "Check for free with zero login in seconds what Claude, ChatGPT &amp; Gemini can read from your storefront."
+          }</span>
+        </div>
+        <a class="btn-secondary check-teaser-btn" href="${de ? "/check" : "/en/check"}">${
+          de ? "Shop prüfen →" : "Check store →"
+        }</a>
+      </div>
     </div>
   </section>
 
@@ -1545,6 +1560,7 @@ ${
         <span><strong>Shop<span class="brand-accent">Cart</span></strong> · by <a href="https://wals.pro" target="_blank" rel="noopener noreferrer">wals.pro</a></span>
       </div>
       <div class="foot-links">
+        <a href="${de ? "/check" : "/en/check"}">${de ? "Shop prüfen" : "Check store"}</a>
         <a href="/guides?lang=${lang}">${de ? "Ratgeber" : "Guides"}</a>
         <a href="${de ? "/for-merchants" : "/en/for-merchants"}">${de ? "Für Shops" : "For merchants"}</a>
         <a href="/billing?lang=${lang}">${de ? "Konto &amp; Abo" : "Account &amp; billing"}</a>

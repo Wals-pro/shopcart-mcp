@@ -114,6 +114,7 @@ Users arrive from ${origin} with a prompt like "Connect ShopCart (${mcpUrl}) for
 - [Full Agent Reference](${origin}/llms-full.txt): Supported store types, DE/EN shopping use cases, all guide summaries, security & read-only architecture.
 - [Homepage & Setup](${origin}): Consumer overview, connect buttons, AI start links, and pricing.
 - [Global Store Directory (DE / EN)](${origin}/stores): Searchable directory of live-verified DACH and global online stores ([English](${origin}/en/stores), JSON API \`${origin}/api/stores\`).
+- [Storefront Self-Check (DE)](${origin}/check) | [Storefront Self-Check (EN)](${origin}/en/check): Free, read-only browser check showing what AI assistants can read from any public online store.
 - [Shopping Guides Hub](${origin}/guides): Answer-first guides in German and English.
 ${GUIDE_DEFINITIONS.map((g) => `  - [${g.title}](${origin}${g.path}) (${g.lang}): ${g.cardSummary}`).join("\n")}
 - [For Merchants — Agentic Storefront Readiness (DE)](${origin}/for-merchants) | [(EN)](${origin}/en/for-merchants): Free storefront self-check and optional B2B readiness services by wals.pro (100% independent, zero pay-to-rank).
@@ -334,6 +335,8 @@ export const SITEMAP_PATHS: readonly string[] = [
   "/en/for-merchants",
   "/stores",
   "/en/stores",
+  "/check",
+  "/en/check",
   "/guides",
   ...GUIDE_DEFINITIONS.map((g) => g.path),
   "/billing",
@@ -364,6 +367,8 @@ export function renderSitemapXml(config: AppConfig): string {
     "/en/for-merchants": "0.8",
     "/stores": "0.9",
     "/en/stores": "0.9",
+    "/check": "0.9",
+    "/en/check": "0.9",
     "/guides": "0.9",
     ...Object.fromEntries(GUIDE_DEFINITIONS.map((g) => [g.path, "0.8"]))
   };
@@ -388,6 +393,13 @@ export function renderSitemapXml(config: AppConfig): string {
         { hreflang: "de", href: `${origin}/stores` },
         { hreflang: "en", href: `${origin}/en/stores` },
         { hreflang: "x-default", href: `${origin}/stores` }
+      ];
+    }
+    if (p === "/check" || p === "/en/check") {
+      return [
+        { hreflang: "de", href: `${origin}/check` },
+        { hreflang: "en", href: `${origin}/en/check` },
+        { hreflang: "x-default", href: `${origin}/check` }
       ];
     }
     if (p === "/guides") {

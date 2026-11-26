@@ -132,9 +132,11 @@ describe("Agent discovery (GEO/AEO): llms.txt, llms-full.txt, robots.txt, sitema
     expect(res.text.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true);
     expect(res.text).toContain('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"');
     expect(res.text).toContain('xmlns:xhtml="http://www.w3.org/1999/xhtml"');
-    for (const required of ["/", "/?lang=de", "/?lang=en", "/guides", "/billing", "/privacy", "/terms", "/llms.txt", "/llms-full.txt"]) {
+    for (const required of ["/", "/?lang=de", "/?lang=en", "/check", "/en/check", "/guides", "/billing", "/privacy", "/terms", "/llms.txt", "/llms-full.txt"]) {
       expect(SITEMAP_PATHS).toContain(required);
     }
+    expect(res.text).toContain('hreflang="de" href="https://shopcart.wals.pro/check"');
+    expect(res.text).toContain('hreflang="en" href="https://shopcart.wals.pro/en/check"');
     for (const guide of GUIDE_DEFINITIONS) {
       expect(SITEMAP_PATHS).toContain(guide.path);
     }
@@ -174,6 +176,8 @@ describe("Agent discovery (GEO/AEO): llms.txt, llms-full.txt, robots.txt, sitema
 
     const urls = extractSitemapUrls(sitemapRes.text, "shopcart.wals.pro");
     expect(urls).toHaveLength(SITEMAP_PATHS.length);
+    expect(urls).toContain("https://shopcart.wals.pro/check");
+    expect(urls).toContain("https://shopcart.wals.pro/en/check");
     expect(urls).toContain("https://shopcart.wals.pro/en/guides/chatgpt-instant-checkout-alternative");
     expect(urls).toContain("https://shopcart.wals.pro/guides/shopify-mcp-server-vergleich");
 

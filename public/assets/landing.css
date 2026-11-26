@@ -2840,3 +2840,41 @@ details[open] > summary .faq-icon::after {
     display: none;
   }
 }
+
+/* --- Subtle Storefront Self-Check Teaser in #shops --- */
+.check-teaser {
+  margin-top: 22px;
+  padding: 18px 22px;
+  border-radius: var(--walspro-radius-card);
+  border: 1px solid var(--walspro-border-strong);
+  background: var(--walspro-surface);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px 20px;
+}
+
+.check-teaser-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 680px;
+}
+
+.check-teaser-copy strong {
+  font-size: 15.5px;
+  font-weight: 720;
+  color: #ffffff;
+}
+
+.check-teaser-copy span {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--walspro-muted);
+}
+
+.check-teaser-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}

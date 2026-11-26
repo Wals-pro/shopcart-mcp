@@ -40,6 +40,7 @@ ${analyticsHead}
     <nav class="nav">
       <a href="/?lang=${lang}">${de ? "Startseite" : "Home"}</a>
       <a href="${de ? "/for-merchants" : "/en/for-merchants"}">${de ? "Für Shops" : "For merchants"}</a>
+      <a href="${de ? "/check" : "/en/check"}">${de ? "Shop prüfen" : "Check store"}</a>
       <a href="/billing?lang=${lang}">${de ? "Konto & Billing" : "Billing"}</a>
       <a href="/privacy?lang=${lang}">${de ? "Datenschutz" : "Privacy"}</a>
       <a href="/terms?lang=${lang}">${de ? "Nutzungsbedingungen" : "Terms"}</a>
