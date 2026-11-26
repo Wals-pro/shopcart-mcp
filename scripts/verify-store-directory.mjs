@@ -92,18 +92,33 @@ function isParkedOrErrorPage(html) {
     lower.includes("domain is for sale") ||
     lower.includes("this domain may be for sale") ||
     lower.includes("sedoparking") ||
-    lower.includes("dan.com") && lower.includes("buy this domain") ||
-    lower.includes("afternic") && lower.includes("domain") ||
+    lower.includes("buy this domain") ||
+    (lower.includes("afternic") && lower.includes("domain")) ||
     lower.includes("parked free, courtesy of godaddy") ||
     lower.includes("this store is currently unavailable") ||
     lower.includes("sorry, this shop is currently unavailable") ||
-    lower.includes("opening soon") && lower.includes("enter using password")
+    (lower.includes("opening soon") && lower.includes("enter using password"))
   );
+}
+
+function extractReferencedHosts(html) {
+  const hosts = new Set();
+  const urlRe = /https:\/\/[a-z0-9.-]+(?=[/"'\s<>])/gi;
+  for (const match of html.matchAll(urlRe)) {
+    try {
+      const parsed = new URL(match[0]);
+      hosts.add(parsed.hostname.toLowerCase());
+    } catch {
+      // ignore invalid URLs
+    }
+  }
+  return hosts;
 }
 
 function detectMarkersFromHtmlAndHeaders(html, headers) {
   const lower = html.toLowerCase();
   const h = headers || {};
+  const referencedHosts = extractReferencedHosts(html);
   const markers = [];
 
   // Shopify markers
@@ -114,13 +129,19 @@ function detectMarkersFromHtmlAndHeaders(html, headers) {
       (h["powered-by"] && h["powered-by"].toLowerCase().includes("shopify")) ||
       (h["server"] && h["server"].toLowerCase().includes("shopify"))
   );
+  let hasShopifyCdnHost = false;
+  for (const host of referencedHosts) {
+    if (host === "cdn.shopify.com" || host.endsWith(".myshopify.com") || host.endsWith(".shopifycdn.com")) {
+      hasShopifyCdnHost = true;
+      break;
+    }
+  }
   const hasShopifyHtml =
-    lower.includes("cdn.shopify.com") ||
+    hasShopifyCdnHost ||
     lower.includes("shopify.shop") ||
     lower.includes("shopify-features") ||
     lower.includes("shopify-digital-wallet") ||
-    lower.includes("window.shopify") ||
-    lower.includes("myshopify.com");
+    lower.includes("window.shopify");
   if (hasShopifyHeader || hasShopifyHtml) markers.push("shopify");
 
   // WooCommerce markers
@@ -138,9 +159,15 @@ function detectMarkersFromHtmlAndHeaders(html, headers) {
       h["x-bc-edge-cache-status"] ||
       (h["set-cookie"] && h["set-cookie"].includes("SHOP_SESSION_TOKEN"))
   );
+  let hasBcCdnHost = false;
+  for (const host of referencedHosts) {
+    if (/^cdn\d*\.bigcommerce\.com$/.test(host)) {
+      hasBcCdnHost = true;
+      break;
+    }
+  }
   const hasBcHtml =
-    /cdn\d*\.bigcommerce\.com/i.test(html) ||
-    lower.includes("bigcommerce.com/s-") ||
+    hasBcCdnHost ||
     lower.includes("window.bcdata") ||
     lower.includes("stencil-utils") ||
     lower.includes("bc-sf-filter");

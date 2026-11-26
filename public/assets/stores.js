@@ -22,8 +22,8 @@
 
   const lang = document.body.getAttribute("data-lang") === "en" ? "en" : "de";
   const de = lang === "de";
-  const basePath = document.body.getAttribute("data-base-path") || (de ? "/stores" : "/en/stores");
-  const checkPath = document.body.getAttribute("data-check-path") || (de ? "/check" : "/en/check");
+  const basePath = de ? "/stores" : "/en/stores";
+  const checkPath = de ? "/check" : "/en/check";
 
   const PLATFORM_LABELS = {
     shopify: "Shopify",
