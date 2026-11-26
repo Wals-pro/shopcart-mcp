@@ -18,7 +18,13 @@ import {
 } from "../../security/sanitize.js";
 import { validateExternalUrl } from "../../security/ssrf.js";
 import { formatMoney, normalizeCurrency } from "../shopify/normalize.js";
-import type { Money, ProductAvailability, ProductDetail, ProductVariant } from "../types.js";
+import type {
+  Money,
+  ProductAvailability,
+  ProductCondition,
+  ProductDetail,
+  ProductVariant
+} from "../types.js";
 
 export const MAX_HTML_PARSE_BYTES = 2 * 1024 * 1024; // 2 MB strict parser cap
 const MAX_JSONLD_BLOCKS = 32;
@@ -83,6 +89,7 @@ interface HtmlMetaHints {
   ogPriceAmount: string | null;
   ogPriceCurrency: string | null;
   ogAvailability: string | null;
+  ogCondition: string | null;
   productBrand: string | null;
   productSku: string | null;
   twitterTitle: string | null;
@@ -110,6 +117,8 @@ interface ExtractedOffer {
   currency: string | null;
   availability: ProductAvailability;
   available: boolean;
+  condition: ProductCondition;
+  conditionRaw: string | null;
   url: string | null;
   optionValues: string[];
 }
@@ -324,6 +333,7 @@ function extractHtmlMetaHints(rawHtml: string): HtmlMetaHints {
     ogPriceAmount: null,
     ogPriceCurrency: null,
     ogAvailability: null,
+    ogCondition: null,
     productBrand: null,
     productSku: null,
     twitterTitle: null,
@@ -414,6 +424,13 @@ function extractHtmlMetaHints(rawHtml: string): HtmlMetaHints {
       case "availability":
         if (key === "product:availability" || !hints.ogAvailability) {
           hints.ogAvailability = content;
+        }
+        break;
+      case "product:condition":
+      case "og:product:condition":
+      case "itemcondition":
+        if (key === "product:condition" || !hints.ogCondition) {
+          hints.ogCondition = content;
         }
         break;
       case "product:brand":
@@ -702,6 +719,171 @@ export function normalizeSchemaAvailability(
     default:
       return defaultWhenMissing;
   }
+}
+
+function unwrapRawConditionString(raw: unknown): string | null {
+  if (typeof raw === "string") {
+    return raw;
+  }
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      const found = unwrapRawConditionString(item);
+      if (found && found.trim()) return found;
+    }
+    return null;
+  }
+  if (isObject(raw)) {
+    const val = raw["@id"] ?? raw["name"] ?? raw["url"];
+    if (typeof val === "string") return val;
+  }
+  return null;
+}
+
+export function normalizeSchemaCondition(raw?: unknown): ProductCondition {
+  const candidate = unwrapRawConditionString(raw);
+  if (!candidate || !candidate.trim()) {
+    return "unknown";
+  }
+
+  const sanitized = sanitizeCatalogOptionalText(candidate, 120);
+  if (!sanitized) return "unknown";
+
+  const schemaToken = normalizeSchemaType(sanitized).replace(/[^a-z]/g, "");
+  switch (schemaToken) {
+    case "newcondition":
+      return "new";
+    case "refurbishedcondition":
+      return "refurbished";
+    case "usedcondition":
+      return "used";
+    case "damagedcondition":
+      return "damaged";
+    default:
+      break;
+  }
+
+  const normalized = sanitized
+    .toLowerCase()
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (
+    normalized === "like new" ||
+    normalized === "likenew" ||
+    normalized === "wie neu" ||
+    normalized === "neuwertig" ||
+    normalized === "open box" ||
+    normalized === "openbox" ||
+    normalized === "as new" ||
+    normalized === "mint"
+  ) {
+    return "like_new";
+  }
+
+  if (
+    normalized === "refurbished" ||
+    normalized === "refurbed" ||
+    normalized === "renewed" ||
+    normalized === "reconditioned" ||
+    normalized === "generalueberholt" ||
+    normalized === "wiederaufbereitet" ||
+    normalized === "aufbereitet" ||
+    normalized === "erneuert" ||
+    normalized.includes("refurbished") ||
+    normalized.includes("generalueberholt") ||
+    normalized.includes("wiederaufbereitet")
+  ) {
+    return "refurbished";
+  }
+
+  if (
+    normalized === "damaged" ||
+    normalized === "defekt" ||
+    normalized === "beschaedigt" ||
+    normalized === "broken" ||
+    normalized === "for parts" ||
+    normalized === "for parts or not working" ||
+    normalized === "bastler"
+  ) {
+    return "damaged";
+  }
+
+  if (
+    normalized === "used" ||
+    normalized === "gebraucht" ||
+    normalized === "secondhand" ||
+    normalized === "second hand" ||
+    normalized === "pre owned" ||
+    normalized === "preowned" ||
+    normalized === "occasion" ||
+    normalized === "benutzt" ||
+    normalized === "good" ||
+    normalized === "very good" ||
+    normalized === "sehr gut" ||
+    normalized === "gut" ||
+    normalized === "acceptable" ||
+    normalized === "akzeptabel" ||
+    normalized === "fair" ||
+    normalized.includes("gebraucht") ||
+    normalized.includes("second hand") ||
+    normalized.includes("secondhand") ||
+    normalized.includes("pre owned")
+  ) {
+    return "used";
+  }
+
+  if (
+    normalized === "new" ||
+    normalized === "brand new" ||
+    normalized === "neu" ||
+    normalized === "fabrikneu" ||
+    normalized === "neuware" ||
+    normalized === "ovp" ||
+    normalized === "neu & ovp" ||
+    normalized === "neu mit etikett"
+  ) {
+    return "new";
+  }
+
+  return "unknown";
+}
+
+function extractConditionInfo(
+  raw: unknown
+): { condition: ProductCondition; conditionRaw: string | null } | undefined {
+  const rawStr = unwrapRawConditionString(raw);
+  const conditionRaw = sanitizeCatalogOptionalText(rawStr, 120);
+  if (!conditionRaw) return undefined;
+  return {
+    condition: normalizeSchemaCondition(conditionRaw),
+    conditionRaw
+  };
+}
+
+function pickOverallCondition(
+  variants: ProductVariant[],
+  fallback?: { condition: ProductCondition; conditionRaw: string | null }
+): { condition: ProductCondition; conditionRaw: string | null } {
+  const withKnown = variants.find((v) => v.condition && v.condition !== "unknown");
+  if (withKnown) {
+    return {
+      condition: withKnown.condition!,
+      conditionRaw: withKnown.condition_raw ?? null
+    };
+  }
+  const withRaw = variants.find((v) => v.condition_raw);
+  if (withRaw) {
+    return {
+      condition: withRaw.condition ?? "unknown",
+      conditionRaw: withRaw.condition_raw ?? null
+    };
+  }
+  return fallback ?? { condition: "unknown", conditionRaw: null };
 }
 
 export function isSameStoreHost(candidateHost: string, storeHost: string): boolean {
@@ -998,20 +1180,25 @@ function extractOffersFromField(
   idMap: Map<string, JsonObject>,
   pageUrl: string,
   currencyHint: string,
-  fallbackAvailability?: { status: ProductAvailability; available: boolean }
+  fallbackAvailability?: { status: ProductAvailability; available: boolean },
+  fallbackCondition?: { condition: ProductCondition; conditionRaw: string | null }
 ): ExtractedOffer[] {
   const results: ExtractedOffer[] = [];
   const visited = new Set<JsonObject>();
   let totalVisits = 0;
 
-  const processOfferNode = (rawNode: unknown, depth: number): void => {
+  const processOfferNode = (
+    rawNode: unknown,
+    depth: number,
+    inheritedCondition?: { condition: ProductCondition; conditionRaw: string | null }
+  ): void => {
     if (depth > 4 || results.length >= MAX_VARIANTS || totalVisits >= MAX_OFFER_VISITS) return;
     totalVisits++;
     const resolved = resolveRef(rawNode, idMap);
     if (Array.isArray(resolved)) {
       for (const item of resolved) {
         if (results.length >= MAX_VARIANTS || totalVisits >= MAX_OFFER_VISITS) break;
-        processOfferNode(item, depth + 1);
+        processOfferNode(item, depth + 1, inheritedCondition);
       }
       return;
     }
@@ -1021,11 +1208,16 @@ function extractOffersFromField(
 
     const types = getSchemaTypes(resolved);
     const isAggregate = types.includes("aggregateoffer");
+    const ownCondition = extractConditionInfo(resolved["itemCondition"]);
+    const effectiveCondition = ownCondition ?? inheritedCondition ?? fallbackCondition ?? {
+      condition: "unknown" as ProductCondition,
+      conditionRaw: null
+    };
 
     // AggregateOffer may contain an explicit nested `offers` list — prefer individual offers when present
     if (isAggregate && resolved["offers"]) {
       const nestedCountBefore = results.length;
-      processOfferNode(resolved["offers"], depth + 1);
+      processOfferNode(resolved["offers"], depth + 1, ownCondition ?? inheritedCondition);
       if (results.length > nestedCountBefore) {
         return;
       }
@@ -1071,6 +1263,8 @@ function extractOffersFromField(
           currency,
           availability: avail.status,
           available: avail.available,
+          condition: effectiveCondition.condition,
+          conditionRaw: effectiveCondition.conditionRaw,
           url: offerUrl,
           optionValues: []
         });
@@ -1104,6 +1298,8 @@ function extractOffersFromField(
           currency,
           availability: avail.status,
           available: avail.available,
+          condition: effectiveCondition.condition,
+          conditionRaw: effectiveCondition.conditionRaw,
           url: offerUrl,
           optionValues: []
         });
@@ -1111,7 +1307,7 @@ function extractOffersFromField(
     }
   };
 
-  processOfferNode(rawOffers, 0);
+  processOfferNode(rawOffers, 0, fallbackCondition);
   return results;
 }
 
@@ -1278,6 +1474,8 @@ function buildFromProductGroup(
   const ogAvailFallback = hints.ogAvailability
     ? normalizeSchemaAvailability(hints.ogAvailability)
     : undefined;
+  const ogConditionFallback = extractConditionInfo(hints.ogCondition);
+  const groupConditionFallback = extractConditionInfo(group["itemCondition"]) ?? ogConditionFallback;
 
   const seenVariantNodes = new Set<JsonObject>();
   const rawVariants: JsonObject[] = [];
@@ -1312,13 +1510,16 @@ function buildFromProductGroup(
       set.add(attr.value);
     }
     const optionValues = attrs.map((a) => a.value);
+    const variantConditionFallback =
+      extractConditionInfo(vNode["itemCondition"]) ?? groupConditionFallback;
 
     const offers = extractOffersFromField(
       vNode["offers"],
       idMap,
       pageUrl,
       fallbackCurrency,
-      ogAvailFallback
+      ogAvailFallback,
+      variantConditionFallback
     );
 
     for (const offer of offers) {
@@ -1350,6 +1551,8 @@ function buildFromProductGroup(
         mpn,
         available: offer.available,
         availability: offer.availability,
+        condition: offer.condition,
+        condition_raw: offer.conditionRaw,
         price: formatMoney(offer.priceAmount, offerCurrency),
         compare_at_price:
           offer.compareAtAmount !== null
@@ -1368,7 +1571,8 @@ function buildFromProductGroup(
       idMap,
       pageUrl,
       fallbackCurrency,
-      ogAvailFallback
+      ogAvailFallback,
+      groupConditionFallback
     );
     for (const offer of groupOffers) {
       if (offer.priceAmount === null) continue;
@@ -1393,6 +1597,8 @@ function buildFromProductGroup(
         mpn,
         available: offer.available,
         availability: offer.availability,
+        condition: offer.condition,
+        condition_raw: offer.conditionRaw,
         price: formatMoney(offer.priceAmount, offerCurrency),
         compare_at_price:
           offer.compareAtAmount !== null
@@ -1428,6 +1634,7 @@ function buildFromProductGroup(
     variants[0]!.price
   );
   const overallAvailability = pickOverallAvailability(variants);
+  const overallCondition = pickOverallCondition(variants, groupConditionFallback);
 
   const options = Array.from(optionMap.entries()).map(([name, valSet]) => ({
     name,
@@ -1461,6 +1668,8 @@ function buildFromProductGroup(
       mpn: groupIds.mpn ?? variants[0]?.mpn ?? null,
       available: variants.some((v) => v.available),
       availability: overallAvailability,
+      condition: overallCondition.condition,
+      condition_raw: overallCondition.conditionRaw,
       price_min: priceMin,
       price_max: priceMax,
       metadata_source: usedOpenGraphFallback ? "jsonld+opengraph" : "jsonld",
@@ -1531,13 +1740,17 @@ function buildFromProductNode(
   const ogAvailFallback = hints.ogAvailability
     ? normalizeSchemaAvailability(hints.ogAvailability)
     : undefined;
+  const ogConditionFallback = extractConditionInfo(hints.ogCondition);
+  const nodeCondition = extractConditionInfo(node["itemCondition"]);
+  const productConditionFallback = nodeCondition ?? ogConditionFallback;
 
   const offers = extractOffersFromField(
     node["offers"],
     idMap,
     pageUrl,
     fallbackCurrency,
-    ogAvailFallback
+    ogAvailFallback,
+    productConditionFallback
   );
 
   // Determine canonical URL (Product.url -> first offer url -> link[rel=canonical] -> og:url -> pageUrl)
@@ -1589,6 +1802,8 @@ function buildFromProductNode(
       mpn: vMpn,
       available: offer.available,
       availability: offer.availability,
+      condition: offer.condition,
+      condition_raw: offer.conditionRaw,
       price: formatMoney(offer.priceAmount, offerCurrency),
       compare_at_price:
         offer.compareAtAmount !== null
@@ -1610,6 +1825,10 @@ function buildFromProductNode(
       );
       resolvedCurrency = finalCurr;
       const avail = normalizeSchemaAvailability(hints.ogAvailability);
+      const effectiveCond = productConditionFallback ?? {
+        condition: "unknown" as ProductCondition,
+        conditionRaw: null
+      };
       usedOpenGraphFallback = true;
       variants.push({
         id: pickSafeJsonLdVariantId(
@@ -1623,6 +1842,8 @@ function buildFromProductNode(
         mpn: productIds.mpn,
         available: avail.available,
         availability: avail.status,
+        condition: effectiveCond.condition,
+        condition_raw: effectiveCond.conditionRaw,
         price: formatMoney(parsedOgPrice.amount, finalCurr),
         compare_at_price: null,
         option_values: optionValues,
@@ -1654,6 +1875,7 @@ function buildFromProductNode(
     `product-${urlHash}`
   );
   const overallAvailability = pickOverallAvailability(variants);
+  const overallCondition = pickOverallCondition(variants, productConditionFallback);
 
   return {
     currency: finalCurrency,
@@ -1670,6 +1892,8 @@ function buildFromProductNode(
       mpn: productIds.mpn,
       available: variants.some((v) => v.available),
       availability: overallAvailability,
+      condition: overallCondition.condition,
+      condition_raw: overallCondition.conditionRaw,
       price_min: priceMin,
       price_max: priceMax,
       metadata_source: usedOpenGraphFallback ? "jsonld+opengraph" : "jsonld",
@@ -1705,6 +1929,10 @@ function buildFromOpenGraphOnly(
     fallbackCurrency
   );
   const avail = normalizeSchemaAvailability(hints.ogAvailability);
+  const ogCond = extractConditionInfo(hints.ogCondition) ?? {
+    condition: "unknown" as ProductCondition,
+    conditionRaw: null
+  };
   const canonicalUrl =
     sanitizeUniversalProductUrl(hints.canonicalUrl, pageUrl) ??
     sanitizeUniversalProductUrl(hints.ogUrl, pageUrl) ??
@@ -1743,6 +1971,8 @@ function buildFromOpenGraphOnly(
       mpn: null,
       available: avail.available,
       availability: avail.status,
+      condition: ogCond.condition,
+      condition_raw: ogCond.conditionRaw,
       price_min: money,
       price_max: money,
       metadata_source: "opengraph",
@@ -1759,6 +1989,8 @@ function buildFromOpenGraphOnly(
           mpn: null,
           available: avail.available,
           availability: avail.status,
+          condition: ogCond.condition,
+          condition_raw: ogCond.conditionRaw,
           price: money,
           compare_at_price: null,
           option_values: [],

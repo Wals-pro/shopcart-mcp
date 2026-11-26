@@ -9,6 +9,10 @@ import {
 } from "../adapters/affiliate-feed/index.js";
 import { AdapterRegistry } from "../adapters/registry.js";
 import {
+  normalizeSecondhandSearchParams,
+  selectSecondhandMarketplaces
+} from "../adapters/secondhand/index.js";
+import {
   DISCOUNT_DISCLAIMER,
   extractPartnerRuleDiscounts,
   mergePartnerRuleDiscounts,
@@ -26,6 +30,7 @@ import {
 import {
   buildComparisonLinks,
   buildDealSearchLinks,
+  decorateComparisonOutboundUrl,
   loadComparisonConfig,
   normalizeEan,
   type ComparisonConfig
@@ -64,6 +69,7 @@ export interface ToolRuntimeContext {
   affiliateFeed?: AffiliateFeedProvider;
   awinPromotions?: AwinPromotionsProvider;
   comparison?: ComparisonConfig;
+  env?: NodeJS.ProcessEnv;
   concurrencyKey?: string;
   consumeQuota?: (toolName: string) => Promise<QuotaCheckResult>;
   thumbnailFetcher?: ThumbnailFetcherFn;
@@ -274,7 +280,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Inspect Store",
       description:
-        "Check an HTTPS online store URL to detect its platform (Amazon, Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2 / Adobe Commerce, or Universal Schema.org JSON-LD fallback), currency, country, WAF restrictions, and available catalog capabilities.",
+        "Check an HTTPS online store URL to detect its platform (Amazon, Second-Hand & Refurbished Marketplaces, Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2 / Adobe Commerce, or Universal Schema.org JSON-LD fallback), currency, country, WAF restrictions, and available catalog capabilities.",
       inputSchema: {
         store_url: z
           .string()
@@ -296,7 +302,13 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           );
         }
         const notices: string[] = [];
-        if (store.platform === "jsonld") {
+        if (store.platform === "secondhand") {
+          notices.push(
+            store.capabilities.singleItemLookup
+              ? `${store.name ?? store.origin} is a supported secondhand/refurbished marketplace (handoff_tier: "search_handoff"). Use search_secondhand_marketplaces to search multiple secondhand platforms in 1 call, or pass a shared single-item URL directly to get_product to verify live price and Schema.org itemCondition.`
+              : `${store.name ?? store.origin} is a WAF-protected secondhand/refurbished marketplace (handoff_tier: "search_handoff", zero scraping). Use search_secondhand_marketplaces (or search_products) to build verified pre-filtered search links for the user's browser.`
+          );
+        } else if (store.platform === "jsonld") {
           notices.push(
             "Handled via Universal Schema.org JSON-LD fallback: pass a full product page URL to get_product for verified live price, currency, stock availability, and SKU/EAN. create_cart_link returns a verified direct_product_link."
           );
@@ -513,7 +525,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           concurrencyKey: ctx.concurrencyKey
         });
 
-        let anyAffiliate = false;
+        let anyAffiliate = Boolean(result.affiliate_disclosure);
         let disclosureNote: string | undefined;
         const decoratedProducts = result.products.map((product) => {
           const decorated = applyAttribution(product.url, attribution, { kind: "product" });
@@ -527,12 +539,30 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           };
         });
 
+        let searchHints = result.search_hints;
+        if (adapter.platform === "secondhand" && result.search_hints?.search_url) {
+          const decoratedHint = decorateComparisonOutboundUrl(
+            result.search_hints.search_url,
+            attribution,
+            comparisonConfig
+          );
+          if (decoratedHint.affiliate_disclosure) {
+            anyAffiliate = true;
+            disclosureNote = disclosureNote ?? decoratedHint.disclosure_note;
+          }
+          searchHints = {
+            ...result.search_hints,
+            search_url: decoratedHint.url
+          };
+        }
+
         return {
           store_origin: result.store_origin,
           currency: result.currency,
           source_notice: SOURCE_NOTICE_CATALOG,
           ...(result.collection ? { collection: result.collection } : {}),
           ...(result.sort_by ? { sort_by: result.sort_by } : {}),
+          ...(result.handoff_tier ? { handoff_tier: result.handoff_tier } : {}),
           affiliate_disclosure: anyAffiliate,
           ...(anyAffiliate
             ? { disclosure_note: disclosureNote ?? AFFILIATE_DISCLOSURE_NOTE }
@@ -540,7 +570,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           total_returned: decoratedProducts.length,
           products: decoratedProducts,
           ...(result.agent_guidance ? { agent_guidance: result.agent_guidance } : {}),
-          ...(result.search_hints ? { search_hints: result.search_hints } : {}),
+          ...(searchHints ? { search_hints: searchHints } : {}),
           ...(result.notices.length > 0 ? { notices: result.notices } : {})
         };
       })
@@ -579,18 +609,24 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           concurrencyKey: ctx.concurrencyKey
         });
         const decorated = applyAttribution(result.product.url, attribution, { kind: "product" });
+        const anyAffiliate = Boolean(
+          result.affiliate_disclosure || decorated.affiliate_disclosure
+        );
         const payload = {
           store_origin: result.store_origin,
           currency: result.currency,
           source_notice: SOURCE_NOTICE_PRODUCT,
-          affiliate_disclosure: decorated.affiliate_disclosure,
-          ...(decorated.affiliate_disclosure
+          ...(result.handoff_tier ? { handoff_tier: result.handoff_tier } : {}),
+          affiliate_disclosure: anyAffiliate,
+          ...(anyAffiliate
             ? { disclosure_note: decorated.disclosure_note ?? AFFILIATE_DISCLOSURE_NOTE }
             : {}),
           product: {
             ...result.product,
             url: decorated.url
-          }
+          },
+          ...(result.agent_guidance ? { agent_guidance: result.agent_guidance } : {}),
+          ...(result.notices && result.notices.length > 0 ? { notices: result.notices } : {})
         };
 
         if (!include_thumbnail) {
@@ -1394,6 +1430,204 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           concurrencyKey: ctx.concurrencyKey
         })
       )
+  );
+
+  server.registerTool(
+    "search_secondhand_marketplaces",
+    {
+      title: "Search Second-Hand & Refurbished Marketplaces",
+      description:
+        "Generate verified, pre-filtered search deep-links across up to 16 major second-hand, classifieds, vintage, and refurbished marketplaces (willhaben, Kleinanzeigen, Vinted, Ricardo.ch, tutti.ch, refurbed, Back Market, rebuy, medimops, asgoodasnew, eBay, Etsy, Depop, Poshmark, buyZOXS, Vestiaire Collective) in a single tool call. Strictly read-only with zero scraping and zero WAF/CAPTCHA bypass.",
+      inputSchema: {
+        query: z
+          .string()
+          .trim()
+          .min(1)
+          .max(200)
+          .describe(
+            "Product, brand, or model keyword(s) to search across secondhand/refurbished marketplaces (1-200 chars, e.g. 'iPhone 15 Pro 256GB' or 'Damen Trekkingrad')."
+          ),
+        region: z
+          .enum(["AT", "DE", "CH", "DACH", "EU", "UK", "US"])
+          .default("DACH")
+          .optional()
+          .describe(
+            "Target region for marketplace selection: 'DACH' (default), 'AT', 'DE', 'CH', 'EU', 'UK', or 'US'."
+          ),
+        category: z
+          .enum([
+            "all",
+            "classifieds",
+            "refurbished",
+            "electronics",
+            "fashion",
+            "books",
+            "handmade"
+          ])
+          .default("all")
+          .optional()
+          .describe(
+            "Optional category filter: 'all' (default), 'classifieds', 'refurbished', 'electronics', 'fashion', 'books', or 'handmade'."
+          ),
+        condition: z
+          .enum(["any", "used", "refurbished", "like_new", "new"])
+          .default("any")
+          .optional()
+          .describe(
+            "Desired item condition filter: 'any' (default), 'used', 'refurbished', 'like_new', or 'new'."
+          ),
+        min_price: z
+          .number()
+          .min(0)
+          .max(1000000)
+          .optional()
+          .describe("Optional minimum price filter in marketplace currency units."),
+        max_price: z
+          .number()
+          .min(0)
+          .max(1000000)
+          .optional()
+          .describe("Optional maximum price filter in marketplace currency units."),
+        postal_code: z
+          .string()
+          .trim()
+          .min(1)
+          .max(12)
+          .optional()
+          .describe(
+            "Optional postal code for regional location filtering (5-digit German PLZ e.g. '10115' enables Kleinanzeigen location + radius)."
+          ),
+        radius_km: z
+          .number()
+          .int()
+          .min(1)
+          .max(500)
+          .optional()
+          .describe("Optional search radius in km (integer 1-500; used with 5-digit German PLZ on Kleinanzeigen)."),
+        sort_by: z
+          .enum(["relevance", "newest", "price_asc", "price_desc"])
+          .default("relevance")
+          .optional()
+          .describe("Sort order where supported by the marketplace: 'relevance' (default), 'newest', 'price_asc', or 'price_desc'."),
+        marketplaces: z
+          .array(z.string().trim().min(1).max(40))
+          .max(16)
+          .optional()
+          .describe(
+            "Optional explicit list of marketplace IDs or names (max 16), e.g. ['willhaben_at', 'kleinanzeigen_de', 'refurbed_de', 'ebay_de', 'vinted_de']."
+          )
+      },
+      annotations: makeAnnotations("Search Second-Hand & Refurbished Marketplaces")
+    },
+    async ({
+      query,
+      region,
+      category,
+      condition,
+      min_price,
+      max_price,
+      postal_code,
+      radius_km,
+      sort_by,
+      marketplaces
+    }) =>
+      runGuardedTool(ctx, "search_secondhand_marketplaces", async () => {
+        const effectiveRegion = region ?? "DACH";
+        const effectiveCategory = category ?? "all";
+        const effectiveCondition = condition ?? "any";
+        const effectiveSortBy = sort_by ?? "relevance";
+
+        const { selected, unknownSelectors } = selectSecondhandMarketplaces({
+          region: effectiveRegion,
+          category: effectiveCategory,
+          condition: effectiveCondition,
+          marketplaces
+        });
+
+        const requireGermanPlz =
+          effectiveRegion === "DE" ||
+          (selected.length > 0 && selected.every((mp) => mp.id === "kleinanzeigen_de"));
+
+        const normalized = normalizeSecondhandSearchParams(
+          {
+            query,
+            condition: effectiveCondition,
+            minPrice: min_price,
+            maxPrice: max_price,
+            postalCode: postal_code,
+            radiusKm: radius_km,
+            sortBy: effectiveSortBy
+          },
+          { requireGermanPostalCode: requireGermanPlz }
+        );
+
+        const notices: string[] = [];
+        if (unknownSelectors.length > 0) {
+          notices.push(
+            `Ignored unrecognized marketplace selector(s): ${unknownSelectors.join(", ")}.`
+          );
+        }
+        if (selected.length === 0) {
+          notices.push(
+            `No marketplaces matched region='${effectiveRegion}', category='${effectiveCategory}', condition='${effectiveCondition}'. Try category='all' or a broader region.`
+          );
+        }
+
+        let anyAffiliate = false;
+        let disclosureNote: string | undefined;
+
+        const results = selected.map((mp) => {
+          const built = mp.buildSearchUrl(normalized);
+          const decorated = decorateComparisonOutboundUrl(
+            built.url,
+            attribution,
+            comparisonConfig
+          );
+          if (decorated.affiliate_disclosure) {
+            anyAffiliate = true;
+            disclosureNote = disclosureNote ?? decorated.disclosure_note;
+          }
+          return {
+            id: mp.id,
+            name: mp.name,
+            origin: mp.origin,
+            country: mp.country,
+            currency: mp.currency,
+            categories: [...mp.categories],
+            search_url: decorated.url,
+            applied_filters: built.appliedFilters,
+            handoff_tier: "search_handoff" as const,
+            supports_single_item_lookup: mp.supportsSingleItemLookup,
+            live_api_configured: false,
+            affiliate_disclosure: decorated.affiliate_disclosure,
+            ...(decorated.applied_network ? { applied_network: decorated.applied_network } : {}),
+            ...(built.note ? { note: built.note } : {})
+          };
+        });
+
+        return {
+          query: normalized.query,
+          region: effectiveRegion,
+          category: effectiveCategory,
+          condition: effectiveCondition,
+          sort_by: effectiveSortBy,
+          ...(normalized.minPrice !== undefined ? { min_price: normalized.minPrice } : {}),
+          ...(normalized.maxPrice !== undefined ? { max_price: normalized.maxPrice } : {}),
+          ...(normalized.postalCode ? { postal_code: normalized.postalCode } : {}),
+          ...(normalized.radiusKm !== undefined ? { radius_km: normalized.radiusKm } : {}),
+          handoff_tier: "search_handoff" as const,
+          source_notice: SOURCE_NOTICE_CATALOG,
+          total_marketplaces: results.length,
+          marketplaces: results,
+          affiliate_disclosure: anyAffiliate,
+          ...(anyAffiliate
+            ? { disclosure_note: disclosureNote ?? AFFILIATE_DISCLOSURE_NOTE }
+            : {}),
+          notices,
+          agent_guidance:
+            "Second-hand & refurbished handoff: present these pre-filtered marketplace search links directly so the user can browse live listings in their browser (zero scraping, zero bot bypass). When the user shares a specific item URL from willhaben.at, ricardo.ch, refurbed.at/.de, rebuy.de, or medimops.de (supports_single_item_lookup=true), call get_product(store_url, handle_or_url) to verify live price, title, image, and Schema.org itemCondition."
+        };
+      })
   );
 
   if (affiliateFeed?.isConfigured()) {

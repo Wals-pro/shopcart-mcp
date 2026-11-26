@@ -171,6 +171,7 @@ describe("Google Gemini JSON Schema compliance (dynamic tools/list)", () => {
       expect(toolNames).toContain("compare_prices");
       expect(toolNames).toContain("find_hot_deals");
       expect(toolNames).toContain("match_visual_product");
+      expect(toolNames).toContain("search_secondhand_marketplaces");
       const cartTool = tools.find((t) => t.name === "create_cart_link");
       expect((cartTool?.inputSchema.properties as Record<string, unknown> | undefined)).toHaveProperty(
         "auto_apply_discount"

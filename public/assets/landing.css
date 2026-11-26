@@ -2446,6 +2446,12 @@ details[open] > summary .faq-icon::after {
   color: var(--walspro-tone-warning-fg);
 }
 
+.handoff-search {
+  border-color: var(--walspro-tone-info-border);
+  background: var(--walspro-tone-info-bg);
+  color: var(--walspro-tone-info-fg);
+}
+
 .handoff-text {
   display: block;
   margin-top: 8px;
