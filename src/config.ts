@@ -26,6 +26,9 @@ export interface AppConfig {
   demoVideoUrl: string | undefined;
   demoVideoUrlDe: string | undefined;
   demoVideoUrlEn: string | undefined;
+  demoVideoPoster: string | undefined;
+  demoVideoPosterDe: string | undefined;
+  demoVideoPosterEn: string | undefined;
   smtpUrl: string | undefined;
   smtpSenderEmail: string;
   smtpSenderName: string;
@@ -56,7 +59,7 @@ function parseOptionalDate(raw: string | undefined, fallback?: string): Date | n
   return d;
 }
 
-function parseOptionalVideoUrl(raw: string | undefined): string | undefined {
+function parseOptionalMediaUrl(raw: string | undefined): string | undefined {
   const val = raw?.trim();
   if (!val) return undefined;
   if (val.startsWith("/") && !val.startsWith("//")) return val;
@@ -130,9 +133,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     openaiAppsChallenge: env.OPENAI_APPS_CHALLENGE?.trim() || undefined,
     mcpRegistryAuth: env.MCP_REGISTRY_AUTH?.trim() || undefined,
     indexNowKey: parseIndexNowKey(env.INDEXNOW_KEY),
-    demoVideoUrl: parseOptionalVideoUrl(env.DEMO_VIDEO_URL),
-    demoVideoUrlDe: parseOptionalVideoUrl(env.DEMO_VIDEO_URL_DE),
-    demoVideoUrlEn: parseOptionalVideoUrl(env.DEMO_VIDEO_URL_EN),
+    demoVideoUrl: parseOptionalMediaUrl(env.DEMO_VIDEO_URL),
+    demoVideoUrlDe: parseOptionalMediaUrl(env.DEMO_VIDEO_URL_DE),
+    demoVideoUrlEn: parseOptionalMediaUrl(env.DEMO_VIDEO_URL_EN),
+    demoVideoPoster: parseOptionalMediaUrl(env.DEMO_VIDEO_POSTER),
+    demoVideoPosterDe: parseOptionalMediaUrl(env.DEMO_VIDEO_POSTER_DE),
+    demoVideoPosterEn: parseOptionalMediaUrl(env.DEMO_VIDEO_POSTER_EN),
     smtpUrl: env.SMTP_URL?.trim() || undefined,
     smtpSenderEmail: env.SMTP_SENDER_EMAIL?.trim() || "support@notify.wals.pro",
     smtpSenderName: env.SMTP_SENDER_NAME?.trim() || "ShopCart by wals.pro",

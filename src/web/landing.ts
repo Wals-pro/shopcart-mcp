@@ -28,10 +28,47 @@ import {
   PLATFORM_NAMES
 } from "./platforms.js";
 
+const GCS_HERO_VIDEO_BASE = "https://storage.googleapis.com/walspro-shopcart-media/videos";
+
+export const HERO_VIDEO_ASSETS = {
+  de: {
+    legacySrc: `${GCS_HERO_VIDEO_BASE}/01-snocks-hero-16x9-de.mp4`,
+    src: `${GCS_HERO_VIDEO_BASE}/01-snocks-hero-16x9-de-v2.mp4`,
+    poster: `${GCS_HERO_VIDEO_BASE}/01-snocks-hero-16x9-de-poster.jpg`,
+    width: 1920,
+    height: 1080
+  },
+  en: {
+    legacySrc: `${GCS_HERO_VIDEO_BASE}/04-allbirds-hero-16x9-en.mp4`,
+    src: `${GCS_HERO_VIDEO_BASE}/04-allbirds-hero-16x9-en-v2.mp4`,
+    poster: `${GCS_HERO_VIDEO_BASE}/04-allbirds-hero-16x9-en-poster.jpg`,
+    width: 1920,
+    height: 1080
+  }
+} as const;
+
 export type ResolvedDemoMedia =
   | { kind: "simulation" }
-  | { kind: "video"; src: string; defaultAspect: "16:9" | "9:16" }
+  | {
+      kind: "video";
+      src: string;
+      poster?: string;
+      width?: number;
+      height?: number;
+      mimeType?: string;
+      defaultAspect: "16:9" | "9:16";
+    }
   | { kind: "iframe"; src: string; title: string; defaultAspect: "16:9" | "9:16" };
+
+function matchHostedHeroAsset(rawUrl: string) {
+  const cleanUrl = rawUrl.split(/[?#]/)[0] ?? "";
+  for (const asset of Object.values(HERO_VIDEO_ASSETS)) {
+    if (cleanUrl === asset.legacySrc || cleanUrl === asset.src) {
+      return asset;
+    }
+  }
+  return undefined;
+}
 
 export function resolveDemoMedia(config: AppConfig, lang: Lang): ResolvedDemoMedia {
   const rawUrl =
@@ -41,7 +78,28 @@ export function resolveDemoMedia(config: AppConfig, lang: Lang): ResolvedDemoMed
   // Direct self-hosted or external video file (.mp4 / .webm / .mov)
   const cleanPath = rawUrl.split(/[?#]/)[0]?.toLowerCase() ?? "";
   if (cleanPath.endsWith(".mp4") || cleanPath.endsWith(".webm") || cleanPath.endsWith(".mov")) {
-    return { kind: "video", src: rawUrl, defaultAspect: "16:9" };
+    const explicitPoster =
+      (lang === "de" ? config.demoVideoPosterDe : config.demoVideoPosterEn) ??
+      config.demoVideoPoster;
+    const hostedAsset = matchHostedHeroAsset(rawUrl);
+    const cleanUrl = rawUrl.split(/[?#]/)[0] ?? "";
+    const resolvedSrc =
+      hostedAsset && cleanUrl === hostedAsset.legacySrc ? hostedAsset.src : rawUrl;
+    const resolvedPoster = explicitPoster ?? hostedAsset?.poster;
+    const mimeType = cleanPath.endsWith(".mp4")
+      ? "video/mp4"
+      : cleanPath.endsWith(".webm")
+        ? "video/webm"
+        : "video/quicktime";
+
+    return {
+      kind: "video",
+      src: resolvedSrc,
+      ...(resolvedPoster ? { poster: resolvedPoster } : {}),
+      ...(hostedAsset ? { width: hostedAsset.width, height: hostedAsset.height } : {}),
+      mimeType,
+      defaultAspect: "16:9"
+    };
   }
 
   try {
@@ -515,8 +573,14 @@ export function renderLandingPage(config: AppConfig, lang: Lang): string {
         </div>`
       : demoMedia.kind === "video"
         ? `<div class="media-frame">
-            <video controls playsinline autoplay muted loop preload="metadata">
-              <source src="${escapeHtml(demoMedia.src)}">
+            <video controls playsinline autoplay muted loop preload="metadata"${
+              demoMedia.width && demoMedia.height
+                ? ` width="${demoMedia.width}" height="${demoMedia.height}"`
+                : ""
+            }${demoMedia.poster ? ` poster="${escapeHtml(demoMedia.poster)}"` : ""}>
+              <source src="${escapeHtml(demoMedia.src)}"${
+                demoMedia.mimeType ? ` type="${demoMedia.mimeType}"` : ""
+              }>
             </video>
           </div>`
         : renderSimulation(lang);
