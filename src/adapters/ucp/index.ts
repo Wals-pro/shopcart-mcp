@@ -7,6 +7,7 @@ export {
 } from "./client.js";
 export {
   buildUnsupportedUcpMetadata,
+  MAX_CACHED_UCP_PROFILES,
   parseUcpManifest,
   UcpDiscoveryClient,
   type UcpDiscoveryOptions,
@@ -14,7 +15,11 @@ export {
 } from "./discovery.js";
 export {
   MAX_UCP_API_BYTES,
+  MAX_UCP_CACHED_PROFILE_BYTES,
+  MAX_UCP_CAPABILITIES_NORMALIZED,
+  MAX_UCP_ENDPOINT_URL_LENGTH,
   MAX_UCP_MANIFEST_BYTES,
+  MAX_UCP_SERVICES_NORMALIZED,
   UcpCatalogSearchResponseSchema,
   UcpCheckoutSessionResponseSchema,
   UcpManifestSchema,
@@ -34,6 +39,7 @@ export {
   sanitizeUcpSessionId,
   sanitizeUcpText,
   sanitizeUcpVersion,
+  stripLlmControlTokensFixpoint,
   validateUcpContinueUrl,
   validateUcpEndpointUrl,
   validateUcpUrl

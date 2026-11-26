@@ -12,8 +12,15 @@ import { ShopwareClient } from "../src/adapters/shopware/client.js";
 import {
   getTenantRegistrableDomain,
   isSameRegistrableStoreDomain,
+  MAX_CACHED_UCP_PROFILES,
+  MAX_UCP_CACHED_PROFILE_BYTES,
+  MAX_UCP_CAPABILITIES_NORMALIZED,
+  MAX_UCP_ENDPOINT_URL_LENGTH,
   MAX_UCP_MANIFEST_BYTES,
+  MAX_UCP_SERVICES_NORMALIZED,
   parseUcpManifest,
+  sanitizeUcpText,
+  stripLlmControlTokensFixpoint,
   UcpDiscoveryClient,
   UniversalUcpAdapter,
   validateUcpContinueUrl,
@@ -116,27 +123,163 @@ const SAMPLE_PRODUCT_HTML = `<!doctype html>
 </html>`;
 
 describe("UCP SSRF, Registrable-Domain & URL Security Hardening", () => {
-  it("computes tenant-isolated registrable domains and rejects shared multi-tenant sibling attacks", () => {
-    expect(getTenantRegistrableDomain("shop.brand.example")).toBe("brand.example");
-    expect(getTenantRegistrableDomain("api.brand.co.uk")).toBe("brand.co.uk");
+  it("enforces fail-closed tenant isolation across shared PaaS, cloud, and ccTLD suffixes", () => {
+    expect(getTenantRegistrableDomain("shop.example")).toBe("shop.example");
+    expect(getTenantRegistrableDomain("www.shop.example")).toBe("shop.example");
+    expect(getTenantRegistrableDomain("shop.brand.example")).toBe("shop.brand.example");
     expect(getTenantRegistrableDomain("acme.myshopify.com")).toBe("acme.myshopify.com");
-    expect(getTenantRegistrableDomain("ucp.acme.myshopify.com")).toBe("acme.myshopify.com");
     expect(getTenantRegistrableDomain("myshopify.com")).toBeNull();
     expect(getTenantRegistrableDomain("co.uk")).toBeNull();
+    expect(getTenantRegistrableDomain("co.il")).toBeNull();
+    expect(getTenantRegistrableDomain("run.app")).toBeNull();
+    expect(getTenantRegistrableDomain("webflow.io")).toBeNull();
 
-    // Legitimate same-site and subdomains
+    // Legitimate exact host, direct subdomains, and 2-label custom apex <-> www/subdomains
     expect(isSameRegistrableStoreDomain("https://shop.example", "https://shop.example")).toBe(true);
+    expect(isSameRegistrableStoreDomain("https://www.shop.example", "https://shop.example")).toBe(true);
     expect(isSameRegistrableStoreDomain("https://www.shop.example", "https://api.shop.example")).toBe(true);
-    expect(isSameRegistrableStoreDomain("https://shop.brand.example", "https://checkout.brand.example")).toBe(true);
-    expect(isSameRegistrableStoreDomain("https://shop.brand.co.uk", "https://ucp.brand.co.uk")).toBe(true);
+    expect(isSameRegistrableStoreDomain("https://shop.example", "https://checkout.shop.example")).toBe(true);
     expect(isSameRegistrableStoreDomain("https://acme.myshopify.com", "https://ucp.acme.myshopify.com")).toBe(true);
+    expect(isSameRegistrableStoreDomain("https://shop1.co.il", "https://api.shop1.co.il")).toBe(true);
+    expect(isSameRegistrableStoreDomain("https://svc.a.run.app", "https://api.svc.a.run.app")).toBe(true);
 
-    // Cross-site, lookalike, and cross-tenant attacks MUST be rejected
-    expect(isSameRegistrableStoreDomain("https://shop.example", "https://evil-third-party.example")).toBe(false);
-    expect(isSameRegistrableStoreDomain("https://shop.example", "https://shop.example.evil.com")).toBe(false);
-    expect(isSameRegistrableStoreDomain("https://victim.myshopify.com", "https://evil.myshopify.com")).toBe(false);
-    expect(isSameRegistrableStoreDomain("https://victim.wixsite.com", "https://evil.wixsite.com")).toBe(false);
-    expect(isSameRegistrableStoreDomain("https://victim.shopware.store", "https://evil.shopware.store")).toBe(false);
+    // Cross-site, lookalike, and fail-closed cross-tenant sibling attacks MUST ALL be blocked
+    const blockedPairs: Array<[string, string]> = [
+      ["https://shop.example", "https://evil-third-party.example"],
+      ["https://shop.example", "https://shop.example.evil.com"],
+      ["https://shop.brand.example", "https://checkout.brand.example"],
+      ["https://victim.myshopify.com", "https://evil.myshopify.com"],
+      ["https://victim.wixsite.com", "https://evil.wixsite.com"],
+      ["https://victim.shopware.store", "https://evil.shopware.store"],
+      ["https://shop1.co.il", "https://shop2.co.il"],
+      ["https://www.co.il", "https://victim.co.il"],
+      ["https://app1.a.run.app", "https://app2.a.run.app"],
+      ["https://shop1.europe-west1.run.app", "https://shop2.europe-west1.run.app"],
+      ["https://bucket1.s3.amazonaws.com", "https://bucket2.s3.amazonaws.com"],
+      ["https://app1.r.appspot.com", "https://app2.r.appspot.com"],
+      ["https://site1.webflow.io", "https://site2.webflow.io"],
+      ["https://www.webflow.io", "https://victim.webflow.io"],
+      ["https://tenant1.unlisted-cloud.dev", "https://tenant2.unlisted-cloud.dev"]
+    ];
+    for (const [storeOrigin, candidateOrigin] of blockedPairs) {
+      expect(
+        isSameRegistrableStoreDomain(storeOrigin, candidateOrigin),
+        `must block ${storeOrigin} -> ${candidateOrigin}`
+      ).toBe(false);
+    }
+  });
+
+  it("strips nested LLM control tokens via bounded fixpoint loop without reassembly", () => {
+    expect(stripLlmControlTokensFixpoint("<|<|im_start|>|>")).toBe("");
+    expect(stripLlmControlTokensFixpoint("Hello <|<|im_start|>system|> World")).toBe("Hello  World");
+    expect(stripLlmControlTokensFixpoint("<<<<SYS>>SYS>>")).toBe("");
+    expect(stripLlmControlTokensFixpoint("[[INST]INST]")).toBe("");
+    expect(
+      sanitizeUcpText(
+        "Clean <|<|im_start|>|> Name <<<<SYS>>SYS>> [[INST]INST] &lt;|im_end|&gt; \u{E0041}<script>alert(1)</script>",
+        160
+      )
+    ).toBe("Clean Name");
+  });
+
+  it("enforces strict <= 8192 byte profile budget, endpoint/service/capability caps, and <= 256 discovery cache cap", async () => {
+    // 1. Adversarial manifest: 32 services x 3 endpoints x 2048 chars (oversized endpoints rejected)
+    const oversizedEndpointServices: Record<string, unknown> = {};
+    for (let i = 0; i < 32; i++) {
+      const longSeg = "a".repeat(2000);
+      oversizedEndpointServices[`com.evil.svc${i}`] = {
+        rest: { endpoint: `https://flood.example/${longSeg}/${i}/r` },
+        mcp: { endpoint: `https://flood.example/${longSeg}/${i}/m` },
+        a2a: { endpoint: `https://flood.example/${longSeg}/${i}/a` }
+      };
+    }
+    const oversizedParsed = parseUcpManifest(
+      {
+        ucp: {
+          version: "2026-01-11",
+          services: oversizedEndpointServices,
+          capabilities: Array.from({ length: 64 }, (_, i) => ({ name: `com.evil.cap.${i}` }))
+        }
+      },
+      "https://flood.example"
+    );
+    expect(oversizedParsed).not.toBeNull();
+    expect(oversizedParsed!.rejectedEndpointCount).toBe(96);
+    expect(Object.keys(oversizedParsed!.services).length).toBeLessThanOrEqual(
+      MAX_UCP_SERVICES_NORMALIZED
+    );
+    expect(oversizedParsed!.capabilities.length).toBeLessThanOrEqual(
+      MAX_UCP_CAPABILITIES_NORMALIZED
+    );
+    expect(Buffer.byteLength(JSON.stringify(oversizedParsed), "utf8")).toBeLessThanOrEqual(
+      MAX_UCP_CACHED_PROFILE_BYTES
+    );
+
+    // 2. Maximal valid-length manifest: 32 services x 3 endpoints right under 512 chars + 64 long capabilities
+    const maxValidServices: Record<string, unknown> = {};
+    const validSeg = "x".repeat(MAX_UCP_ENDPOINT_URL_LENGTH - 40);
+    maxValidServices["dev.ucp.shopping"] = {
+      version: "2026-01-11",
+      rest: { endpoint: `https://maxvalid.example/r/${validSeg}` },
+      mcp: { endpoint: `https://maxvalid.example/m/${validSeg}` },
+      a2a: { endpoint: `https://maxvalid.example/a/${validSeg}` }
+    };
+    for (let i = 0; i < 31; i++) {
+      maxValidServices[`com.vendor.extra-service-name-${i}`] = {
+        version: "2026-01-11",
+        rest: { endpoint: `https://maxvalid.example/r${i}/${validSeg.slice(0, 450)}` },
+        mcp: { endpoint: `https://maxvalid.example/m${i}/${validSeg.slice(0, 450)}` },
+        a2a: { endpoint: `https://maxvalid.example/a${i}/${validSeg.slice(0, 450)}` }
+      };
+    }
+    const longCaps = [
+      ...Array.from({ length: 60 }, (_, i) => ({ name: `com.vendor.very-long-custom-capability-${i}-${"c".repeat(60)}` })),
+      { name: "dev.ucp.shopping.checkout" },
+      { name: "dev.ucp.shopping.catalog" }
+    ];
+    const maxValidParsed = parseUcpManifest(
+      {
+        ucp: {
+          version: "2026-01-11",
+          services: maxValidServices,
+          capabilities: longCaps
+        },
+        merchant: { name: "M".repeat(160), platform: "P".repeat(80), currency: "EUR" }
+      },
+      "https://maxvalid.example"
+    );
+    expect(maxValidParsed).not.toBeNull();
+    expect(Object.keys(maxValidParsed!.services).length).toBeLessThanOrEqual(
+      MAX_UCP_SERVICES_NORMALIZED
+    );
+    expect(maxValidParsed!.capabilities.length).toBeLessThanOrEqual(
+      MAX_UCP_CAPABILITIES_NORMALIZED
+    );
+    // Core checkout & catalog capabilities are prioritized even when trimmed
+    expect(maxValidParsed!.checkoutHandoffSupported).toBe(true);
+    expect(maxValidParsed!.catalogSearchSupported).toBe(true);
+    expect(maxValidParsed!.endpoints.rest).toBe(`https://maxvalid.example/r/${validSeg}`);
+    // Hard <= 8192 byte serialized JSON guarantee for both discovery and registry caches
+    const profileBytes = Buffer.byteLength(JSON.stringify(maxValidParsed), "utf8");
+    const metadataBytes = Buffer.byteLength(JSON.stringify(maxValidParsed!.metadata), "utf8");
+    expect(profileBytes).toBeLessThanOrEqual(MAX_UCP_CACHED_PROFILE_BYTES);
+    expect(metadataBytes).toBeLessThanOrEqual(MAX_UCP_CACHED_PROFILE_BYTES);
+
+    // 3. Wildcard subdomain flooding caps discovery cache at <= 256 entries
+    const discovery = new UcpDiscoveryClient({
+      fetcher: async (url) => ({
+        status: 200,
+        url,
+        contentType: "application/json",
+        headers: { "content-type": "application/json" },
+        bodyBuffer: Buffer.from(JSON.stringify({ ucp: { version: "2026-01-11" } })),
+        bodyText: JSON.stringify({ ucp: { version: "2026-01-11" } })
+      })
+    });
+    for (let i = 0; i < MAX_CACHED_UCP_PROFILES + 50; i++) {
+      await discovery.discover(`https://sub-${i}.flood-tenant.example`);
+    }
+    expect(discovery.getCacheSize()).toBeLessThanOrEqual(MAX_CACHED_UCP_PROFILES);
   });
 
   it("blocks all SSRF, IP literal, metadata, credential, scheme-smuggling, and cross-site URLs in UCP endpoints and continue_url", () => {
@@ -293,6 +436,161 @@ describe("UCP SSRF, Registrable-Domain & URL Security Hardening", () => {
     expect(redirected).toBeNull();
     expect(connectedUrls).toEqual(["https://redirect-shop.example/.well-known/ucp"]);
     expect(connectedUrls.some((u) => u.includes("evil-third-party.example"))).toBe(false);
+  });
+
+  it("degrades /.well-known/ucp SSRF-redirect errors gracefully on valid stores without breaking inspect_store or JSON-LD fallback", async () => {
+    const connectedUrls: string[] = [];
+    const safeMockFetcher = (url: string, opts?: SafeFetchOptions) =>
+      safeFetch(url, {
+        ...opts,
+        lookupFn: async () => [{ address: "93.184.216.34", family: 4 }],
+        fetchImpl: async (target) => {
+          connectedUrls.push(target);
+          const u = new URL(target);
+          if (u.pathname === "/.well-known/ucp") {
+            return {
+              status: 302,
+              headers: {
+                get(name: string) {
+                  return name.toLowerCase() === "location"
+                    ? "http://169.254.169.254/latest/meta-data"
+                    : null;
+                }
+              },
+              body: null
+            };
+          }
+          if (u.hostname === "shopify-weird-ucp.example" && u.pathname === "/meta.json") {
+            const txt = JSON.stringify({
+              id: 1,
+              name: "Valid Shopify Store",
+              currency: "EUR",
+              country: "DE",
+              domain: "shopify-weird-ucp.example"
+            });
+            return {
+              status: 200,
+              headers: { get: (n) => (n.toLowerCase() === "content-type" ? "application/json" : null) },
+              body: (async function* () {
+                yield Buffer.from(txt);
+              })()
+            };
+          }
+          if (u.hostname === "jsonld-weird-ucp.example" && u.pathname === "/") {
+            const txt = "<html><head><title>Valid Public Store</title></head></html>";
+            return {
+              status: 200,
+              headers: { get: (n) => (n.toLowerCase() === "content-type" ? "text/html" : null) },
+              body: (async function* () {
+                yield Buffer.from(txt);
+              })()
+            };
+          }
+          return {
+            status: 404,
+            headers: { get: () => "text/plain" },
+            body: (async function* () {
+              yield Buffer.from("Not Found");
+            })()
+          };
+        }
+      });
+
+    const registry = new AdapterRegistry([
+      new ShopifyAdapter(new ShopifyClient(safeMockFetcher)),
+      new UniversalUcpAdapter({ fetcher: safeMockFetcher }),
+      new UniversalJsonLdAdapter({ fetcher: safeMockFetcher })
+    ]);
+
+    // 1. Valid Shopify store whose /.well-known/ucp redirects to 169.254.169.254 still resolves cleanly
+    const shopifyRes = await registry.resolve("https://shopify-weird-ucp.example");
+    expect(shopifyRes.adapter.platform).toBe("shopify");
+    expect(shopifyRes.store?.platform).toBe("shopify");
+    expect(shopifyRes.store?.ucp?.supported).toBe(false);
+
+    // 2. Valid non-native store whose /.well-known/ucp redirects to 169.254.169.254 falls back to JSON-LD cleanly
+    const jsonldRes = await registry.resolve("https://jsonld-weird-ucp.example");
+    expect(jsonldRes.adapter.platform).toBe("jsonld");
+    expect(jsonldRes.store?.name).toBe("Valid Public Store");
+    expect(jsonldRes.store?.ucp?.supported).toBe(false);
+
+    // 3. Never connected to 169.254.169.254
+    expect(connectedUrls.some((u) => u.includes("169.254.169.254"))).toBe(false);
+  });
+
+  it("enforces maxRedirects: 0 on UCP POST checkout-sessions calls so 307/308 redirects never forward POST bodies", async () => {
+    const postTargets: string[] = [];
+    const safePostFetcher = (url: string, opts?: SafeFetchOptions) =>
+      safeFetch(url, {
+        ...opts,
+        lookupFn: async () => [{ address: "93.184.216.34", family: 4 }],
+        fetchImpl: async (target, init) => {
+          const method = (init.method ?? "GET").toUpperCase();
+          if (method === "POST") {
+            postTargets.push(target);
+            return {
+              status: 307,
+              headers: {
+                get(name: string) {
+                  return name.toLowerCase() === "location"
+                    ? "https://checkout.post-redir.example/redirected-checkout"
+                    : null;
+                }
+              },
+              body: null
+            };
+          }
+          const u = new URL(target);
+          if (u.pathname === "/.well-known/ucp") {
+            const txt = JSON.stringify({
+              ucp: {
+                version: "2026-01-11",
+                services: {
+                  "dev.ucp.shopping": {
+                    rest: { endpoint: "https://post-redir.example/ucp" }
+                  }
+                },
+                capabilities: [{ name: "dev.ucp.shopping.checkout" }]
+              }
+            });
+            return {
+              status: 200,
+              headers: { get: (n) => (n.toLowerCase() === "content-type" ? "application/json" : null) },
+              body: (async function* () {
+                yield Buffer.from(txt);
+              })()
+            };
+          }
+          if (u.pathname === "/products/mug") {
+            const txt = SAMPLE_PRODUCT_HTML.replaceAll("aurora-goods.example", "post-redir.example").replaceAll(
+              "/products/travel-mug",
+              "/products/mug"
+            );
+            return {
+              status: 200,
+              headers: { get: (n) => (n.toLowerCase() === "content-type" ? "text/html" : null) },
+              body: (async function* () {
+                yield Buffer.from(txt);
+              })()
+            };
+          }
+          return { status: 404, headers: { get: () => null }, body: null };
+        }
+      });
+
+    const adapter = new UniversalUcpAdapter({ fetcher: safePostFetcher });
+    const result = await adapter.buildCartLink(
+      "https://post-redir.example",
+      [{ variantId: "AUR-MUG-350", quantity: 1 }],
+      { mode: "checkout", verifyHandles: ["https://post-redir.example/products/mug"] }
+    );
+
+    // POST MUST NOT have followed the 307 redirect
+    expect(postTargets).toEqual(["https://post-redir.example/ucp/checkout-sessions"]);
+    expect(postTargets.some((u) => u.includes("redirected-checkout"))).toBe(false);
+    // Cleanly fell back to verified JSON-LD direct product link
+    expect(result.cart_mode).toBe("direct_product_link");
+    expect(result.cart_url).toBe("https://post-redir.example/products/mug");
   });
 });
 
@@ -964,6 +1262,11 @@ describe("AdapterRegistry Priority, Native UCP Enrichment, MCP inspect_store & G
     for (const tool of tools) {
       expect(findGeminiSchemaViolations(tool.inputSchema, tool.name)).toEqual([]);
     }
+    const cartLinkTool = tools.find((t) => t.name === "create_cart_link");
+    expect(cartLinkTool?.annotations?.readOnlyHint).toBe(false);
+    expect(cartLinkTool?.annotations?.idempotentHint).toBe(false);
+    expect(cartLinkTool?.annotations?.destructiveHint).toBe(false);
+    expect(cartLinkTool?.annotations?.openWorldHint).toBe(true);
 
     const inspectShopify = await client.callTool({
       name: "inspect_store",

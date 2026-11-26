@@ -9,7 +9,10 @@ import {
 import { normalizeCurrency } from "../shopify/normalize.js";
 import type { UcpMetadata, UcpServiceSummary } from "../types.js";
 import {
+  MAX_UCP_CACHED_PROFILE_BYTES,
+  MAX_UCP_CAPABILITIES_NORMALIZED,
   MAX_UCP_MANIFEST_BYTES,
+  MAX_UCP_SERVICES_NORMALIZED,
   UcpManifestSchema,
   type NormalizedUcpProfile,
   type RawUcpManifest
@@ -38,6 +41,7 @@ export interface UcpDiscoveryOptions {
   fetcher?: UcpFetcherFn;
   timeoutMs?: number;
   maxBytes?: number;
+  maxCachedProfiles?: number;
 }
 
 interface CachedDiscoveryEntry {
@@ -46,22 +50,28 @@ interface CachedDiscoveryEntry {
 }
 
 const DISCOVERY_CACHE_TTL_MS = 15 * 60 * 1000;
-const MAX_CACHED_PROFILES = 1000;
-
-const HARD_SSRF_CODES = new Set([
-  "INVALID_URL",
-  "BLOCKED_HOST",
-  "BLOCKED_IP",
-  "CONCURRENCY_LIMIT"
-]);
+export const MAX_CACHED_UCP_PROFILES = 256;
 
 const DEFAULT_UCP_HEADERS: Record<string, string> = {
   Accept: "application/json, application/ucp+json;q=0.9",
   "User-Agent": "ShopCart-MCP/1.0 (+https://shopcart.wals.pro)"
 };
 
-function isHardSsrfError(err: unknown): boolean {
-  return err instanceof SsrfError && HARD_SSRF_CODES.has(err.code);
+/**
+ * Distinguish a direct SSRF/concurrency error on the user-supplied store origin itself
+ * (which MUST be rethrown) from a redirect-triggered SSRF error emitted when a valid
+ * public store's `/.well-known/ucp` redirects to an internal IP or blocked host (which
+ * should degrade UCP discovery cleanly to `null`).
+ */
+function isDirectOriginSsrfError(err: unknown, storeHostname: string): boolean {
+  if (!(err instanceof SsrfError)) return false;
+  if (err.code === "CONCURRENCY_LIMIT") return true;
+  if (err.code === "BLOCKED_IP") {
+    // Only rethrow if the user-supplied store hostname itself resolved to a blocked IP
+    const expectedSuffix = `for ${storeHostname}`;
+    return err.message.toLowerCase().endsWith(expectedSuffix.toLowerCase());
+  }
+  return false;
 }
 
 function looksLikeJsonContentType(contentType: string, bodyText: string): boolean {
@@ -75,6 +85,10 @@ function looksLikeJsonContentType(contentType: string, bodyText: string): boolea
   // Allow missing or generic content-type only if body clearly begins with a JSON object
   const trimmed = bodyText.trimStart();
   return trimmed.startsWith("{");
+}
+
+function isShoppingServiceKey(key: string): boolean {
+  return key === "dev.ucp.shopping" || key.endsWith(".shopping");
 }
 
 function isCheckoutCapability(cap: string): boolean {
@@ -113,9 +127,137 @@ export function buildUnsupportedUcpMetadata(origin: string): UcpMetadata {
   };
 }
 
+function buildMetadataFromParts(parts: {
+  manifestUrl: string;
+  version: string;
+  capabilities: string[];
+  services: Record<string, UcpServiceSummary>;
+  endpoints: { rest: string | null; mcp: string | null; a2a: string | null };
+  checkoutHandoffSupported: boolean;
+  catalogSearchSupported: boolean;
+  rejectedEndpointCount: number;
+  warnings: string[];
+}): UcpMetadata {
+  return {
+    supported: true,
+    manifestUrl: parts.manifestUrl,
+    version: parts.version,
+    capabilities: parts.capabilities,
+    services: parts.services,
+    endpoints: {
+      ...(parts.endpoints.rest ? { rest: parts.endpoints.rest } : {}),
+      ...(parts.endpoints.mcp ? { mcp: parts.endpoints.mcp } : {}),
+      ...(parts.endpoints.a2a ? { a2a: parts.endpoints.a2a } : {})
+    },
+    checkoutHandoffSupported: parts.checkoutHandoffSupported,
+    catalogSearchSupported: parts.catalogSearchSupported,
+    liabilityModel: "zero_liability_handoff",
+    ...(parts.rejectedEndpointCount > 0
+      ? { rejectedEndpointCount: parts.rejectedEndpointCount }
+      : {}),
+    ...(parts.warnings.length > 0 ? { warnings: parts.warnings } : {})
+  };
+}
+
+function measureProfileBytes(profile: NormalizedUcpProfile): number {
+  return Buffer.byteLength(JSON.stringify(profile), "utf8");
+}
+
+/**
+ * Enforce a hard serialized JSON byte budget (`<= MAX_UCP_CACHED_PROFILE_BYTES`, 8 KB)
+ * on the normalized UCP profile so neither the discovery cache nor the registry cache
+ * can retain attacker-sized endpoint maps.
+ */
+function enforceProfileByteBudget(profile: NormalizedUcpProfile): NormalizedUcpProfile {
+  if (measureProfileBytes(profile) <= MAX_UCP_CACHED_PROFILE_BYTES) {
+    return profile;
+  }
+
+  let services: Record<string, UcpServiceSummary> = { ...profile.services };
+  let capabilities = [...profile.capabilities];
+  let warnings = [...profile.warnings];
+  let storeName = profile.storeName;
+  let platformHint = profile.platformHint;
+
+  const rebuild = (): NormalizedUcpProfile => {
+    const metadata = buildMetadataFromParts({
+      manifestUrl: profile.manifestUrl,
+      version: profile.version,
+      capabilities,
+      services,
+      endpoints: profile.endpoints,
+      checkoutHandoffSupported: profile.checkoutHandoffSupported,
+      catalogSearchSupported: profile.catalogSearchSupported,
+      rejectedEndpointCount: profile.rejectedEndpointCount,
+      warnings
+    });
+    return {
+      ...profile,
+      storeName,
+      platformHint,
+      capabilities,
+      services,
+      warnings,
+      metadata
+    };
+  };
+
+  // Step 1: Drop non-shopping services first, then trim remaining services if still over budget
+  const serviceKeys = Object.keys(services);
+  const nonShoppingKeys = serviceKeys.filter((k) => !isShoppingServiceKey(k));
+  const shoppingKeys = serviceKeys.filter((k) => isShoppingServiceKey(k));
+  const dropOrder = [...nonShoppingKeys.reverse(), ...shoppingKeys.slice(1).reverse(), ...shoppingKeys.slice(0, 1)];
+
+  for (const key of dropOrder) {
+    delete services[key];
+    const candidate = rebuild();
+    if (measureProfileBytes(candidate) <= MAX_UCP_CACHED_PROFILE_BYTES) {
+      return candidate;
+    }
+  }
+
+  // Step 2: Trim warnings
+  if (warnings.length > 1) {
+    warnings = warnings.slice(0, 1);
+    const candidate = rebuild();
+    if (measureProfileBytes(candidate) <= MAX_UCP_CACHED_PROFILE_BYTES) {
+      return candidate;
+    }
+  }
+
+  // Step 3: Trim non-core capabilities while keeping checkout/catalog capabilities
+  const coreCaps = capabilities.filter((c) => isCheckoutCapability(c) || isCatalogCapability(c));
+  const extraCaps = capabilities.filter((c) => !isCheckoutCapability(c) && !isCatalogCapability(c));
+  while (extraCaps.length > 0) {
+    extraCaps.pop();
+    capabilities = [...coreCaps, ...extraCaps];
+    const candidate = rebuild();
+    if (measureProfileBytes(candidate) <= MAX_UCP_CACHED_PROFILE_BYTES) {
+      return candidate;
+    }
+  }
+
+  // Step 4: Trim optional text fields and warnings if still over budget
+  warnings = [];
+  storeName = storeName ? storeName.slice(0, 80) : null;
+  platformHint = platformHint ? platformHint.slice(0, 40) : null;
+  services = {};
+  capabilities = coreCaps.slice(0, 4);
+  const finalCandidate = rebuild();
+  if (measureProfileBytes(finalCandidate) <= MAX_UCP_CACHED_PROFILE_BYTES) {
+    return finalCandidate;
+  }
+
+  // Guaranteed minimal backstop strictly under 8 KB
+  capabilities = [];
+  storeName = null;
+  platformHint = null;
+  return rebuild();
+}
+
 /**
  * Parse and validate a raw `/.well-known/ucp` JSON object into a strictly sanitized,
- * SSRF-hardened `NormalizedUcpProfile`.
+ * SSRF-hardened, byte-budgeted `NormalizedUcpProfile`.
  */
 export function parseUcpManifest(
   rawJson: unknown,
@@ -208,7 +350,8 @@ export function parseUcpManifest(
 
     const safeRest =
       validateCandidateEndpoint(restCandidate) ??
-      (transport === "rest" || (!transport && flatCandidate && !restCandidate && !mcpCandidate && !a2aCandidate)
+      (transport === "rest" ||
+      (!transport && flatCandidate && !restCandidate && !mcpCandidate && !a2aCandidate)
         ? validateCandidateEndpoint(flatCandidate)
         : null);
     const safeMcp =
@@ -224,16 +367,33 @@ export function parseUcpManifest(
 
     services[key] = existing;
 
-    const isShoppingService = key === "dev.ucp.shopping" || key.endsWith(".shopping");
-    if (existing.restEndpoint && (!primaryRest || isShoppingService)) {
+    const isShopping = isShoppingServiceKey(key);
+    if (existing.restEndpoint && (!primaryRest || isShopping)) {
       primaryRest = existing.restEndpoint;
     }
-    if (existing.mcpEndpoint && (!primaryMcp || isShoppingService)) {
+    if (existing.mcpEndpoint && (!primaryMcp || isShopping)) {
       primaryMcp = existing.mcpEndpoint;
     }
-    if (existing.a2aEndpoint && (!primaryA2a || isShoppingService)) {
+    if (existing.a2aEndpoint && (!primaryA2a || isShopping)) {
       primaryA2a = existing.a2aEndpoint;
     }
+  }
+
+  // Prioritize shopping services and strictly cap to MAX_UCP_SERVICES_NORMALIZED (8)
+  const orderedServiceEntries = Object.entries(services).sort(([a], [b]) => {
+    const aShop = isShoppingServiceKey(a) ? 0 : 1;
+    const bShop = isShoppingServiceKey(b) ? 0 : 1;
+    return aShop - bShop;
+  });
+
+  const plainServices: Record<string, UcpServiceSummary> = {};
+  for (const [k, v] of orderedServiceEntries.slice(0, MAX_UCP_SERVICES_NORMALIZED)) {
+    plainServices[k] = {
+      ...(v.version ? { version: v.version } : {}),
+      ...(v.restEndpoint ? { restEndpoint: v.restEndpoint } : {}),
+      ...(v.mcpEndpoint ? { mcpEndpoint: v.mcpEndpoint } : {}),
+      ...(v.a2aEndpoint ? { a2aEndpoint: v.a2aEndpoint } : {})
+    };
   }
 
   // Normalize capabilities (supports both array-style and object/map-style UCP manifests)
@@ -261,7 +421,13 @@ export function parseUcpManifest(
     }
   }
 
-  const capabilities = Array.from(capSet).slice(0, 64);
+  // Prioritize checkout/catalog capabilities before capping to MAX_UCP_CAPABILITIES_NORMALIZED (16)
+  const allCaps = Array.from(capSet);
+  const prioritizedCaps = [
+    ...allCaps.filter((c) => isCheckoutCapability(c) || isCatalogCapability(c)),
+    ...allCaps.filter((c) => !isCheckoutCapability(c) && !isCatalogCapability(c))
+  ];
+  const capabilities = prioritizedCaps.slice(0, MAX_UCP_CAPABILITIES_NORMALIZED);
 
   if (rejectedEndpointCount > 0) {
     warnings.push(
@@ -272,7 +438,8 @@ export function parseUcpManifest(
   const merchantMeta = data.merchant ?? data.business ?? data.store;
   const storeName = sanitizeUcpOptionalText(merchantMeta?.name, 160);
   const rawCurrency = merchantMeta?.currency?.trim().toUpperCase();
-  const currency = rawCurrency && /^[A-Z]{3}$/.test(rawCurrency) ? normalizeCurrency(rawCurrency) : null;
+  const currency =
+    rawCurrency && /^[A-Z]{3}$/.test(rawCurrency) ? normalizeCurrency(rawCurrency) : null;
   const rawCountry = merchantMeta?.country?.trim().toUpperCase();
   const country = rawCountry && /^[A-Z]{2}$/.test(rawCountry) ? rawCountry : null;
   const platformHint = sanitizeUcpOptionalText(merchantMeta?.platform, 80);
@@ -283,41 +450,30 @@ export function parseUcpManifest(
   const checkoutHandoffSupported = Boolean(primaryRest && hasCheckoutCap);
   const catalogSearchSupported = Boolean((primaryRest || primaryMcp) && hasCatalogCap);
 
-  // Copy null-prototype services map into a clean plain object for JSON serialization
-  const plainServices: Record<string, UcpServiceSummary> = {};
-  for (const [k, v] of Object.entries(services)) {
-    plainServices[k] = {
-      ...(v.version ? { version: v.version } : {}),
-      ...(v.restEndpoint ? { restEndpoint: v.restEndpoint } : {}),
-      ...(v.mcpEndpoint ? { mcpEndpoint: v.mcpEndpoint } : {}),
-      ...(v.a2aEndpoint ? { a2aEndpoint: v.a2aEndpoint } : {})
-    };
-  }
-
   const safeManifestUrl =
     manifestUrl && validateUcpEndpointUrl(manifestUrl, validatedOrigin)
       ? validateUcpEndpointUrl(manifestUrl, validatedOrigin)!
       : `${validatedOrigin}/.well-known/ucp`;
 
-  const metadata: UcpMetadata = {
-    supported: true,
+  const endpoints = {
+    rest: primaryRest,
+    mcp: primaryMcp,
+    a2a: primaryA2a
+  };
+
+  const metadata = buildMetadataFromParts({
     manifestUrl: safeManifestUrl,
     version,
     capabilities,
     services: plainServices,
-    endpoints: {
-      ...(primaryRest ? { rest: primaryRest } : {}),
-      ...(primaryMcp ? { mcp: primaryMcp } : {}),
-      ...(primaryA2a ? { a2a: primaryA2a } : {})
-    },
+    endpoints,
     checkoutHandoffSupported,
     catalogSearchSupported,
-    liabilityModel: "zero_liability_handoff",
-    ...(rejectedEndpointCount > 0 ? { rejectedEndpointCount } : {}),
-    ...(warnings.length > 0 ? { warnings } : {})
-  };
+    rejectedEndpointCount,
+    warnings
+  });
 
-  return {
+  const normalized: NormalizedUcpProfile = {
     origin: validatedOrigin,
     manifestUrl: safeManifestUrl,
     version,
@@ -327,23 +483,22 @@ export function parseUcpManifest(
     platformHint,
     capabilities,
     services: plainServices,
-    endpoints: {
-      rest: primaryRest,
-      mcp: primaryMcp,
-      a2a: primaryA2a
-    },
+    endpoints,
     checkoutHandoffSupported,
     catalogSearchSupported,
     rejectedEndpointCount,
     warnings,
     metadata
   };
+
+  return enforceProfileByteBudget(normalized);
 }
 
 export class UcpDiscoveryClient {
   private readonly fetcher: UcpFetcherFn;
   private readonly timeoutMs: number;
   private readonly maxBytes: number;
+  private readonly maxCachedProfiles: number;
   private readonly cache = new Map<string, CachedDiscoveryEntry>();
 
   constructor(opts: UcpDiscoveryOptions = {}) {
@@ -353,18 +508,26 @@ export class UcpDiscoveryClient {
       MAX_UCP_MANIFEST_BYTES,
       Math.max(4096, opts.maxBytes ?? MAX_UCP_MANIFEST_BYTES)
     );
+    this.maxCachedProfiles = Math.min(
+      MAX_CACHED_UCP_PROFILES,
+      Math.max(16, opts.maxCachedProfiles ?? MAX_CACHED_UCP_PROFILES)
+    );
   }
 
   clearCache(): void {
     this.cache.clear();
   }
 
+  getCacheSize(): number {
+    return this.cache.size;
+  }
+
   private setCache(key: string, entry: CachedDiscoveryEntry, now: number): void {
-    if (this.cache.size >= MAX_CACHED_PROFILES && !this.cache.has(key)) {
+    if (this.cache.size >= this.maxCachedProfiles && !this.cache.has(key)) {
       for (const [k, v] of this.cache) {
         if (v.expiresAt <= now) this.cache.delete(k);
       }
-      while (this.cache.size >= MAX_CACHED_PROFILES) {
+      while (this.cache.size >= this.maxCachedProfiles) {
         const oldest = this.cache.keys().next().value;
         if (oldest === undefined) break;
         this.cache.delete(oldest);
@@ -378,7 +541,10 @@ export class UcpDiscoveryClient {
     origin: string,
     opts: { forceRefresh?: boolean; concurrencyKey?: string } = {}
   ): Promise<NormalizedUcpProfile | null> {
-    const validatedOrigin = validateExternalUrl(origin).origin;
+    // Always strictly validate the user-supplied store origin first (direct SSRF always throws)
+    const validatedParsed = validateExternalUrl(origin);
+    const validatedOrigin = validatedParsed.origin;
+    const storeHostname = validatedParsed.hostname.toLowerCase().replace(/\.$/, "");
     const now = Date.now();
 
     if (!opts.forceRefresh) {
@@ -412,10 +578,11 @@ export class UcpDiscoveryClient {
         this.setCache(validatedOrigin, { profile: null, expiresAt: now + DISCOVERY_CACHE_TTL_MS }, now);
         return null;
       }
-      if (isHardSsrfError(err)) {
+      // Rethrow direct SSRF on the user-supplied store host (e.g. DNS rebinding to private IP) or concurrency limits;
+      // degrade redirect-triggered SSRF errors on already-valid public stores cleanly to null.
+      if (isDirectOriginSsrfError(err, storeHostname)) {
         throw err;
       }
-      // Network timeouts, BODY_TOO_LARGE, DNS errors mean UCP is unavailable
       this.setCache(validatedOrigin, { profile: null, expiresAt: now + DISCOVERY_CACHE_TTL_MS }, now);
       return null;
     }
@@ -436,7 +603,7 @@ export class UcpDiscoveryClient {
       return null;
     }
 
-    // Verify final response URL did not escape the store's registrable domain
+    // Verify final response URL did not escape the store's tenant domain
     let effectiveOrigin = validatedOrigin;
     let effectiveManifestUrl = manifestUrl;
     if (res.url) {

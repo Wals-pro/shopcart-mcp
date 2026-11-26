@@ -84,10 +84,22 @@ export class UniversalUcpAdapter implements StoreAdapter {
       return store;
     }
 
-    const profile = await this.discovery.discover(store.origin, {
-      forceRefresh: false,
-      concurrencyKey
-    });
+    // Validate the already-resolved store origin before optional UCP probing
+    validateExternalUrl(store.origin);
+
+    let profile: NormalizedUcpProfile | null;
+    try {
+      profile = await this.discovery.discover(store.origin, {
+        forceRefresh: false,
+        concurrencyKey
+      });
+    } catch (err) {
+      if (err instanceof SsrfError && err.code === "CONCURRENCY_LIMIT") {
+        throw err;
+      }
+      // Degrade optional /.well-known/ucp enrichment cleanly without breaking inspect_store
+      profile = null;
+    }
 
     if (!profile) {
       return {

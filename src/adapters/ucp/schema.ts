@@ -11,6 +11,14 @@ export const MAX_UCP_MANIFEST_BYTES = 262_144;
  */
 export const MAX_UCP_API_BYTES = 524_288;
 
+/**
+ * Tight normalized cache caps to prevent memory amplification across wildcard subdomains.
+ */
+export const MAX_UCP_SERVICES_NORMALIZED = 8;
+export const MAX_UCP_CAPABILITIES_NORMALIZED = 16;
+export const MAX_UCP_ENDPOINT_URL_LENGTH = 512;
+export const MAX_UCP_CACHED_PROFILE_BYTES = 8192;
+
 const BoundedString = z.string().max(512);
 const ShortString = z.string().max(160);
 const UrlCandidateString = z.string().max(2048);

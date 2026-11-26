@@ -385,7 +385,7 @@ export class UcpApiClient {
         },
         body: opts.method === "POST" ? JSON.stringify(opts.body) : undefined,
         timeoutMs: this.timeoutMs,
-        maxRedirects: 2,
+        maxRedirects: opts.method === "POST" ? 0 : 2,
         maxBytes: this.maxBytes,
         truncateOnMaxBytes: false,
         concurrencyKey: opts.concurrencyKey,

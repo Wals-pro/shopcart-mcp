@@ -85,12 +85,15 @@ const VARIANT_ID_SCHEMA = z
     "variant_id must not contain whitespace or control characters"
   );
 
-function makeAnnotations(title: string) {
+function makeAnnotations(
+  title: string,
+  overrides: { readOnlyHint?: boolean; idempotentHint?: boolean } = {}
+) {
   return {
     title,
-    readOnlyHint: true,
+    readOnlyHint: overrides.readOnlyHint ?? true,
     destructiveHint: false,
-    idempotentHint: true,
+    idempotentHint: overrides.idempotentHint ?? true,
     openWorldHint: true
   } as const;
 }
@@ -859,7 +862,10 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
             "Recommended: product handles/slugs/paths, IDs, SKUs, ASINs, or full product URLs whose variants should be verified live for stock and price"
           )
       },
-      annotations: makeAnnotations("Create Store Cart Link")
+      annotations: makeAnnotations("Create Store Cart Link", {
+        readOnlyHint: false,
+        idempotentHint: false
+      })
     },
     async ({ store_url, items, mode, discount_code, auto_apply_discount, verify_handles }) =>
       runGuardedTool(ctx, "create_cart_link", async () => {
