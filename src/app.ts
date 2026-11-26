@@ -26,7 +26,7 @@ import { createBillingRouter } from "./web/billing.js";
 import { renderLlmsFullTxt, renderLlmsTxt, renderRobotsTxt, renderSitemapXml } from "./web/discovery.js";
 import { createGuidesRouter } from "./web/guides.js";
 import { renderLandingPage } from "./web/landing.js";
-import { renderPrivacyPage, renderSecurityTxt, renderTermsPage } from "./web/legal.js";
+import { renderNotFoundPage, renderPrivacyPage, renderSecurityTxt, renderTermsPage } from "./web/legal.js";
 
 export interface CreateAppDeps {
   config: AppConfig;
@@ -46,7 +46,19 @@ const STATIC_ICONS: Array<{ route: string; file: string; contentType: string }> 
   { route: "/favicon.svg", file: "favicon.svg", contentType: "image/svg+xml; charset=utf-8" },
   { route: "/favicon.png", file: "favicon.png", contentType: "image/png" },
   { route: "/apple-touch-icon.png", file: "apple-touch-icon.png", contentType: "image/png" },
-  { route: "/icon-512.png", file: "icon-512.png", contentType: "image/png" }
+  { route: "/icon-192.png", file: "icon-192.png", contentType: "image/png" },
+  { route: "/icon-512.png", file: "icon-512.png", contentType: "image/png" },
+  { route: "/logo.svg", file: "logo.svg", contentType: "image/svg+xml; charset=utf-8" },
+  {
+    route: "/manifest.webmanifest",
+    file: "manifest.webmanifest",
+    contentType: "application/manifest+json; charset=utf-8"
+  },
+  {
+    route: "/manifest.json",
+    file: "manifest.webmanifest",
+    contentType: "application/manifest+json; charset=utf-8"
+  }
 ];
 
 const STATIC_LANDING_ASSETS: Array<{ route: string; file: string; contentType: string }> = [
@@ -55,11 +67,6 @@ const STATIC_LANDING_ASSETS: Array<{ route: string; file: string; contentType: s
     route: "/assets/hero-flow.js",
     file: "assets/hero-flow.js",
     contentType: "application/javascript; charset=utf-8"
-  },
-  {
-    route: "/assets/walspro-mark.svg",
-    file: "assets/walspro-mark.svg",
-    contentType: "image/svg+xml; charset=utf-8"
   }
 ];
 
@@ -250,6 +257,7 @@ export function createApp(deps: CreateAppDeps): Express {
       },
       icons: [
         { src: `${config.appOrigin}/apple-touch-icon.png`, mimeType: "image/png", sizes: ["180x180"] },
+        { src: `${config.appOrigin}/icon-192.png`, mimeType: "image/png", sizes: ["192x192"] },
         { src: `${config.appOrigin}/icon-512.png`, mimeType: "image/png", sizes: ["512x512"] }
       ],
       privacy_policy_url: `${config.appOrigin}/privacy`,
@@ -401,8 +409,17 @@ export function createApp(deps: CreateAppDeps): Express {
   app.use(createGuidesRouter(config));
   app.use(createBillingRouter(config, store, otpService, deps.stripeClient));
 
-  // 404 fallback
-  app.use((_req, res) => {
+  // 404 fallback (HTML for browser navigations, JSON for API/non-HTML clients)
+  app.use((req, res) => {
+    const accept = String(req.headers.accept ?? "");
+    if (req.method === "GET" && accept.includes("text/html") && !accept.includes("application/json")) {
+      const lang = detectLang(req.query.lang, req.headers["accept-language"]);
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("X-Frame-Options", "DENY");
+      res.setHeader("Cache-Control", "no-store");
+      res.status(404).type("html").send(renderNotFoundPage(lang));
+      return;
+    }
     res.status(404).json({ error: "not_found" });
   });
 

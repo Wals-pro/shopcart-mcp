@@ -158,7 +158,8 @@ export function createOAuthRouter(
       "client_secret_post",
       "client_secret_basic"
     ],
-    scopes_supported: ["mcp:read"]
+    scopes_supported: ["mcp:read"],
+    logo_uri: `${issuer}/icon-512.png`
   };
 
   async function resolveClient(clientId: string): Promise<ResolvedOAuthClient | null> {

@@ -82,7 +82,9 @@ describe("SEO & GEO shopping guide pages (/guides, 11 DE/EN detail routes, sitem
       expect(html).not.toMatch(/<script(?![^>]*\btype="application\/ld\+json")[^>]*>/i);
       expect(html).not.toMatch(/<style[\s>]/i);
       expect(html).toContain('href="/assets/guides.css');
-      expect(html).toContain("/assets/walspro-mark.svg");
+      expect(html).toContain('class="brand-logo"');
+      expect(html).toContain('fill="#FF1F4D"');
+      expect(html).not.toContain("walspro-mark");
 
       // Meta title <= 70 chars & meta description <= 160 chars
       const title = extractTagContent(html, "title");

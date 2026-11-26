@@ -1,5 +1,6 @@
 import type { AppConfig } from "../config.js";
 import { escapeHtml, type Lang } from "../auth/pages.js";
+import { renderFaviconHeadLinks, renderShopCartWordmark, renderSparkCartSvg } from "./brand.js";
 import { getTrademarkDisclaimer } from "./platforms.js";
 
 function renderLegalShell(lang: Lang, title: string, path: string, bodyHtml: string): string {
@@ -12,9 +13,7 @@ function renderLegalShell(lang: Lang, title: string, path: string, bodyHtml: str
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#141414">
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="icon" type="image/png" href="/favicon.png">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+${renderFaviconHeadLinks()}
 <title>${escapeHtml(title)} — ShopCart MCP</title>
 <style>
 :root{
@@ -28,7 +27,8 @@ body{margin:0;min-height:100dvh;font-family:"WALSPRO Body","Inter","Avenir Next"
 .wrap{max-width:780px;margin:0 auto;padding:28px 22px 56px}
 .top{display:flex;justify-content:space-between;align-items:center;padding-bottom:18px;border-bottom:1px solid var(--walspro-divider);margin-bottom:28px;gap:14px;flex-wrap:wrap}
 .brand{font-family:"WALSPRO Display","Inter",system-ui,sans-serif;font-weight:750;text-decoration:none;color:#fff;display:inline-flex;align-items:center;gap:10px;font-size:16px}
-.brand img{width:26px;height:26px;border-radius:7px;display:block}
+.brand img,.brand svg{width:26px;height:26px;display:block;flex-shrink:0}
+.brand-accent{color:#ff2d59}
 .nav{display:flex;gap:16px;font-size:13px;color:var(--walspro-muted);align-items:center;flex-wrap:wrap}
 .nav a{text-decoration:none;color:inherit}
 .nav a:hover{color:#fff}
@@ -43,12 +43,15 @@ code{font-family:"SFMono-Regular","Cascadia Code",monospace;background:var(--wal
 .disclaimer{margin-top:24px;padding:12px 14px;background:var(--walspro-bg-2);border:1px solid var(--walspro-border);border-radius:12px;font-size:13px;color:var(--walspro-muted)}
 a{color:#ff6b7a}
 a:hover{color:#fff}
+.foot-note{margin-top:20px;font-size:12.5px;color:var(--walspro-muted);text-align:center}
+.foot-note a{color:var(--walspro-muted)}
+.foot-note a:hover{color:#fff}
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="top">
-    <a class="brand" href="/?lang=${lang}"><img src="/assets/walspro-mark.svg" alt="wals.pro" width="26" height="26"><span>ShopCart MCP</span></a>
+    <a class="brand" href="/?lang=${lang}">${renderSparkCartSvg({ size: 26, className: "brand-logo" })}${renderShopCartWordmark("MCP")}</a>
     <nav class="nav">
       <a href="/?lang=${lang}">${de ? "Startseite" : "Home"}</a>
       <a href="/billing?lang=${lang}">${de ? "Konto & Billing" : "Billing"}</a>
@@ -60,6 +63,7 @@ a:hover{color:#fff}
   <main class="card">
     ${bodyHtml}
   </main>
+  <p class="foot-note">ShopCart MCP · by <a href="https://wals.pro" target="_blank" rel="noopener noreferrer">wals.pro</a></p>
 </div>
 </body>
 </html>`;
@@ -215,6 +219,22 @@ export function renderTermsPage(config: AppConfig, lang: Lang): string {
 `;
 
   return renderLegalShell(lang, de ? "Nutzungsbedingungen" : "Terms of Service", "/terms", body);
+}
+
+export function renderNotFoundPage(lang: Lang): string {
+  const de = lang === "de";
+  const body = de
+    ? `
+<h1>404 — Seite nicht gefunden</h1>
+<p class="updated">Die angeforderte Seite existiert leider nicht oder wurde verschoben.</p>
+<p><a href="/?lang=de">Zur Startseite</a> · <a href="/guides?lang=de">Zu den Shopping-Guides</a> · <a href="/billing?lang=de">Konto &amp; Billing</a></p>
+`
+    : `
+<h1>404 — Page not found</h1>
+<p class="updated">The requested page does not exist or has been moved.</p>
+<p><a href="/?lang=en">Back to homepage</a> · <a href="/guides?lang=en">Browse Shopping Guides</a> · <a href="/billing?lang=en">Account &amp; Billing</a></p>
+`;
+  return renderLegalShell(lang, de ? "Seite nicht gefunden (404)" : "Page not found (404)", "/", body);
 }
 
 export function renderSecurityTxt(config: AppConfig): string {

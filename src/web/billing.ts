@@ -16,6 +16,7 @@ import {
   normalizeEmail
 } from "../auth/email-otp.js";
 import { WALSPRO_DARK_CSS, detectLang, escapeHtml, type Lang } from "../auth/pages.js";
+import { renderFaviconHeadLinks, renderShopCartWordmark, renderSparkCartSvg } from "./brand.js";
 import { SESSION_COOKIE } from "../auth/router.js";
 import { getBerlinDayKey, getEffectiveEntitlement, isPromoFreeProActive } from "../billing/quota.js";
 import {
@@ -128,16 +129,14 @@ function renderBillingShell(lang: Lang, title: string, langHrefPath: string, bod
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#141414">
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="icon" type="image/png" href="/favicon.png">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+${renderFaviconHeadLinks()}
 <title>${escapeHtml(title)} — ShopCart MCP</title>
 <style>${WALSPRO_DARK_CSS}${BILLING_EXTRA_CSS}</style>
 </head>
 <body>
 <div class="wrap">
   <div class="top">
-    <a class="brand" href="/?lang=${lang}"><img src="/assets/walspro-mark.svg" alt="wals.pro" width="24" height="24">ShopCart MCP <span class="brand-sub">by wals.pro</span></a>
+    <a class="brand" href="/?lang=${lang}">${renderSparkCartSvg({ size: 24, className: "brand-logo" })}${renderShopCartWordmark("MCP")} <span class="brand-sub">by wals.pro</span></a>
     <a class="lang" href="${escapeHtml(langHrefPath)}?lang=${otherLang}">${de ? "English" : "Deutsch"}</a>
   </div>
   <main>

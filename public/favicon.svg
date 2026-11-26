@@ -1,8 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ShopCart MCP">
-  <rect width="512" height="512" rx="112" fill="#d92d20"/>
-  <g fill="none" stroke="#ffffff" stroke-width="32" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M96 144h52l34 166a22 22 0 0 0 21.5 17.5h158a22 22 0 0 0 21.3-16.6L410 198H160"/>
-    <circle cx="206" cy="390" r="24" fill="#ffffff" stroke="none"/>
-    <circle cx="348" cy="390" r="24" fill="#ffffff" stroke="none"/>
-  </g>
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ShopCart">
+  <rect x="0" y="0" width="64" height="64" rx="16" fill="#FF1F4D"/>
+  <path d="M13 18h6.2l4.4 20.5a3.2 3.2 0 0 0 3.1 2.5h17.8a3.2 3.2 0 0 0 3.1-2.4l3.1-12.2H22.2"
+    fill="none" stroke="#FFFFFF" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="26.5" cy="49.5" r="3.4" fill="#FFFFFF"/>
+  <circle cx="43.5" cy="49.5" r="3.4" fill="#FFFFFF"/>
+  <path d="M44 10.5c.8 4.4 2.1 5.7 6.5 6.5-4.4.8-5.7 2.1-6.5 6.5-.8-4.4-2.1-5.7-6.5-6.5 4.4-.8 5.7-2.1 6.5-6.5z"
+    fill="#FFFFFF"/>
 </svg>

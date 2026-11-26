@@ -413,7 +413,10 @@ describe("OAuth 2.1 compliance & MCP auth", () => {
     expect(svg.headers["content-type"]).toContain("image/svg+xml");
     await request(app).get("/favicon.png").expect(200);
     await request(app).get("/apple-touch-icon.png").expect(200);
+    await request(app).get("/icon-192.png").expect(200);
     await request(app).get("/icon-512.png").expect(200);
+    await request(app).get("/logo.svg").expect(200);
+    await request(app).get("/manifest.webmanifest").expect(200);
 
     // 2. Product-specific legal pages & security.txt
     const privacy = await request(app).get("/privacy?lang=en").expect(200);

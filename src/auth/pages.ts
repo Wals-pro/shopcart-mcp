@@ -1,3 +1,5 @@
+import { renderFaviconHeadLinks, renderShopCartWordmark, renderSparkCartSvg } from "../web/brand.js";
+
 export type Lang = "de" | "en";
 
 export function detectLang(
@@ -107,12 +109,15 @@ body {
   white-space: nowrap;
   min-width: 0;
 }
-.brand img {
+.brand img,
+.brand svg {
   width: 24px;
   height: 24px;
-  border-radius: 6px;
   display: block;
   flex-shrink: 0;
+}
+.brand-accent {
+  color: #ff2d59;
 }
 .brand-sub {
   color: var(--walspro-muted);
@@ -509,16 +514,14 @@ export function renderAuthorizePage(p: AuthorizePageParams): string {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#141414">
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="icon" type="image/png" href="/favicon.png">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+${renderFaviconHeadLinks()}
 <title>${escapeHtml(title)}</title>
 <style>${WALSPRO_DARK_CSS}</style>
 </head>
 <body class="auth-body">
 <main class="card">
   <div class="top">
-    <div class="brand"><img src="/assets/walspro-mark.svg" alt="wals.pro" width="24" height="24">ShopCart MCP <span class="brand-sub">by wals.pro</span></div>
+    <div class="brand">${renderSparkCartSvg({ size: 24, className: "brand-logo" })}${renderShopCartWordmark("MCP")} <span class="brand-sub">by wals.pro</span></div>
     <a class="lang" href="/oauth/authorize?${escapeHtml(langSwitchQs)}">${escapeHtml(toggleLabel)}</a>
   </div>
 
@@ -624,16 +627,14 @@ export function renderMagicLinkResultPage(p: MagicLinkResultPageParams): string 
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#141414">
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="icon" type="image/png" href="/favicon.png">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+${renderFaviconHeadLinks()}
 <title>${escapeHtml(heading)} — ShopCart MCP</title>
 <style>${WALSPRO_DARK_CSS}</style>
 </head>
 <body class="auth-body">
 <main class="card" data-state="${escapeHtml(p.kind)}" data-banner="${escapeHtml(bannerClass)}">
   <div class="top">
-    <a class="brand" href="/?lang=${p.lang}"><img src="/assets/walspro-mark.svg" alt="wals.pro" width="24" height="24">ShopCart MCP <span class="brand-sub">by wals.pro</span></a>
+    <a class="brand" href="/?lang=${p.lang}">${renderSparkCartSvg({ size: 24, className: "brand-logo" })}${renderShopCartWordmark("MCP")} <span class="brand-sub">by wals.pro</span></a>
   </div>
 
   <h1>${escapeHtml(heading)}</h1>

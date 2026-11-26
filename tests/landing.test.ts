@@ -87,8 +87,12 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
     expect(js.text).toContain("prefers-reduced-motion");
     expect(js.text).not.toContain("window.prompt");
 
-    const mark = await request(app).get("/assets/walspro-mark.svg").expect(200);
-    expect(mark.headers["content-type"]).toContain("image/svg+xml");
+    const logo = await request(app).get("/logo.svg").expect(200);
+    expect(logo.headers["content-type"]).toContain("image/svg+xml");
+    const logoText = Buffer.isBuffer(logo.body) ? logo.body.toString("utf8") : String(logo.text ?? "");
+    expect(logoText).toContain('fill="#FF1F4D"');
+    expect(de.text).not.toContain("walspro-mark");
+    expect(en.text).not.toContain("walspro-mark");
 
     const billing = await request(app).get("/billing?lang=de").expect(200);
     expect(billing.text).toContain("--walspro-accent:#ff1f4d");

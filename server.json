@@ -18,6 +18,13 @@
       ]
     },
     {
+      "src": "https://shopcart.wals.pro/icon-192.png",
+      "mimeType": "image/png",
+      "sizes": [
+        "192x192"
+      ]
+    },
+    {
       "src": "https://shopcart.wals.pro/icon-512.png",
       "mimeType": "image/png",
       "sizes": [
