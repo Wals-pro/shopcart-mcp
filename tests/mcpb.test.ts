@@ -152,7 +152,7 @@ describe("Claude Desktop 1-click Extension (.mcpb)", () => {
     expect(typeof manifest.description).toBe("string");
     expect(manifest.description.length).toBeGreaterThan(10);
     expect(manifest.author).toEqual({
-      name: "Wals.pro",
+      name: "wals.pro",
       email: "support@wals.pro",
       url: "https://wals.pro"
     });

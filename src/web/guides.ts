@@ -4,6 +4,15 @@ import { detectLang, escapeHtml, type Lang } from "../auth/pages.js";
 import { isPromoFreeProActive } from "../billing/quota.js";
 import { ANSWER_PAGE_GUIDES } from "./guides-answer-pages.js";
 import {
+  getComfortFeatures,
+  getHandoffSentence,
+  getMatrixHeaders,
+  getPlatformLimits,
+  getPlatformRows,
+  getPlatformSentence,
+  getTrademarkDisclaimer
+} from "./platforms.js";
+import {
   PUBLISHED_ISO,
   SOURCES_DE,
   SOURCES_EN,
@@ -51,7 +60,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
       "Ja: Verbinde Claude.ai oder Claude Desktop in zwei Klicks mit ShopCart MCP und lass dir geprüfte Multi-Artikel-Warenkörbe erstellen.",
     tldrLabel: "Kurzantwort:",
     tldrText:
-      "Ja — Claude kann 2026 echte Warenkörbe in tausenden Online-Shops bauen, ohne dass du Zahlungsdaten teilen musst. Mit dem kostenlosen OAuth-2.1-Connector ShopCart MCP (https://shopcart.wals.pro/mcp) prüft Claude.ai oder Claude Desktop Varianten, Größen, Bestand und Live-Preise direkt in öffentlichen Shopify- und WooCommerce-Shops — plus offizielle Amazon-Cart-Links — und liefert einen fertigen Browser-Warenkorb-Link zum Selbstbezahlen.",
+      "Ja — Claude kann 2026 echte Warenkörbe in Online-Shops bauen, ohne dass du Zahlungsdaten teilen musst. Mit dem kostenlosen OAuth-2.1-Connector ShopCart MCP (https://shopcart.wals.pro/mcp) prüft Claude.ai oder Claude Desktop Varianten, Größen, Bestand und Live-Preise direkt in öffentlichen Shops auf Shopify, WooCommerce, BigCommerce, Shopware 6 und Magento 2 — plus offizielle Amazon-Cart-Links — und liefert einen fertigen Warenkorb-Link oder geprüfte Produktlinks zum Selbstbezahlen.",
     intro:
       "Du möchtest beim Online-Shopping Zeit sparen, ohne dich durch zwanzig Tabs und ausverkaufte Größen zu klicken? In diesem Praxis-Guide siehst du, wie Claude über das offene Model Context Protocol (MCP) echte, geprüfte Warenkörbe zusammenstellt — ganz ohne fragile Browser-Extensions und ohne automatischen Kaufabschluss.",
     takeawaysHeading: "Das Wichtigste in Kürze",
@@ -70,7 +79,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
       },
       {
         lead: "Weltweite Währungen statt lokaler Liefer-Apps.",
-        text: "Unterstützt öffentliche Shopify- und WooCommerce-Shops in EUR, CHF, USD und GBP sowie offizielle Amazon-Multi-Artikel-Links über 10 Marktplätze."
+        text: "Unterstützt öffentliche Shops auf Shopify, WooCommerce, BigCommerce, Shopware 6 und Magento 2 in EUR, CHF, USD und GBP, offizielle Amazon-Multi-Artikel-Links über 10 Marktplätze und den Preis-Check per Produktlink in jedem anderen Shop."
       }
     ],
     primaryAssistant: "claude",
@@ -92,12 +101,12 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
       {
         heading: "So baut dir Claude in vier Schritten einen echten Warenkorb",
         paragraphs: [
-          "ShopCart MCP nutzt das offene Model Context Protocol (MCP), um Claude vier klar begrenzte Lese-Werkzeuge bereitzustellen. Statt HTML-Seiten zu raten, ruft der Server strukturierte Katalogdaten direkt vom jeweiligen Shop ab und erzeugt einen offiziellen Warenkorb-Permalink."
+          "ShopCart MCP nutzt das offene Model Context Protocol (MCP), um Claude sechs klar begrenzte Lese-Werkzeuge bereitzustellen. Vier davon bilden den Weg zum Warenkorb, zwei weitere lesen in Shopify-Shops Sale-Kollektionen sowie Versand- und Rückgaberegeln. Statt HTML-Seiten zu raten, ruft der Server strukturierte Katalogdaten direkt vom jeweiligen Shop ab und erzeugt einen offiziellen Warenkorb-Permalink."
         ],
         orderedSteps: [
           {
             lead: "Shop prüfen (inspect_store):",
-            text: "Erkennt automatisch öffentliche Shopify- und WooCommerce-Shops (sowie Amazon-Marktplätze für Cart-Links) und liest Währung, Land und Firewall-Regeln aus."
+            text: "Erkennt automatisch das Shop-System (Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2, Amazon-Marktplatz oder Schema.org/JSON-LD) und liest Währung, Land und Firewall-Regeln aus."
           },
           {
             lead: "Katalog durchsuchen (search_products):",
@@ -178,7 +187,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
         heading: "Datenschutz und Sicherheit: Warum Read-Only entscheidend ist",
         paragraphs: [
           "Niemand möchte, dass eine KI eigenmächtig Kreditkarten belastet oder versteckte Textanweisungen in fremden Produktbeschreibungen ausführt. ShopCart MCP löst beides auf Architekturebene.",
-          "Alle vier Werkzeuge sind technisch als rein lesend markiert und verarbeiten weder Bestellungen noch Shop-Logins oder Zahlungsdaten. Ein eingebauter Filter bereinigt HTML und unsichtbare Steuerzeichen aus Shop-Texten (Prompt-Injection-Schutz), während DNS-gepinnte SSRF-Regeln interne Netze sperren. Der gehostete Dienst läuft in der EU (Google Cloud, europe-west1) und speichert keine Chat-Verläufe."
+          "Alle sechs Werkzeuge sind technisch als rein lesend markiert und verarbeiten weder Bestellungen noch Shop-Logins oder Zahlungsdaten. Ein eingebauter Filter bereinigt HTML und unsichtbare Steuerzeichen aus Shop-Texten (Prompt-Injection-Schutz), während DNS-gepinnte SSRF-Regeln interne Netze sperren. Der gehostete Dienst läuft in der EU (Google Cloud, europe-west1) und speichert keine Chat-Verläufe."
         ],
         takeaway:
           "Fazit: Claude übernimmt Recherche und Warenkorb-Bau, während Datenschutz und Kaufentscheidung zu 100 % bei dir bleiben."
@@ -206,7 +215,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
     sources: SOURCES_DE,
     limitationsLabel: "Grenzen:",
     limitationsText:
-      "Die volle Live-Katalog-, Varianten- und Bestandsprüfung funktioniert auf öffentlichen Shopify- und WooCommerce-Storefronts ohne Login-Schranke. Für Amazon unterstützt ShopCart MCP offizielle Multi-Artikel-Warenkorb-Links (/gp/aws/cart/add.html) über 10 Marktplätze kombiniert mit Websuche oder optional Keepa/PA-API — kein automatischer Checkout. Passwortgeschützte B2B-Portale werden nicht unterstützt.",
+      getPlatformLimits("de"),
     faqHeading: "Häufige Fragen zum Einkaufen mit Claude",
     faqs: [
       {
@@ -222,7 +231,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
       {
         question: "In welchen Online-Shops kann Claude Warenkörbe erstellen?",
         answer:
-          "Claude durchsucht tausende öffentliche Shopify- und WooCommerce-Onlineshops weltweit live inklusive Größen- und Bestandscheck in EUR, CHF, USD oder GBP. Für Amazon erstellt ShopCart MCP zudem offizielle Multi-Artikel-Warenkorb-Links (/gp/aws/cart/add.html) über 10 Marktplätze."
+          getPlatformSentence("de") + " " + getHandoffSentence("de")
       },
       {
         question: "Was kostet ShopCart MCP für Claude?",
@@ -262,7 +271,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
       "Ja — trotz zurückgefahrenem Instant Checkout baut ChatGPT 2026 über ShopCart MCP echte, geprüfte Warenkörbe zum Selbstbezahlen im Browser.",
     tldrLabel: "Kurzantwort:",
     tldrText:
-      "Ja — ChatGPT kann 2026 fertige Warenkörbe erstellen, obwohl OpenAI den eigenständigen Instant Checkout zurückgefahren hat. Über das offene Model Context Protocol (MCP) verbindet sich ChatGPT mit ShopCart MCP (https://shopcart.wals.pro/mcp), prüft Größen, Live-Preise und Lagerbestand direkt in öffentlichen Shopify- und WooCommerce-Shops (plus offizielle Amazon-Cart-Links) und liefert einen geprüften Warenkorb-Link zum Selbstbezahlen.",
+      "Ja — ChatGPT kann 2026 fertige Warenkörbe erstellen, obwohl OpenAI den eigenständigen Instant Checkout zurückgefahren hat. Über das offene Model Context Protocol (MCP) verbindet sich ChatGPT mit ShopCart MCP (https://shopcart.wals.pro/mcp), prüft Größen, Live-Preise und Lagerbestand direkt in öffentlichen Shops auf Shopify, WooCommerce, BigCommerce, Shopware 6 und Magento 2 (plus offizielle Amazon-Cart-Links) und liefert einen geprüften Warenkorb-Link oder geprüfte Produktlinks zum Selbstbezahlen.",
     intro:
       "Viele ältere Blogartikel und Kurzvideos behaupten noch immer, ChatGPT könne höchstens Text-Einkaufslisten schreiben und keinen echten Warenkorb füllen. Mit Custom MCP Connectors ist diese Aussage 2026 überholt: Hier siehst du, wie ChatGPT in Sekunden einen geprüften Warenkorb-Link baut.",
     takeawaysHeading: "Das Wichtigste in Kürze",
@@ -273,11 +282,11 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
       },
       {
         lead: "Live-Varianten statt ausverkaufter Treffer.",
-        text: "Auf öffentlichen Shopify- und WooCommerce-Shops liest ChatGPT exakte Größen, Farben, Stückzahlen und aktuelle Preise live vor dem Link-Bau."
+        text: "In öffentlichen Shops auf Shopify, WooCommerce, BigCommerce, Shopware 6 und Magento 2 liest ChatGPT exakte Größen, Farben, Stückzahlen und aktuelle Preise live vor dem Link-Bau."
       },
       {
         lead: "Mehrere Artikel in einem Klick im Warenkorb.",
-        text: "Bis zu 20 Positionen landen gebündelt in einem geprüften Browser-Warenkorb — plus offizielle Amazon-Multi-Artikel-Links über 10 Marktplätze."
+        text: "In Shopify-Shops landen bis zu 20 Positionen gebündelt in einem geprüften Browser-Warenkorb, bei Amazon in einem offiziellen Multi-Artikel-Link über 10 Marktplätze. WooCommerce und BigCommerce liefern einen Link pro Artikel."
       },
       {
         lead: "Kein Auto-Checkout, volle Kontrolle.",
@@ -295,7 +304,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
         heading: "Warum viele Antworten noch „Nein“ sagen — und was 2026 per MCP geht",
         paragraphs: [
           "Ohne aktiven MCP-Connector liefert die normale ChatGPT-Websuche tatsächlich nur Text-Einkaufslisten oder einzelne Produkt-URLs mit oft veralteten Preisen. Hinzu kommt, dass OpenAI seinen eigenständigen In-Chat-Instant-Checkout Anfang 2026 zurückgefahren hat — viele Artikel schließen daraus fälschlich, fertige KI-Warenkörbe seien nicht möglich.",
-          "Über Custom MCP Connectors ändert sich das grundlegend: Mit ShopCart MCP erhält ChatGPT strukturierten Lesezugriff auf öffentliche Shopify- und WooCommerce-Kataloge, prüft Größen und Bestand live und erzeugt einen offiziellen Warenkorb-Link, der alle Artikel auf einmal in deinem Browser lädt."
+          "Über Custom MCP Connectors ändert sich das grundlegend: Mit ShopCart MCP erhält ChatGPT strukturierten Lesezugriff auf öffentliche Shop-Kataloge (Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2), prüft Größen und Bestand live und erzeugt in Shopify-Shops einen offiziellen Warenkorb-Link, der alle Artikel auf einmal in deinem Browser lädt."
         ],
         takeaway:
           "Fazit: Nicht der ChatGPT-Chat allein, sondern ChatGPT + offenes MCP macht aus Textlisten echte, geprüfte Warenkörbe."
@@ -351,7 +360,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
               "Größen & Farben live prüfen",
               "Oft unvollständig oder veraltet",
               "Nur bei angebundenen Pilot-Händlern",
-              "Live je Varianten-ID auf öffentlichen Shopify- & WooCommerce-Shops"
+              "Live je Varianten-ID in öffentlichen Shops (Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2)"
             ],
             [
               "Budget- & Rabatt-Prüfung",
@@ -417,13 +426,13 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
     sources: SOURCES_DE,
     limitationsLabel: "Grenzen:",
     limitationsText:
-      "Vollständige unauthentifizierte Live-Katalog-, Varianten- und Bestandsprüfung gilt für öffentliche Shopify- und WooCommerce-Shops ohne Login-Pflicht. Bei Amazon sperrt die Plattform automatisierte Checkout-Bots; ShopCart MCP unterstützt dort offizielle Multi-Artikel-Warenkorb-Links (/gp/aws/cart/add.html) über 10 Marktplätze kombiniert mit Websuche oder optional Keepa/PA-API. Passwortgeschützte B2B-Shops werden nicht unterstützt.",
+      getPlatformLimits("de"),
     faqHeading: "Häufige Fragen zu ChatGPT & Warenkorb-Links",
     faqs: [
       {
         question: "Nutzt ChatGPT MCP?",
         answer:
-          "Ja. ChatGPT unterstützt Custom Remote MCP Connectors mit Streamable HTTP und OAuth 2.1. Nach dem Hinzufügen von https://shopcart.wals.pro/mcp greift ChatGPT direkt auf die vier Read-Only-Shopping-Tools von ShopCart MCP zu."
+          "Ja. ChatGPT unterstützt Custom Remote MCP Connectors mit Streamable HTTP und OAuth 2.1. Nach dem Hinzufügen von https://shopcart.wals.pro/mcp greift ChatGPT direkt auf die sechs Read-Only-Shopping-Tools von ShopCart MCP zu."
       },
       {
         question: "Warum behaupten manche Suchergebnisse, ChatGPT könne keinen Warenkorb erstellen?",
@@ -433,7 +442,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
       {
         question: "Funktioniert ein ChatGPT-Warenkorb auch bei Amazon?",
         answer:
-          "Amazon blockiert automatisierte Drittanbieter-Checkout-Bots und offenes Katalog-Scraping. Mit ShopCart MCP kannst du jedoch offizielle Amazon-Multi-Artikel-Links (/gp/aws/cart/add.html) für 10 Marktplätze erzeugen — kombiniert mit Websuche oder optional Keepa/PA-API — während öffentliche Shopify- und WooCommerce-Shops volle Live-Suche bieten."
+          "Amazon blockiert automatisierte Drittanbieter-Checkout-Bots und offenes Katalog-Scraping. Mit ShopCart MCP kannst du jedoch offizielle Amazon-Multi-Artikel-Links (/gp/aws/cart/add.html) für 10 Marktplätze erzeugen — die Artikel nennst du per Link oder ASIN, eine Live-Suche bei Amazon gibt es nur im Self-Hosting mit eigenem Keepa- oder PA-API-Schlüssel. Volle Live-Suche bieten öffentliche Shops auf Shopify, WooCommerce, BigCommerce, Shopware 6 und Magento 2."
       },
       {
         question: "Kann ChatGPT mit ShopCart MCP selbstständig bestellen oder bezahlen?",
@@ -519,7 +528,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
       {
         heading: "Beispiel-Shops für Adventskalender & Geschenke: KERNenergie, SNOCKS & PURELEI",
         paragraphs: [
-          "Tausende beliebte DACH-Marken setzen auf Shopify-Storefronts und lassen sich direkt mit ShopCart MCP nach lieferbaren Adventskalendern und Geschenkideen durchsuchen. Drei typische Beispiele aus Food, Basics und Schmuck:"
+          "Viele beliebte DACH-Marken setzen auf Shopify-Storefronts und lassen sich direkt mit ShopCart MCP nach lieferbaren Adventskalendern und Geschenkideen durchsuchen. Drei typische Beispiele aus Food, Basics und Schmuck:"
         ],
         bullets: [
           {
@@ -541,7 +550,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
       {
         heading: "Typische Geschenke-Szenarien und passende Filter-Strategien",
         paragraphs: [
-          "Je nach Anlass kombiniert deine KI die vier ShopCart-MCP-Werkzeuge gezielt mit Preis-, Verfügbarkeits- und Variantenfiltern."
+          "Je nach Anlass kombiniert deine KI die ShopCart-MCP-Werkzeuge gezielt mit Preis-, Verfügbarkeits- und Variantenfiltern."
         ],
         table: {
           id: "advent-scenarios-table",
@@ -624,7 +633,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
       {
         question: "Kann ich mehrere Shops wie KERNenergie, SNOCKS und PURELEI vergleichen?",
         answer:
-          "Ja. Claude und ChatGPT können mehrere öffentliche Shopify- und WooCommerce-Shops nacheinander abfragen, Preise und Verfügbarkeiten übersichtlich gegenüberstellen und dir für deinen gewählten Shop einen fertigen Warenkorb-Link bauen."
+          "Ja. Claude und ChatGPT können mehrere öffentliche Shops (Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2) nacheinander abfragen, Preise und Verfügbarkeiten übersichtlich gegenüberstellen und dir für deinen gewählten Shop einen fertigen Warenkorb-Link bauen."
       },
       {
         question: "Prüft ShopCart MCP echte Black-Friday-Rabatte?",
@@ -669,14 +678,14 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
       "Yes: Connect Claude.ai or Claude Desktop in two clicks to verify live stock and build real multi-item shopping carts globally — strictly read-only.",
     tldrLabel: "Direct Answer:",
     tldrText:
-      "Yes — Claude can build verified multi-item shopping carts across thousands of public Shopify and WooCommerce stores (plus official Amazon multi-item cart links) using ShopCart MCP (https://shopcart.wals.pro/mcp). Unlike regional grocery-only apps, ShopCart MCP works globally in EUR, USD, GBP, and CHF, checks live stock per variant ID, and returns a strictly read-only browser cart link you review and pay yourself.",
+      "Yes — Claude can build verified multi-item shopping carts on public Shopify stores — plus official Amazon multi-item cart links, add-to-cart links on WooCommerce and BigCommerce, and verified product links on Shopware 6, Magento 2, and any other store — using ShopCart MCP (https://shopcart.wals.pro/mcp). Unlike regional grocery-only apps, ShopCart MCP works globally in EUR, USD, GBP, and CHF, checks live stock per variant ID, and returns a strictly read-only browser cart link you review and pay yourself.",
     intro:
       "Tired of reading that Claude can only shop inside a couple of regional grocery apps or requires fragile browser automation? This 2026 guide shows how to connect Claude via the open Model Context Protocol (MCP) to verify live stock and build a ready-to-open shopping cart in seconds.",
     takeawaysHeading: "Key Takeaways",
     takeaways: [
       {
         lead: "Global multi-item carts instead of regional grocery silos.",
-        text: "Works across independent public Shopify and WooCommerce stores in EUR, USD, GBP, and CHF — plus official Amazon multi-item cart permalinks across 10 marketplaces."
+        text: "Works across public Shopify, WooCommerce, BigCommerce, Shopware 6, and Magento 2 stores in EUR, USD, GBP, and CHF — plus official Amazon multi-item cart permalinks across 10 marketplaces and price checks by product link on any other store."
       },
       {
         lead: "Strictly read-only by architecture.",
@@ -710,16 +719,16 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
       {
         heading: "How Claude builds a verified shopping cart in four read-only steps",
         paragraphs: [
-          "ShopCart MCP uses the open Model Context Protocol (MCP) to give Claude four focused read-only tools. Instead of scraping HTML guesses, the server reads structured catalog endpoints live and builds an official cart permalink."
+          "ShopCart MCP uses the open Model Context Protocol (MCP) to give Claude six focused read-only tools. Four of them form the core path to a cart; two more read sale collections and shipping and return policies on Shopify stores. Instead of scraping HTML guesses, the server reads structured catalog endpoints live and builds an official cart permalink."
         ],
         orderedSteps: [
           {
             lead: "Inspect the store (inspect_store):",
-            text: "Detects public Shopify and WooCommerce storefronts (or Amazon marketplaces for cart permalinks) and resolves canonical origin, currency, country, and firewall rules."
+            text: "Detects the store platform (Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2, an Amazon marketplace, or Schema.org/JSON-LD) and resolves canonical origin, currency, country, and firewall rules."
           },
           {
             lead: "Search the catalog (search_products):",
-            text: "Finds matching products on public Shopify and WooCommerce stores with optional filters for live availability and minimum or maximum price in native currency."
+            text: "Finds matching products on public Shopify, WooCommerce, BigCommerce, Shopware 6, and Magento 2 stores with optional filters for live availability and minimum or maximum price in native currency."
           },
           {
             lead: "Verify variants and stock (get_product):",
@@ -752,7 +761,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
               "Store & country coverage",
               "Single region / groceries only",
               "Desktop browser only; breaks on anti-bot walls",
-              "Global Shopify & WooCommerce stores + 10 Amazon cart marketplaces"
+              "Shopify, WooCommerce, BigCommerce, Shopware 6 & Magento 2 stores + 10 Amazon cart marketplaces"
             ],
             [
               "Size & color stock check",
@@ -796,7 +805,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
         heading: "Security and privacy: why read-only cart permalinks matter",
         paragraphs: [
           "Handing credit cards or merchant passwords to an autonomous agent creates unnecessary risk. ShopCart MCP eliminates that surface completely by stopping at the merchant's official cart page.",
-          "All four tools carry read-only MCP annotations and never submit orders, collect shipping addresses, or store chat transcripts. Under the hood, the server strips HTML and invisible Unicode characters from third-party catalog text to defend against prompt injection and enforces DNS-pinned SSRF controls. Hosted accounts run in the EU (Google Cloud europe-west1)."
+          "All six tools carry read-only MCP annotations and never submit orders, collect shipping addresses, or store chat transcripts. Under the hood, the server strips HTML and invisible Unicode characters from third-party catalog text to defend against prompt injection and enforces DNS-pinned SSRF controls. Hosted accounts run in the EU (Google Cloud europe-west1)."
         ],
         takeaway:
           "Takeaway: Claude handles research and cart assembly, while privacy and final checkout remain 100 percent under your control."
@@ -824,13 +833,13 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
     sources: SOURCES_EN,
     limitationsLabel: "Limitations:",
     limitationsText:
-      "Full unauthenticated live catalog, stock, and variant verification applies to public Shopify and WooCommerce storefronts without login gates. On Amazon, automated checkout bots are restricted; ShopCart MCP supports official Amazon multi-item cart permalinks (/gp/aws/cart/add.html) across 10 marketplaces paired with web search or optional Keepa/PA-API keys. Password-protected B2B portals are not supported.",
+      getPlatformLimits("en"),
     faqHeading: "Frequently Asked Questions",
     faqs: [
       {
         question: "Can Claude shop for you?",
         answer:
-          "Yes — with ShopCart MCP connected, Claude can search public Shopify and WooCommerce stores live, verify sizes, stock, and prices, and hand you a ready-to-open browser cart link (plus official multi-item Amazon cart permalinks). For your safety, Claude never pays automatically: you review the cart and check out yourself."
+          "Yes — with ShopCart MCP connected, Claude can search public Shopify, WooCommerce, BigCommerce, Shopware 6, and Magento 2 stores live, verify sizes, stock, and prices, and hand you a ready-to-open browser cart link (plus official multi-item Amazon cart permalinks). For your safety, Claude never pays automatically: you review the cart and check out yourself."
       },
       {
         question: "Does Claude place orders or charge my card automatically with ShopCart MCP?",
@@ -845,7 +854,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
       {
         question: "Which online stores are supported?",
         answer:
-          "ShopCart MCP runs full live catalog, stock, and variant searches on thousands of public Shopify and WooCommerce storefronts worldwide across USD, EUR, GBP, CHF, and other currencies, and builds official multi-item cart permalinks across 10 Amazon marketplaces."
+          getPlatformSentence("en") + " " + getHandoffSentence("en")
       },
       {
         question: "How much does ShopCart MCP cost?",
@@ -885,13 +894,13 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
       "Yes: Even after standalone Instant Checkout was scaled back, connecting ChatGPT via ShopCart MCP builds verified multi-item browser carts globally.",
     tldrLabel: "Direct Answer:",
     tldrText:
-      "Yes — ChatGPT can create a real, verified shopping cart in 2026 using the open Model Context Protocol (MCP). Even after OpenAI scaled back standalone Instant Checkout, connecting ShopCart MCP (https://shopcart.wals.pro/mcp) lets ChatGPT check live stock, sizes, and prices on public Shopify and WooCommerce stores — plus official Amazon multi-item cart links — and return a strictly read-only browser cart link.",
+      "Yes — ChatGPT can create a real, verified shopping cart in 2026 using the open Model Context Protocol (MCP). Even after OpenAI scaled back standalone Instant Checkout, connecting ShopCart MCP (https://shopcart.wals.pro/mcp) lets ChatGPT check live stock, sizes, and prices on public Shopify, WooCommerce, BigCommerce, Shopware 6, and Magento 2 stores — plus official Amazon multi-item cart links — and return a strictly read-only cart link or verified product links.",
     seasonalNote: {
       label: "Seasonal Note (Black Friday Launch):",
       text: "Through December 6, 2026, every signed-in hosted ShopCart MCP account automatically receives 500 free tool calls/day for holiday gift and sale shopping — no credit card required."
     },
     intro:
-      "Most web results still claim ChatGPT can only draft text grocery lists or shop through one US-only delivery app. In 2026, ChatGPT supports custom OAuth 2.1 MCP connectors — letting your assistant check live inventory and hand you a ready-to-open shopping cart for any public Shopify or WooCommerce brand in seconds.",
+      "Most web results still claim ChatGPT can only draft text grocery lists or shop through one US-only delivery app. In 2026, ChatGPT supports custom OAuth 2.1 MCP connectors — letting your assistant check live inventory and hand you a ready-to-open shopping cart for public Shopify brands in seconds, plus verified links on other store platforms.",
     takeawaysHeading: "Key Takeaways",
     takeaways: [
       {
@@ -900,7 +909,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
       },
       {
         lead: "Works globally beyond US-only grocery integrations.",
-        text: "Shop public Shopify and WooCommerce storefronts across EUR, USD, GBP, CHF, and CAD, or assemble official Amazon multi-item cart permalinks across 10 marketplaces."
+        text: "Shop public Shopify, WooCommerce, BigCommerce, Shopware 6, and Magento 2 storefronts across EUR, USD, GBP, CHF, and CAD, or assemble official Amazon multi-item cart permalinks across 10 marketplaces."
       },
       {
         lead: "Strictly read-only — zero checkout risk.",
@@ -939,7 +948,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
           },
           {
             lead: "Specify stores, products, sizes, and budget:",
-            text: "Ask ChatGPT to search one or more public Shopify or WooCommerce stores with a clear price ceiling (for example, under $50 or €80) and required sizes."
+            text: "Ask ChatGPT to search one or more public stores (Shopify, WooCommerce, BigCommerce, Shopware 6, or Magento 2) with a clear price ceiling (for example, under $50 or €80) and required sizes."
           },
           {
             lead: "Review live discounts and stock:",
@@ -972,7 +981,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
               "Store & geographic reach",
               "US-only groceries or stale product URLs",
               "Breaks on CAPTCHAs, cookie walls & layout shifts",
-              "Global public Shopify & WooCommerce stores + 10 Amazon cart marketplaces"
+              "Shopify, WooCommerce, BigCommerce, Shopware 6 & Magento 2 stores + 10 Amazon cart marketplaces"
             ],
             [
               "Checking size availability",
@@ -1015,7 +1024,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
       {
         heading: "Read-only architecture, EU hosting, and transparent pricing",
         paragraphs: [
-          "ShopCart MCP never stores payment cards, shipping addresses, merchant logins, or chat transcripts. All four tools are read-only, sanitized against prompt injection, and protected by DNS-pinned SSRF guards on EU infrastructure (Google Cloud europe-west1).",
+          "ShopCart MCP never stores payment cards, shipping addresses, merchant logins, or chat transcripts. All six tools are read-only, sanitized against prompt injection, and protected by DNS-pinned SSRF guards on EU infrastructure (Google Cloud europe-west1).",
           "The hosted Free tier includes 20 tool calls/day permanently with zero credit card required. Hosted Pro is €9/month (500 calls/day, cancel anytime), and the MIT open-source CLI (npx -y shopcart-mcp) is free and unlimited locally."
         ],
         takeaway:
@@ -1032,7 +1041,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
       },
       {
         name: "Ask ChatGPT for products, sizes, and budget",
-        text: "Name your preferred public Shopify or WooCommerce store domain (or Amazon URLs/ASINs), target items or budget, and exact sizes or colors."
+        text: "Name your preferred public store domain (or Amazon URLs/ASINs), target items or budget, and exact sizes or colors."
       },
       {
         name: "Review and check out on the merchant's website",
@@ -1044,13 +1053,13 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
     sources: SOURCES_EN,
     limitationsLabel: "Limitations:",
     limitationsText:
-      "Full unauthenticated live catalog, stock, and variant verification applies to public Shopify and WooCommerce storefronts without login gates. On Amazon, automated checkout bots are restricted; ShopCart MCP supports official Amazon multi-item cart permalinks (/gp/aws/cart/add.html) across 10 marketplaces paired with web search or optional Keepa/PA-API keys. Password-protected B2B portals are not supported.",
+      getPlatformLimits("en"),
     faqHeading: "Frequently Asked Questions",
     faqs: [
       {
         question: "Does ChatGPT use MCP?",
         answer:
-          "Yes. ChatGPT supports custom remote MCP connectors over Streamable HTTP with OAuth 2.1. Paste https://shopcart.wals.pro/mcp into ChatGPT's connector settings and sign in to unlock all four read-only shopping tools."
+          "Yes. ChatGPT supports custom remote MCP connectors over Streamable HTTP with OAuth 2.1. Paste https://shopcart.wals.pro/mcp into ChatGPT's connector settings and sign in to unlock all six read-only shopping tools."
       },
       {
         question: "Is AI shopping cart building with ShopCart MCP free and legit?",
@@ -1070,7 +1079,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
       {
         question: "How do online shopping cart permalinks work?",
         answer:
-          "Storefronts like Shopify (/cart/<variant_id>:<qty>?storefront=true), WooCommerce Store API carts, and Amazon (/gp/aws/cart/add.html) accept structured URL parameters that preload chosen products and quantities directly into your own browser session without needing third-party account access."
+          "Shopify (/cart/<variant_id>:<qty>?storefront=true) and Amazon (/gp/aws/cart/add.html) accept structured URL parameters that preload several products and quantities directly into your own browser session without needing third-party account access. WooCommerce and BigCommerce accept one add-to-cart link per item."
       },
       {
         question: "Can ChatGPT apply my discount code to the cart link?",
@@ -1917,8 +1926,8 @@ function renderFooter(config: AppConfig, lang: Lang): string {
     </div>
     <p class="disclaimer">${
       de
-        ? "für Shopify-, WooCommerce- und Amazon-Shops – unabhängiges Community-Tool, nicht verbunden mit Shopify Inc., Automattic Inc. (WooCommerce) oder Amazon.com, Inc. Alle Markennamen gehören ihren jeweiligen Eigentümern."
-        : "for Shopify, WooCommerce, and Amazon stores – independent community tool, not affiliated with Shopify Inc., Automattic Inc. (WooCommerce), or Amazon.com, Inc. All trademarks belong to their respective owners."
+        ? escapeHtml(getTrademarkDisclaimer("de"))
+        : escapeHtml(getTrademarkDisclaimer("en"))
     }</p>
   </div>
 </footer>`;
@@ -1992,6 +2001,40 @@ function renderTable(table: GuideTable): string {
       </tbody>
     </table>
   </div>`;
+}
+
+/** Shared "which stores, how far, which comfort features" block shown on every guide and the hub. */
+function renderPlatformBlock(lang: Lang): string {
+  const de = lang === "de";
+  const headers = getMatrixHeaders(lang);
+  const table: GuideTable = {
+    id: "platforms",
+    caption: de
+      ? "Unterstützte Shop-Systeme: Suche, Live-Prüfung und Übergabe an den Shop"
+      : "Supported store platforms: search, live verification, and handoff to the store",
+    headers: [headers.platform, headers.search, headers.live, headers.handoff],
+    rows: getPlatformRows(lang).map((row) => [
+      row.name,
+      row.search,
+      row.live,
+      `${row.handoffLabel}. ${row.handoff}`
+    ])
+  };
+  const comfortHtml = getComfortFeatures(lang)
+    .map((feature) => `<li><strong>${escapeHtml(feature.title)}:</strong> ${escapeHtml(feature.text)}</li>`)
+    .join("\n      ");
+
+  return `<section class="platform-block" aria-labelledby="platforms-heading">
+    <h2 id="platforms-heading">${
+      de ? "Welche Shops und Funktionen unterstützt ShopCart MCP?" : "Which stores and features does ShopCart MCP support?"
+    }</h2>
+    <p>${escapeHtml(getPlatformSentence(lang))} ${escapeHtml(getHandoffSentence(lang))}</p>
+    ${renderTable(table)}
+    <h3>${de ? "Komfort beim Einkaufen mit KI" : "Comfort features for shopping with AI"}</h3>
+    <ul>
+      ${comfortHtml}
+    </ul>
+  </section>`;
 }
 
 function renderSection(section: GuideSection): string {
@@ -2165,7 +2208,7 @@ export function renderGuidePage(config: AppConfig, guide: GuideDefinition): stri
 <meta name="twitter:title" content="${escapeHtml(guide.metaTitle)}">
 <meta name="twitter:description" content="${escapeHtml(guide.metaDescription)}">
 <meta name="twitter:image" content="${escapeHtml(ogImage)}">
-<link rel="stylesheet" href="/assets/guides.css?v=0.2.0">
+<link rel="stylesheet" href="/assets/guides.css?v=${encodeURIComponent(config.version)}">
 <script type="application/ld+json">${safeJsonLd(articleLd)}</script>
 <script type="application/ld+json">${safeJsonLd(faqLd)}</script>
 <script type="application/ld+json">${safeJsonLd(howToLd)}</script>
@@ -2221,6 +2264,8 @@ ${renderHeader(config, guide.lang, switchHref, guide.path)}
 
       ${sectionsHtml}
 
+      ${renderPlatformBlock(guide.lang)}
+
       <section class="sources-box" aria-labelledby="sources-heading">
         <h2 id="sources-heading">${escapeHtml(guide.sourcesHeading)}</h2>
         <p>${escapeHtml(guide.sourcesIntro)}</p>
@@ -2237,8 +2282,8 @@ ${renderHeader(config, guide.lang, switchHref, guide.path)}
 
       <div class="disclaimer">${
         de
-          ? "Hinweis: ShopCart MCP ist ein Angebot für Shopify-, WooCommerce- und Amazon-Shops – unabhängiges Community-Tool, nicht verbunden mit Shopify Inc., Automattic Inc. (WooCommerce) oder Amazon.com, Inc. Alle Markennamen gehören ihren jeweiligen Eigentümern."
-          : "Note: ShopCart MCP is built for Shopify, WooCommerce, and Amazon stores – independent community tool, not affiliated with Shopify Inc., Automattic Inc. (WooCommerce), or Amazon.com, Inc. All trademarks belong to their respective owners."
+          ? `Hinweis: ${escapeHtml(getTrademarkDisclaimer("de"))}`
+          : `Note: ${escapeHtml(getTrademarkDisclaimer("en"))}`
       }</div>
     </article>
 
@@ -2359,7 +2404,7 @@ export function renderGuidesOverviewPage(config: AppConfig, lang: Lang): string 
 <meta name="twitter:title" content="${escapeHtml(metaTitle)}">
 <meta name="twitter:description" content="${escapeHtml(metaDescription)}">
 <meta name="twitter:image" content="${escapeHtml(ogImage)}">
-<link rel="stylesheet" href="/assets/guides.css?v=0.2.0">
+<link rel="stylesheet" href="/assets/guides.css?v=${encodeURIComponent(config.version)}">
 <script type="application/ld+json">${safeJsonLd(collectionLd)}</script>
 </head>
 <body>
@@ -2373,8 +2418,8 @@ ${renderHeader(config, lang, `/guides?lang=${otherLang}`, "/guides")}
         <span class="kicker">${de ? "DE & EN Ratgeber-Übersicht" : "EN & DE Guide Hub"}</span>
         <span class="meta-date">${
           de
-            ? "Read-only · ChatGPT & Claude · Shopify, WooCommerce & Amazon-Cart-Links"
-            : "Read-only · ChatGPT & Claude · Shopify, WooCommerce & Amazon Cart Links"
+            ? "Read-only · ChatGPT & Claude · Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2 & mehr"
+            : "Read-only · ChatGPT & Claude · Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2 & more"
         }</span>
       </div>
 
@@ -2383,8 +2428,8 @@ ${renderHeader(config, lang, `/guides?lang=${otherLang}`, "/guides")}
       <div class="article-tldr">
         <p><strong>${de ? "Kurz gesagt:" : "TL;DR:"}</strong> ${
           de
-            ? "Alle Schritt-für-Schritt-Anleitungen für ShopCart MCP auf einen Blick: offene Warenkörbe in ChatGPT & Claude per MCP, Instant-Checkout-Alternative, ehrlicher Amazon-Cart-Permalink-Guide sowie technischer Shopify-MCP-Server-Vergleich — strikt read-only."
-            : "Every step-by-step guide for ShopCart MCP in one place: open MCP carts in ChatGPT & Claude, Instant Checkout alternative, honest Amazon multi-item cart permalink guide, and technical Shopify MCP server comparison — strictly read-only."
+            ? "Alle Schritt-für-Schritt-Anleitungen für ShopCart MCP auf einen Blick: offene Warenkörbe in ChatGPT & Claude per MCP, Instant-Checkout-Alternative, ehrlicher Amazon-Cart-Permalink-Guide sowie technischer Shopify-MCP-Server-Vergleich — strikt read-only. Unten findest du die Übersicht aller unterstützten Shop-Systeme: Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2 und jeder andere Shop per Produktlink."
+            : "Every step-by-step guide for ShopCart MCP in one place: open MCP carts in ChatGPT & Claude, Instant Checkout alternative, honest Amazon multi-item cart permalink guide, and technical Shopify MCP server comparison — strictly read-only. Below you will find the overview of all supported store platforms: Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2, and any other store via product link."
         }</p>
       </div>
 
@@ -2393,17 +2438,19 @@ ${renderHeader(config, lang, `/guides?lang=${otherLang}`, "/guides")}
         "claude",
         de ? "Direkt loslegen: 1-Klick-Start" : "Start Shopping in 1 Click",
         de
-          ? "Starte sofort mit einem fertigen Prompt in Claude oder ChatGPT — kostenlos im Free-Tarif (20 Calls/Tag dauerhaft gratis) oder lokal via MIT-CLI."
-          : "Launch a ready-to-use prompt directly in Claude or ChatGPT — free permanently on the Free tier (20 calls/day) or locally via the MIT CLI.",
+          ? `Starte sofort mit einem fertigen Prompt in Claude oder ChatGPT — kostenlos im Free-Tarif (${config.freeDailyLimit} Calls/Tag dauerhaft gratis) oder lokal via MIT-CLI.`
+          : `Launch a ready-to-use prompt directly in Claude or ChatGPT — free permanently on the Free tier (${config.freeDailyLimit} calls/day) or locally via the MIT CLI.`,
         starterPrompt
       )}
 
       ${primaryBlock}
 
+      ${renderPlatformBlock(lang)}
+
       <div class="disclaimer">${
         de
-          ? "für Shopify-, WooCommerce- und Amazon-Shops – unabhängiges Community-Tool, nicht verbunden mit Shopify Inc., Automattic Inc. (WooCommerce) oder Amazon.com, Inc. Alle Markennamen gehören ihren jeweiligen Eigentümern."
-          : "for Shopify, WooCommerce, and Amazon stores – independent community tool, not affiliated with Shopify Inc., Automattic Inc. (WooCommerce), or Amazon.com, Inc. All trademarks belong to their respective owners."
+          ? escapeHtml(getTrademarkDisclaimer("de"))
+          : escapeHtml(getTrademarkDisclaimer("en"))
       }</div>
     </div>
   </div>

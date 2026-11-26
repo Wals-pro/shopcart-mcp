@@ -124,12 +124,12 @@ export function createMcpbManifest(version) {
       "- `search_products` — Search public product catalogs across supported storefronts (or Amazon via optional PA-API/Keepa) with availability, price, and discount sorting (`discount_desc`, `price_asc`, `price_desc`).",
       "- `get_product` — Fetch sanitized product details, options, images, stock, compare-at discounts, and exact variant/SKU IDs or Amazon ASINs.",
       "- `get_store_policies` — Check Shopify shipping thresholds, delivery times, and return/refund policies via native Storefront MCP and public `/policies` pages.",
-      "- `create_cart_link` — Build verified browser cart/checkout permalinks (Shopify, WooCommerce, BigCommerce, Amazon) or verified direct product links (Shopware 6, Magento 2, JSON-LD) so you review and complete checkout yourself.",
+      "- `create_cart_link` — Build one verified cart link (Shopify, Amazon), one add-to-cart link per item (WooCommerce, BigCommerce), or verified direct product links (Shopware 6, Magento 2, JSON-LD) so you review and complete checkout yourself.",
       "",
-      "Includes built-in SSRF protection and prompt-injection sanitization. Independent open-source project by Wals.pro (not affiliated with any storefront platform vendor)."
+      "Includes built-in SSRF protection and prompt-injection sanitization. Independent open-source project by wals.pro, not affiliated with or endorsed by Shopify, WooCommerce (Automattic), Amazon, BigCommerce, Shopware, or Adobe (Magento)."
     ].join("\n"),
     author: {
-      name: "Wals.pro",
+      name: "wals.pro",
       email: "support@wals.pro",
       url: "https://wals.pro"
     },
@@ -173,7 +173,7 @@ export function createMcpbManifest(version) {
       {
         name: "inspect_store",
         description:
-          "Check whether an HTTPS online store URL is a supported public Shopify, WooCommerce, or Amazon storefront and return its platform, currency, country, WAF restrictions, and available catalog capabilities."
+          "Detect the platform of an HTTPS online store URL (Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2, or Universal JSON-LD) and return its currency, country, WAF restrictions, and available catalog capabilities."
       },
       {
         name: "list_collections",
@@ -183,12 +183,12 @@ export function createMcpbManifest(version) {
       {
         name: "search_products",
         description:
-          "Search a supported Shopify, WooCommerce, or Amazon storefront's public catalog by keyword or Shopify collection handle with optional availability, min/max price filters, sort_by (including discount_desc), and automatic discount/savings calculation."
+          "Search a supported storefront's public catalog (Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2, or Amazon with optional PA-API/Keepa) by keyword or Shopify collection handle with optional availability, min/max price filters, sort_by (including discount_desc), and automatic discount/savings calculation."
       },
       {
         name: "get_product",
         description:
-          "Retrieve product details, sanitized description text, options, images, and exact variant IDs (numeric IDs on Shopify/WooCommerce, 10-character ASINs on Amazon), prices, compare-at discounts, and availability."
+          "Retrieve product details, sanitized description text, options, images, and exact variant IDs (numeric IDs on Shopify/WooCommerce, 10-character ASINs on Amazon), prices, compare-at discounts, and availability. On any other store, pass a product URL to verify price and availability via Schema.org/JSON-LD."
       },
       {
         name: "get_store_policies",
@@ -198,7 +198,7 @@ export function createMcpbManifest(version) {
       {
         name: "create_cart_link",
         description:
-          "Generate a read-only browser cart or checkout permalink across Shopify, WooCommerce, and Amazon from exact variant IDs or ASINs and quantities, optionally verifying live availability via verify_handles."
+          "Generate the read-only handoff from exact variant IDs or ASINs and quantities: one cart link on Shopify and Amazon, one add-to-cart link per item on WooCommerce and BigCommerce, verified direct product links on Shopware 6, Magento 2, and JSON-LD stores. Optionally verifies live availability via verify_handles."
       }
     ],
     tools_generated: false,

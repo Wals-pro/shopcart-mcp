@@ -16,7 +16,7 @@ export function createShopcartMcpServer(
   const server = new McpServer(
     {
       name: "shopcart-mcp",
-      version: opts.version ?? "0.5.0"
+      version: opts.version ?? "0.5.1"
     },
     {
       instructions: SERVER_INSTRUCTIONS

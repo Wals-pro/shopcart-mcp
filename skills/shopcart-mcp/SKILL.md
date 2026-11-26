@@ -1,13 +1,15 @@
 ---
 name: shopcart-mcp
 description: >
-  Search public Shopify online stores, browse Sale/Black Friday/Bestseller collections,
-  inspect product details, real compare-at discounts, and exact variants (size, color,
-  stock, price), check shipping and return policies, and generate verified browser cart
-  links using the ShopCart MCP tools (inspect_store, list_collections, search_products,
-  get_product, get_store_policies, create_cart_link). Use whenever a user wants to find
-  products, hunt Black Friday deals, verify shipping/return rules, check stock, or build
-  a shopping cart link at one or more Shopify stores.
+  Search public online stores (Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2),
+  build official Amazon multi-item cart links, and verify price and availability on any
+  other store via Schema.org/JSON-LD. On Shopify stores also browse Sale/Black
+  Friday/Bestseller collections and check shipping and return policies. Inspect product
+  details, real compare-at discounts, and exact variants (size, color, stock, price),
+  and generate verified browser cart or product links using the ShopCart MCP tools
+  (inspect_store, list_collections, search_products, get_product, get_store_policies,
+  create_cart_link). Use whenever a user wants to find products, hunt deals, verify
+  shipping/return rules, check stock, or build a shopping cart link.
 metadata:
   author: wals.pro
   homepage: https://shopcart.wals.pro
@@ -19,8 +21,24 @@ metadata:
 
 # ShopCart MCP — Agentic Shopping Workflow
 
-You have access to **ShopCart MCP**, an independent read-only shopping assistant
-for public Shopify storefronts (not affiliated with Shopify Inc.).
+You have access to **ShopCart MCP**, an independent read-only shopping assistant by
+wals.pro for public online stores (not affiliated with or endorsed by Shopify,
+WooCommerce (Automattic), Amazon, BigCommerce, Shopware, or Adobe (Magento)).
+
+## Platform Reality (Be Honest About the Handoff)
+
+| Platform | Search & live data | Handoff from `create_cart_link` |
+| --- | --- | --- |
+| Shopify | Full live search, variants, stock, discounts, collections, policies | One cart link for the whole cart (up to 20 line items) |
+| WooCommerce | Live search, variations, stock (Store API v1) | One add-to-cart link per item (`cart_url` + `additional_cart_links`) |
+| BigCommerce | Live search, variants, availability | One add-to-cart link per product (`cart_url` + `additional_cart_links`) |
+| Amazon (10 marketplaces) | Only with operator-provided Keepa/PA-API keys; otherwise use ASINs from shared URLs or web search | One official multi-item link (`/gp/aws/cart/add.html`) |
+| Shopware 6 | Live search, variants, availability | Verified direct product links |
+| Magento 2 / Adobe Commerce | Live search, stock, tier discounts (GraphQL) | Verified direct product links |
+| Any other store | No catalog search; `get_product` on a product URL verifies price, currency, availability, EAN/GTIN (Schema.org/JSON-LD) | Verified direct product link |
+
+`list_collections` and `get_store_policies` work on Shopify stores only and return a
+graceful notice elsewhere.
 
 If the ShopCart MCP tools are not connected yet, instruct the user to either:
 - **Hosted (Claude.ai, ChatGPT, Perplexity, Poke, Manus, Mistral, Notion):** Connect Remote MCP URL `https://shopcart.wals.pro/mcp` (OAuth 2.1).
@@ -29,7 +47,7 @@ If the ShopCart MCP tools are not connected yet, instruct the user to either:
 ## Tool Sequence (Follow This Order)
 
 1. **`inspect_store(store_url)`** — Call first whenever a user names a store you have not checked in this conversation.
-   - Confirms the domain is a supported Shopify store and returns its canonical `origin`, `currency`, `country`, and whether `wafRestricted` is true.
+   - Detects the platform (Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2, or Universal JSON-LD) and returns its canonical `origin`, `currency`, `country`, and whether `wafRestricted` is true.
    - If `wafRestricted` is true, always pass a non-empty `query` to `search_products` (browsing without a query requires `/products.json`, which WAFs often block).
 
 2. **`list_collections(store_url, limit?, deals_only?)`** — Discover public collections and automatically highlight Sale, Black Friday, Outlet, Bestseller, Bundle, and Advent calendar collections.

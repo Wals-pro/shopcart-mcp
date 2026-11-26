@@ -1,5 +1,6 @@
 import type { AppConfig } from "../config.js";
 import { escapeHtml, type Lang } from "../auth/pages.js";
+import { getTrademarkDisclaimer } from "./platforms.js";
 
 function renderLegalShell(lang: Lang, title: string, path: string, bodyHtml: string): string {
   const de = lang === "de";
@@ -79,8 +80,8 @@ Support &amp; Datenschutzanfragen: <a href="mailto:support@wals.pro">support@wal
 <ul>
   <li><strong>Konto &amp; OAuth-2.1-Authentifizierung:</strong> Passwortloser E-Mail-Login per einmaligem 6-stelligen Code und Magic Link (ausschließlich als <code>HMAC-SHA-256</code>-Hash mit 10 Minuten TTL gespeichert, keine Passwörter) sowie kryptografische Hashes (<code>SHA-256</code>) von OAuth-Access-/Refresh-Tokens (niemals Klartext-Tokens), um Verbindungen mit KI-Clients (z. B. Claude, ChatGPT, Cursor) abzusichern.</li>
   <li><strong>Tool-Eingaben &amp; -Ausgaben:</strong> Vom Nutzer übergebene öffentliche Shop-URLs, Suchbegriffe, Produkthandles und Varianten-IDs werden in Echtzeit per HTTPS-GET an den jeweils angefragten öffentlichen Online-Shop weitergeleitet, um Katalogdaten zu normalisieren und Warenkorb-Links zu erzeugen. Wir speichern <strong>keine</strong> Chat-Verläufe, keine Lieferadressen, keine Shop-Logins und keine Zahlungsdaten.</li>
-  <li><strong>Nutzungszähler &amp; Billing:</strong> Pro Konto wird ein rein numerischer Tageszähler (<code>tool_calls</code> pro Tag) zur Einhaltung des Free-/Pro-Tageskontingents geführt. Bei Abschluss eines Pro-Abos erfolgt die Zahlungsabwicklung ausschließlich über <strong>Stripe</strong>; bei Wals.pro werden lediglich die Stripe-Customer-ID, Subscription-ID und der Abo-Status gespeichert (keine Kreditkarten- oder Bankdaten).</li>
-  <li><strong>Lokaler Open-Source-Modus (<code>npx -y shopcart-mcp</code>):</strong> Läuft zu 100 % lokal über <code>stdio</code> auf dem Gerät des Nutzers — <strong>null Datenübertragung an Wals.pro, null Telemetrie, kein Konto erforderlich</strong>.</li>
+  <li><strong>Nutzungszähler &amp; Billing:</strong> Pro Konto wird ein rein numerischer Tageszähler (<code>tool_calls</code> pro Tag) zur Einhaltung des Free-/Pro-Tageskontingents geführt. Bei Abschluss eines Pro-Abos erfolgt die Zahlungsabwicklung ausschließlich über <strong>Stripe</strong>; bei wals.pro werden lediglich die Stripe-Customer-ID, Subscription-ID und der Abo-Status gespeichert (keine Kreditkarten- oder Bankdaten).</li>
+  <li><strong>Lokaler Open-Source-Modus (<code>npx -y shopcart-mcp</code>):</strong> Läuft zu 100 % lokal über <code>stdio</code> auf dem Gerät des Nutzers — <strong>null Datenübertragung an wals.pro, null Telemetrie, kein Konto erforderlich</strong>.</li>
 </ul>
 
 <h2>3. Empfänger &amp; Auftragsverarbeiter</h2>
@@ -106,7 +107,7 @@ Support &amp; Datenschutzanfragen: <a href="mailto:support@wals.pro">support@wal
 <h2>6. UTM-Attribution &amp; Affiliate-/Partner-Links (Transparenzhinweis)</h2>
 <p>Von ShopCart erzeugte Produkt- und Warenkorb-Links enthalten im gehosteten Modus standardmäßig nicht-personenbezogene UTM-Parameter (<code>utm_source=shopcart.wals.pro</code>, <code>utm_medium=ai_mcp</code>, <code>utm_campaign=shopcart_mcp</code>), damit Händler KI-vermittelte Besuche in ihren Shop-Analysen zuordnen können (in der lokalen OSS-CLI optional abschaltbar via <code>SHOPCART_DISABLE_UTM=1</code>). Für teilnehmende Partner-Shops oder Produkt-Feeds (z. B. über Affiliate-Netzwerke wie Awin, Impact, Sovrn Commerce, Direktpartnerprogramme oder das Amazon-PartnerNet) können Links zusätzlich Partner- oder Affiliate-Parameter enthalten. Solche monetarisierten Links werden in jeder MCP-Antwort ausdrücklich mit <code>affiliate_disclosure: true</code> gekennzeichnet (§ 5a UWG, § 6 DDG, ECG, FTC 16 CFR Part 255). Beim Klick auf einen Affiliate-Link können das jeweilige Netzwerk oder der Händler eigene Zuordnungs-Cookies gemäß deren Datenschutzerklärung setzen; Wals Professional Services GmbH erhält keine persönlichen Bestell- oder Zahlungsdaten. <strong>Amazon-PartnerNet-Hinweis:</strong> Als Amazon-Partner verdient Wals Professional Services GmbH an qualifizierten Verkäufen — für dich entstehen dadurch keine Mehrkosten.</p>
 
-<div class="disclaimer">Unabhängiges Community-Tool für Shopify-Shops — nicht verbunden mit oder unterstützt von Shopify Inc. Alle Markennamen gehören ihren jeweiligen Eigentümern.</div>
+<div class="disclaimer">${escapeHtml(getTrademarkDisclaimer("de"))}</div>
 `
     : `
 <h1>Privacy Policy — ShopCart MCP</h1>
@@ -120,8 +121,8 @@ Support &amp; privacy requests: <a href="mailto:support@wals.pro">support@wals.p
 <ul>
   <li><strong>Account &amp; OAuth 2.1 Authentication:</strong> Passwordless email sign-in via single-use 6-digit code and Magic Link (stored strictly as <code>HMAC-SHA-256</code> hashes with a 10-minute TTL — zero passwords stored), plus cryptographic hashes (<code>SHA-256</code>) of OAuth access/refresh tokens (never plaintext tokens) used strictly to authenticate your AI clients (such as Claude, ChatGPT, or Cursor).</li>
   <li><strong>Tool Inputs &amp; Outputs:</strong> Public store URLs, search keywords, product handles, and variant IDs you pass to tools are forwarded live over HTTPS GET to the requested public online store to normalize catalog metadata and build browser cart links. We do <strong>not</strong> store chat transcripts, shipping addresses, merchant store logins, or payment credentials.</li>
-  <li><strong>Usage Counters &amp; Billing:</strong> A numeric daily tool-call counter per account is stored to enforce Free/Pro daily quotas. If you upgrade to Pro, payment processing is handled solely by <strong>Stripe</strong>; Wals.pro stores only your Stripe Customer ID, Subscription ID, and subscription status (zero credit card or bank details).</li>
-  <li><strong>Local Open-Source Mode (<code>npx -y shopcart-mcp</code>):</strong> Runs 100% locally over <code>stdio</code> on your machine — <strong>zero data sent to Wals.pro, zero telemetry, no account required</strong>.</li>
+  <li><strong>Usage Counters &amp; Billing:</strong> A numeric daily tool-call counter per account is stored to enforce Free/Pro daily quotas. If you upgrade to Pro, payment processing is handled solely by <strong>Stripe</strong>; wals.pro stores only your Stripe Customer ID, Subscription ID, and subscription status (zero credit card or bank details).</li>
+  <li><strong>Local Open-Source Mode (<code>npx -y shopcart-mcp</code>):</strong> Runs 100% locally over <code>stdio</code> on your machine — <strong>zero data sent to wals.pro, zero telemetry, no account required</strong>.</li>
 </ul>
 
 <h2>3. Recipients &amp; Subprocessors</h2>
@@ -147,7 +148,7 @@ Support &amp; privacy requests: <a href="mailto:support@wals.pro">support@wals.p
 <h2>6. UTM Attribution &amp; Affiliate / Partner Links Disclosure</h2>
 <p>Product and cart links generated in hosted mode include non-personal UTM attribution parameters by default (<code>utm_source=shopcart.wals.pro</code>, <code>utm_medium=ai_mcp</code>, <code>utm_campaign=shopcart_mcp</code>) so merchants can recognize AI-assisted referrals in storefront analytics (optional opt-out in the local OSS CLI via <code>SHOPCART_DISABLE_UTM=1</code>). For participating merchants or partner product feeds (such as Awin, Impact, Sovrn Commerce, direct merchant referral programs, or Amazon Associates / PartnerNet), links may include affiliate tracking tags or deeplinks. Whenever a monetized affiliate link is returned, MCP tool outputs explicitly set <code>affiliate_disclosure: true</code> in compliance with EU/DACH transparency laws and US FTC Endorsement Guides (16 CFR Part 255). Clicking an affiliate link may allow the respective affiliate network or merchant to set attribution cookies under its own privacy policy; Wals Professional Services GmbH never receives personal shopper checkout details. <strong>Amazon Associates Disclosure:</strong> As an Amazon Associate, Wals Professional Services GmbH earns from qualifying purchases at no additional cost to you.</p>
 
-<div class="disclaimer">Independent community tool for Shopify stores — not affiliated with or endorsed by Shopify Inc. All trademarks belong to their respective owners.</div>
+<div class="disclaimer">${escapeHtml(getTrademarkDisclaimer("en"))}</div>
 `;
 
   return renderLegalShell(lang, de ? "Datenschutz" : "Privacy Policy", "/privacy", body);
@@ -161,7 +162,7 @@ export function renderTermsPage(config: AppConfig, lang: Lang): string {
 <p class="updated">Stand: 25.11.2026 · Betreiber: Wals Professional Services GmbH (Wien, Österreich)</p>
 
 <h2>1. Leistungsbeschreibung (Nur-Lesen)</h2>
-<p>ShopCart MCP (${escapeHtml(config.appOrigin)}) ist ein eigenständiger Katalog-Normalisierer, Varianten-Prüfer und Warenkorb-Link-Generator für öffentliche Online-Shops (erster Adapter: öffentliche Shopify-Storefronts). Alle MCP-Tools arbeiten <strong>rein lesend</strong>: ShopCart MCP löst niemals Bestellungen aus, nimmt keine Zahlungen entgegen und greift auf keine Händler-Admin-Konten zu. Kaufverträge kommen ausschließlich direkt zwischen dir und dem jeweiligen Händler im Browser zustande.</p>
+<p>ShopCart MCP (${escapeHtml(config.appOrigin)}) ist ein eigenständiger Katalog-Normalisierer, Varianten-Prüfer und Warenkorb-Link-Generator für öffentliche Online-Shops (Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2, Amazon-Warenkorb-Links sowie beliebige Shops mit Schema.org/JSON-LD-Produktdaten). Alle MCP-Tools arbeiten <strong>rein lesend</strong>: ShopCart MCP löst niemals Bestellungen aus, nimmt keine Zahlungen entgegen und greift auf keine Händler-Admin-Konten zu. Kaufverträge kommen ausschließlich direkt zwischen dir und dem jeweiligen Händler im Browser zustande.</p>
 
 <h2>2. Tarife, Kontingente &amp; Open-Source-Lizenz</h2>
 <ul>
@@ -171,7 +172,7 @@ export function renderTermsPage(config: AppConfig, lang: Lang): string {
 </ul>
 
 <h2>3. Zulässige Nutzung</h2>
-<p>Untersagt sind automatisiertes Massen-Scraping, Umgehung technischer Schutzmechanismen, Angriffe auf interne Netze/Metadaten-Endpunkte sowie missbräuchliche Umgehung von Tageskontingenten. Wals.pro darf Konten bei Missbrauch sperren.</p>
+<p>Untersagt sind automatisiertes Massen-Scraping, Umgehung technischer Schutzmechanismen, Angriffe auf interne Netze/Metadaten-Endpunkte sowie missbräuchliche Umgehung von Tageskontingenten. wals.pro darf Konten bei Missbrauch sperren.</p>
 
 <h2>4. Verfügbarkeit &amp; Haftung</h2>
 <p>Katalogdaten, Preise und Verfügbarkeiten stammen direkt von dritten Online-Shops und können sich jederzeit ändern. Wir übernehmen keine Gewähr für Preis- oder Bestandsangaben von Drittanbietern. Im Übrigen haftet die Wals Professional Services GmbH nach Maßgabe des österreichischen Rechts (Vorsatz und grobe Fahrlässigkeit unbeschränkt).</p>
@@ -182,14 +183,14 @@ export function renderTermsPage(config: AppConfig, lang: Lang): string {
 <h2>6. Kontakt</h2>
 <p>Support: <a href="mailto:support@wals.pro">support@wals.pro</a> · <a href="/privacy?lang=de">Datenschutzerklärung</a> · <a href="https://wals.pro/policies/legal-notice" target="_blank" rel="noopener">Impressum</a>.</p>
 
-<div class="disclaimer">Unabhängiges Community-Tool für Shopify-Shops — nicht verbunden mit oder unterstützt von Shopify Inc.</div>
+<div class="disclaimer">${escapeHtml(getTrademarkDisclaimer("de"))}</div>
 `
     : `
 <h1>Terms of Service — ShopCart MCP</h1>
 <p class="updated">Last updated: 2026-11-25 · Operator: Wals Professional Services GmbH (Vienna, Austria)</p>
 
 <h2>1. Service Description (Strictly Read-Only)</h2>
-<p>ShopCart MCP (${escapeHtml(config.appOrigin)}) is an independent storefront catalog normalizer, variant availability checker, and deterministic cart link generator for public online stores (initial adapter: public Shopify storefronts). All MCP tools are <strong>strictly read-only</strong>: ShopCart MCP never places orders, never processes checkout payments, and never accesses merchant admin accounts. Any purchase takes place solely between you and the respective merchant in your browser.</p>
+<p>ShopCart MCP (${escapeHtml(config.appOrigin)}) is an independent storefront catalog normalizer, variant availability checker, and deterministic cart link generator for public online stores (Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2, Amazon cart links, and any store with Schema.org/JSON-LD product data). All MCP tools are <strong>strictly read-only</strong>: ShopCart MCP never places orders, never processes checkout payments, and never accesses merchant admin accounts. Any purchase takes place solely between you and the respective merchant in your browser.</p>
 
 <h2>2. Plans, Quotas &amp; Open-Source License</h2>
 <ul>
@@ -199,7 +200,7 @@ export function renderTermsPage(config: AppConfig, lang: Lang): string {
 </ul>
 
 <h2>3. Acceptable Use</h2>
-<p>You agree not to abuse the service for high-volume automated scraping, attempt to probe private networks or metadata endpoints, bypass rate limits or quotas, or disrupt third-party storefronts. Wals.pro may suspend accounts engaged in abuse.</p>
+<p>You agree not to abuse the service for high-volume automated scraping, attempt to probe private networks or metadata endpoints, bypass rate limits or quotas, or disrupt third-party storefronts. wals.pro may suspend accounts engaged in abuse.</p>
 
 <h2>4. Third-Party Data &amp; Liability</h2>
 <p>Product titles, prices, discounts, and stock availability come live from third-party public storefronts and may change at any time. Always verify final prices and items on the merchant's cart page before purchasing. Liability is governed by Austrian law.</p>
@@ -210,7 +211,7 @@ export function renderTermsPage(config: AppConfig, lang: Lang): string {
 <h2>6. Contact</h2>
 <p>Support: <a href="mailto:support@wals.pro">support@wals.pro</a> · <a href="/privacy?lang=en">Privacy Policy</a> · <a href="https://wals.pro/policies/legal-notice" target="_blank" rel="noopener">Legal Notice</a>.</p>
 
-<div class="disclaimer">Independent community tool for Shopify stores — not affiliated with or endorsed by Shopify Inc.</div>
+<div class="disclaimer">${escapeHtml(getTrademarkDisclaimer("en"))}</div>
 `;
 
   return renderLegalShell(lang, de ? "Nutzungsbedingungen" : "Terms of Service", "/terms", body);

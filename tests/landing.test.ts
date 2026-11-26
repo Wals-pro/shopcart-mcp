@@ -14,6 +14,13 @@ import {
   getWishes
 } from "../src/web/content.js";
 import { getSimScenarios, resolveDemoMedia } from "../src/web/landing.js";
+import {
+  AMAZON_MARKETPLACES,
+  PLATFORM_NAMES,
+  getComfortFeatures,
+  getPlatformRows,
+  renderPlatformMatrixMarkdown
+} from "../src/web/platforms.js";
 
 function makeLandingApp(extraEnv: Record<string, string> = {}) {
   const config = loadConfig({
@@ -54,7 +61,16 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
     expect(de.text).toContain("/terms?lang=de");
 
     const en = await request(app).get("/?lang=en").expect(200);
-    expect(en.text).toContain("Independent community tool for Shopify stores");
+    expect(en.text).toContain(
+      "Independent open-source tool by wals.pro, not affiliated with or endorsed by Shopify, WooCommerce (Automattic), Amazon, BigCommerce, Shopware, or Adobe (Magento)."
+    );
+    expect(de.text).toContain(
+      "Unabhängiges Open-Source-Tool von wals.pro, nicht verbunden mit oder unterstützt von Shopify, WooCommerce (Automattic), Amazon, BigCommerce, Shopware oder Adobe (Magento)."
+    );
+    // No outdated "Shopify only" positioning anywhere on the landing page
+    for (const html of [de.text, en.text]) {
+      expect(html).not.toMatch(/community tool for Shopify|Community-Tool für Shopify|only Shopify|nur Shopify-Shops/i);
+    }
 
     const css = await request(app).get("/assets/landing.css").expect(200);
     expect(css.headers["content-type"]).toContain("text/css");
@@ -233,6 +249,81 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
     expect(en.text).toContain('data-copied-label="Copied ✓"');
   });
 
+  it("shows all 7 connected platforms in an honest capability matrix plus the comfort features (DE + EN)", async () => {
+    const { app } = makeLandingApp();
+    for (const lang of ["de", "en"] as const) {
+      const res = await request(app).get(`/?lang=${lang}`).expect(200);
+      const html = res.text;
+
+      // Hero strip names every platform and links to the matrix
+      const heroStrip = html.slice(html.indexOf('class="hero-platforms"'), html.indexOf('id="shops"'));
+      for (const name of PLATFORM_NAMES) {
+        expect(heroStrip).toContain(`>${escapeHtml(name)}<`);
+      }
+
+      // Matrix section: 7 rows, each with platform name, handoff badge and honest handoff text
+      const shops = html.slice(html.indexOf('id="shops"'), html.indexOf('id="comfort"'));
+      const rows = getPlatformRows(lang);
+      expect(rows.map((row) => row.id)).toEqual([
+        "shopify",
+        "woocommerce",
+        "bigcommerce",
+        "amazon",
+        "shopware",
+        "magento",
+        "universal"
+      ]);
+      expect(shops.match(/class="matrix-row"/g) ?? []).toHaveLength(7);
+      for (const row of rows) {
+        expect(shops).toContain(escapeHtml(row.name));
+        expect(shops).toContain(escapeHtml(row.handoffLabel));
+        expect(shops).toContain(`handoff-${row.handoffLevel}`);
+      }
+      // Honest handoff levels: only Shopify and Amazon get one link for the whole cart
+      expect(rows.filter((row) => row.handoffLevel === "cart").map((row) => row.id)).toEqual(["shopify"]);
+      expect(rows.filter((row) => row.handoffLevel === "amazon").map((row) => row.id)).toEqual(["amazon"]);
+      expect(rows.filter((row) => row.handoffLevel === "sequence").map((row) => row.id)).toEqual([
+        "woocommerce",
+        "bigcommerce"
+      ]);
+      expect(rows.filter((row) => row.handoffLevel === "product").map((row) => row.id)).toEqual([
+        "shopware",
+        "magento",
+        "universal"
+      ]);
+      expect(shops).toContain(AMAZON_MARKETPLACES);
+      expect(AMAZON_MARKETPLACES.split(", ")).toHaveLength(10);
+
+      // Comfort section: all six features visible
+      const comfort = html.slice(html.indexOf('id="comfort"'), html.indexOf('id="examples"'));
+      const features = getComfortFeatures(lang);
+      expect(features.map((f) => f.id)).toEqual(["policies", "deals", "connect", "desktop", "login", "readonly"]);
+      for (const feature of features) {
+        expect(comfort).toContain(escapeHtml(feature.title));
+      }
+
+      // Developer section documents all six live tools
+      for (const tool of [
+        "inspect_store",
+        "list_collections",
+        "search_products",
+        "get_product",
+        "get_store_policies",
+        "create_cart_link"
+      ]) {
+        expect(html).toContain(tool);
+      }
+      // Strict CSP still holds for the new sections
+      expect(shops + comfort).not.toMatch(/ style="| on[a-z]+="|<style/);
+      // Team-Direktive 8 & brand spelling
+      expect(html).not.toMatch(/DataForSEO|Suchvolumen|search volume/i);
+      expect(html).not.toMatch(/Wals\.pro|WALS\.PRO/);
+    }
+
+    const md = renderPlatformMatrixMarkdown("en");
+    expect(md.split("\n").filter((line) => line.startsWith("| ")).length).toBe(9); // header + separator + 7 platform rows
+  });
+
   it("embeds Schema.org JSON-LD (SoftwareApplication, FAQPage, HowTo) in sync with the visible FAQ and steps", async () => {
     const { app, config } = makeLandingApp();
 
@@ -252,8 +343,15 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
 
       const faqPage = byType("FAQPage")!;
       const faq = getFaq(config, lang);
-      expect(faq).toHaveLength(6);
-      expect(faqPage.mainEntity).toHaveLength(6);
+      expect(faq).toHaveLength(8);
+      expect(faqPage.mainEntity).toHaveLength(8);
+      // SoftwareApplication lists every connected platform and the comfort features
+      for (const row of getPlatformRows(lang)) {
+        expect(app_.featureList.some((f: string) => f.startsWith(`${row.name}:`))).toBe(true);
+      }
+      for (const feature of getComfortFeatures(lang)) {
+        expect(app_.featureList).toContain(feature.title);
+      }
       faq.forEach((item, idx) => {
         expect(faqPage.mainEntity[idx]["@type"]).toBe("Question");
         expect(faqPage.mainEntity[idx].name).toBe(item.q);

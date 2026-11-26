@@ -104,6 +104,8 @@ body {
   gap: 8px;
   color: var(--walspro-text);
   text-decoration: none;
+  white-space: nowrap;
+  min-width: 0;
 }
 .brand img {
   width: 24px;
@@ -132,6 +134,8 @@ body {
   padding: 4px 10px;
   border: 1px solid var(--walspro-border);
   border-radius: 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .lang:hover {
   color: var(--walspro-text);
@@ -185,12 +189,21 @@ h1 {
   gap: 12px;
   margin: 4px 0;
 }
-.consent-row span:first-child { color: var(--walspro-muted); }
+.consent-row span:first-child { color: var(--walspro-muted); flex-shrink: 0; }
 .consent-row span:last-child {
   font-weight: 600;
   text-align: end;
-  word-break: break-all;
+  min-width: 0;
+  /* Wrap at spaces and hyphens; only a single over-long token (e.g. a redirect host) may break. */
+  word-break: normal;
+  overflow-wrap: anywhere;
   color: var(--walspro-text);
+}
+@media (max-width: 420px) {
+  .auth-body { padding: 14px; }
+  .card { padding: 24px 20px; }
+  .brand { font-size: 14.5px; gap: 7px; }
+  .brand-sub { font-size: 12.5px; }
 }
 .banner {
   border-radius: 10px;

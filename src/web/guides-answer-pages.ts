@@ -8,6 +8,7 @@ import {
   UPDATED_ISO,
   type GuideDefinition
 } from "./guides-types.js";
+import { getPlatformLimits, getTrademarkDisclaimer } from "./platforms.js";
 
 export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
   {
@@ -54,7 +55,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
       {
         heading: "What happened to ChatGPT Instant Checkout in 2026?",
         paragraphs: [
-          "Standalone in-chat checkout proved hard to scale cleanly across millions of independent merchants: shipping rules, tax jurisdictions, returns, loyalty points, and regional payment methods such as SEPA, Klarna, or local cards vary widely from store to store.",
+          "Standalone in-chat checkout proved hard to scale cleanly across independent merchants of every size: shipping rules, tax jurisdictions, returns, loyalty points, and regional payment methods such as SEPA, Klarna, or local cards vary widely from store to store.",
           "As standalone Instant Checkout was scaled back in early 2026, most remaining AI shopping experiences gravitated toward closed ecosystems that require merchants to join a specific walled garden and often limit availability to US shoppers. That left European and global shoppers asking how to get real, pre-filled carts without surrendering checkout control."
         ],
         takeaway:
@@ -113,7 +114,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
       {
         heading: "How ShopCart MCP works inside ChatGPT, Claude, and other MCP clients",
         paragraphs: [
-          "ShopCart MCP exposes four read-only tools over the standard Model Context Protocol. Your AI calls them in sequence to verify live catalog data before assembling one clickable cart link."
+          "ShopCart MCP exposes six read-only tools over the standard Model Context Protocol. Four of them form the core path below; two more read sale collections and shipping and return policies on Shopify stores. Your AI calls them in sequence to verify live catalog data before assembling the cart link."
         ],
         orderedSteps: [
           {
@@ -156,7 +157,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
       },
       {
         name: "Describe your store, items, sizes, and budget",
-        text: "Ask your AI assistant to check live stock and prices on any public Shopify or WooCommerce store, or assemble an official Amazon multi-item cart permalink."
+        text: "Ask your AI assistant to check live stock and prices on a public Shopify, WooCommerce, BigCommerce, Shopware 6, or Magento 2 store, or assemble an official Amazon multi-item cart permalink."
       },
       {
         name: "Open the verified cart link and check out yourself",
@@ -168,7 +169,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
     sources: SOURCES_EN,
     limitationsLabel: "Limitations:",
     limitationsText:
-      "ShopCart MCP is intentionally read-only: it never executes one-click in-chat payments or logs into private merchant accounts. Full live catalog, variant, and stock checks work across public Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2, and Schema.org JSON-LD storefronts without login gates; on Amazon, ShopCart MCP supports official multi-item cart permalinks paired with AI web search or optional Keepa/PA-API keys.",
+      "ShopCart MCP is intentionally read-only: it never executes one-click in-chat payments or logs into private merchant accounts." + " " + getPlatformLimits("en"),
     faqHeading: "Frequently Asked Questions",
     faqs: [
       {
@@ -219,7 +220,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
     title: "ChatGPT Instant Checkout Alternative (2026): Offene Warenkörbe per MCP",
     metaTitle: "ChatGPT Instant Checkout Alternative (2026): Offenes MCP",
     metaDescription:
-      "Offene, EU-gehostete MCP-Alternative zu ChatGPT Instant Checkout: geprüfte Warenkörbe in ChatGPT & Claude für Shopify & WooCommerce — read-only.",
+      "Offene, EU-gehostete Alternative zu ChatGPT Instant Checkout: geprüfte Warenkörbe in ChatGPT und Claude für Shopify, WooCommerce, Amazon und mehr. Read-only.",
     cardSummary:
       "Seit OpenAI den eigenen Instant Checkout 2026 zurückgefahren hat, fehlen im DACH-Raum offene KI-Warenkörbe. So löst ein EU-gehosteter Read-Only-MCP-Server die Lücke.",
     tldrLabel: "Kurzantwort:",
@@ -243,7 +244,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
       },
       {
         lead: "Kein Händler-Onboarding für öffentliche Shops nötig.",
-        text: "Öffentliche Shopify- und WooCommerce-Shops funktionieren sofort mit Live-Bestandsprüfung; für Amazon stehen offizielle Multi-Artikel-Warenkorb-Links bereit."
+        text: "Öffentliche Shops auf Shopify, WooCommerce, BigCommerce, Shopware 6 und Magento 2 funktionieren sofort mit Live-Bestandsprüfung; für Amazon stehen offizielle Multi-Artikel-Warenkorb-Links bereit."
       }
     ],
     primaryAssistant: "chatgpt",
@@ -310,12 +311,12 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
           ]
         },
         takeaway:
-          "Fazit: ShopCart MCP verbindet DACH-Tauglichkeit, freie KI-Wahl und 100 % Zahlungshoheit im Browser."
+          "Fazit: ShopCart MCP verbindet DACH-Tauglichkeit, freie KI-Wahl und volle Zahlungshoheit im Browser."
       },
       {
         heading: "So baust du offene KI-Warenkörbe in vier Read-Only-Schritten",
         paragraphs: [
-          "ShopCart MCP stellt deiner KI vier klar abgegrenzte Lese-Werkzeuge über das offene Model Context Protocol bereit."
+          "ShopCart MCP stellt deiner KI sechs klar abgegrenzte Lese-Werkzeuge über das offene Model Context Protocol bereit. Vier davon bilden den Weg zum Warenkorb, zwei weitere lesen in Shopify-Shops Sale-Kollektionen sowie Versand- und Rückgaberegeln."
         ],
         orderedSteps: [
           {
@@ -341,7 +342,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
       {
         heading: "Datenschutz, Kosten und lokaler Open-Source-Betrieb",
         paragraphs: [
-          "Alle vier Werkzeuge sind technisch als rein lesend markiert und verarbeiten weder Kreditkarten noch Lieferadressen oder Shop-Passwörter. Ein integrierter Filter schützt deine KI vor versteckten Text-Injektionen in fremden Produktbeschreibungen, während DNS-gepinnte SSRF-Regeln interne Netze absichern.",
+          "Alle sechs Werkzeuge sind technisch als rein lesend markiert und verarbeiten weder Kreditkarten noch Lieferadressen oder Shop-Passwörter. Ein integrierter Filter schützt deine KI vor versteckten Text-Injektionen in fremden Produktbeschreibungen, während DNS-gepinnte SSRF-Regeln interne Netze absichern.",
           "Im gehosteten EU-Dienst sind 20 Abfragen pro Tag dauerhaft kostenlos (Pro optional 9 €/Monat für 500 Abfragen/Tag). Wer lokal arbeitet, nutzt npx -y shopcart-mcp unter MIT-Lizenz kostenlos, unbegrenzt und ohne Konto."
         ],
         takeaway:
@@ -358,7 +359,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
       },
       {
         name: "Shop, Produkte, Größen und Budget nennen",
-        text: "Formuliere im Chat, welche Artikel, Varianten und Mengen in einem öffentlichen Shopify- oder WooCommerce-Shop oder als Amazon-Warenkorb-Link zusammengestellt werden sollen."
+        text: "Formuliere im Chat, welche Artikel, Varianten und Mengen in einem öffentlichen Online-Shop (Shopify, WooCommerce, BigCommerce, Shopware 6 oder Magento 2) oder als Amazon-Warenkorb-Link zusammengestellt werden sollen."
       },
       {
         name: "Warenkorb-Link im Browser prüfen und bezahlen",
@@ -370,7 +371,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
     sources: SOURCES_DE,
     limitationsLabel: "Grenzen:",
     limitationsText:
-      "ShopCart MCP führt bewusst keinen automatischen In-Chat-Kauf aus und speichert keine Zugangsdaten. Die vollständige Live-Katalog-, Varianten- und Bestandsprüfung läuft auf öffentlichen Shopify-, WooCommerce-, BigCommerce-, Shopware-6-, Magento-2- und Schema.org-JSON-LD-Shops ohne Login-Pflicht; für Amazon unterstützt ShopCart MCP offizielle Multi-Artikel-Warenkorb-Links in Kombination mit KI-Websuche oder optionalen Keepa-/PA-API-Zugangsdaten.",
+      "ShopCart MCP führt bewusst keinen automatischen In-Chat-Kauf aus und speichert keine Zugangsdaten." + " " + getPlatformLimits("de"),
     faqHeading: "Häufige Fragen zur offenen ChatGPT-Instant-Checkout-Alternative",
     faqs: [
       {
@@ -497,7 +498,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
             [
               "Multi-item cart link",
               "Yes — official /gp/aws/cart/add.html across 10 marketplaces",
-              "Yes — verified Shopify /cart/<vid>:<qty> & WooCommerce Store API cart links",
+              "Shopify: yes, one verified /cart/<vid>:<qty> link. WooCommerce: one add-to-cart link per item",
               "Unreliable automated browser clicking"
             ],
             [
@@ -566,7 +567,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
     sources: AMAZON_SOURCES_EN,
     limitationsLabel: "Limitations & Trademark Notice:",
     limitationsText:
-      "Without optional Keepa or Amazon PA-API 5.0 credentials, ShopCart MCP does not scrape Amazon's live catalog or prices — always verify final prices and sellers on Amazon's confirmation page. Full live unauthenticated catalog, stock, and variant verification applies to public Shopify and WooCommerce storefronts. Independent tool for Shopify, WooCommerce, and Amazon — not affiliated with Shopify Inc., Automattic Inc. (WooCommerce), or Amazon.com, Inc.",
+      "Without optional Keepa or Amazon PA-API 5.0 credentials, ShopCart MCP does not scrape Amazon's live catalog or prices — always verify final prices and sellers on Amazon's confirmation page." + " " + getPlatformLimits("en"),
     faqHeading: "Frequently Asked Questions",
     faqs: [
       {
@@ -592,7 +593,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
       {
         question: "How is shopping on public Shopify and WooCommerce stores different?",
         answer:
-          "Public Shopify and WooCommerce storefronts expose structured product and Store API endpoints directly. ShopCart MCP can search their catalogs live, filter by budget and availability, inspect exact sizes/colors, and verify stock before building the cart link — with zero API keys required."
+          "Public Shopify and WooCommerce storefronts expose structured product and Store API endpoints directly. ShopCart MCP can search their catalogs live, filter by budget and availability, inspect exact sizes/colors, and verify stock before building the cart link — with zero API keys required. The same live search works on BigCommerce, Shopware 6, and Magento 2 stores. Shopify gets one link for the whole cart, WooCommerce and BigCommerce one add-to-cart link per item, Shopware 6 and Magento 2 verified product links."
       },
       {
         question: "Does ShopCart MCP log into my Amazon account or place orders?",
@@ -698,7 +699,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
             [
               "Multi-Artikel-Warenkorb-Link",
               "Ja — offizielles /gp/aws/cart/add.html über 10 Marktplätze",
-              "Ja — geprüfte Shopify- (/cart/<vid>:<qty>) & WooCommerce-Warenkorb-Links",
+              "Shopify: ja, ein geprüfter /cart/<vid>:<qty>-Link. WooCommerce: ein In-den-Warenkorb-Link pro Artikel",
               "Instabile Browser-Klicks"
             ],
             [
@@ -767,7 +768,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
     sources: AMAZON_SOURCES_DE,
     limitationsLabel: "Grenzen & Markenhinweis:",
     limitationsText:
-      "Ohne optionale Keepa- oder Amazon-PA-API-5.0-Zugangsdaten liest ShopCart MCP keinen Amazon-Live-Katalog aus — prüfe Endpreis und Verkäufer immer auf der offiziellen Amazon-Bestätigungsseite. Die vollständige unauthentifizierte Live-Katalog-, Varianten- und Bestandsprüfung gilt für öffentliche Shopify- und WooCommerce-Shops. Unabhängiges Tool für Shopify-, WooCommerce- und Amazon-Shops — nicht verbunden mit Shopify Inc., Automattic Inc. (WooCommerce) oder Amazon.com, Inc.",
+      "Ohne optionale Keepa- oder Amazon-PA-API-5.0-Zugangsdaten liest ShopCart MCP keinen Amazon-Live-Katalog aus — prüfe Endpreis und Verkäufer immer auf der offiziellen Amazon-Bestätigungsseite." + " " + getPlatformLimits("de"),
     faqHeading: "Häufige Fragen zu ChatGPT & Amazon-Warenkörben",
     faqs: [
       {
@@ -793,7 +794,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
       {
         question: "Was ist bei öffentlichen Shopify- und WooCommerce-Shops anders?",
         answer:
-          "Öffentliche Shopify- und WooCommerce-Shops stellen strukturierte Storefront- und Store-API-Daten direkt bereit. Dort sucht ShopCart MCP ohne API-Key live nach Produkten, Größen, Lagerbestand und Preisen und prüft den Warenkorb vorab."
+          "Öffentliche Shopify- und WooCommerce-Shops stellen strukturierte Storefront- und Store-API-Daten direkt bereit. Dort sucht ShopCart MCP ohne API-Key live nach Produkten, Größen, Lagerbestand und Preisen und prüft den Warenkorb vorab. Dieselbe Live-Suche funktioniert in BigCommerce-, Shopware-6- und Magento-2-Shops. Shopify bekommt einen Link für den ganzen Warenkorb, WooCommerce und BigCommerce einen In-den-Warenkorb-Link pro Artikel, Shopware 6 und Magento 2 geprüfte Produktlinks."
       },
       {
         question: "Loggt sich ShopCart MCP in mein Amazon-Konto ein?",
@@ -828,7 +829,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
       "Clear technical breakdown of the three Shopify MCP server categories in 2026 — Dev MCP, Storefront MCP / UCP, and ShopCart MCP — answering every setup and hosting question.",
     tldrLabel: "Direct Answer:",
     tldrText:
-      "In 2026, \"Shopify MCP server\" refers to three distinct categories: Shopify's @shopify/dev-mcp for coding and API docs, Shopify's per-store Storefront MCP / Universal Commerce Protocol (UCP at /api/ucp/mcp) for merchants, and ShopCart MCP for shoppers and cross-store AI agents. ShopCart MCP works immediately on any public Shopify or WooCommerce store with zero merchant setup — read-only, SSRF-hardened, and MIT open source.",
+      "In 2026, \"Shopify MCP server\" refers to three distinct categories: Shopify's @shopify/dev-mcp for coding and API docs, Shopify's per-store Storefront MCP / Universal Commerce Protocol (UCP at /api/ucp/mcp) for merchants, and ShopCart MCP for shoppers and cross-store AI agents. ShopCart MCP works immediately on any public Shopify, WooCommerce, BigCommerce, Shopware 6, or Magento 2 store with zero merchant setup — read-only, SSRF-hardened, and MIT open source.",
     intro:
       "Developers and AI builders searching for a Shopify MCP server in 2026 often mix up developer documentation tools, merchant-configured Storefront/UCP endpoints, admin API wrappers, and cross-store shopper connectors. This technical guide compares each option side by side and answers how to run or self-host an MCP server cleanly.",
     takeawaysHeading: "Key Takeaways",
@@ -839,7 +840,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
       },
       {
         lead: "Zero merchant setup for cross-store shopping.",
-        text: "ShopCart MCP works out of the box on public Shopify and WooCommerce stores (plus official Amazon cart permalinks) without asking merchants to install an app."
+        text: "ShopCart MCP works out of the box on public Shopify, WooCommerce, BigCommerce, Shopware 6, and Magento 2 stores (plus official Amazon cart permalinks) without asking merchants to install an app."
       },
       {
         lead: "Run locally via stdio or hosted via OAuth 2.1.",
@@ -891,7 +892,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
               "Store scope",
               "Shopify docs & schemas (no live shopper cart)",
               "Single merchant store configured by the store owner",
-              "Any public Shopify or WooCommerce store + official Amazon cart permalinks"
+              "Public Shopify, WooCommerce, BigCommerce, Shopware 6 & Magento 2 stores + Amazon cart links + any product URL via Schema.org/JSON-LD"
             ],
             [
               "Merchant setup required",
@@ -964,7 +965,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
       },
       {
         name: "Verify the connection with inspect_store",
-        text: "Ask your AI to inspect a public Shopify or WooCommerce storefront to confirm live currency, platform detection, and WAF status."
+        text: "Ask your AI to inspect any public storefront to confirm live currency, platform detection, and WAF status."
       },
       {
         name: "Search, verify variants, and generate a cart permalink",
@@ -976,7 +977,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
     sources: SHOPIFY_MCP_SOURCES_EN,
     limitationsLabel: "Limitations & Trademark Notice:",
     limitationsText:
-      "ShopCart MCP is a read-only shopper MCP server and does not replace Shopify's official Admin API or merchant-side UCP checkout integrations when you need private order management, customer PII, or inventory writes. Independent open-source project for Shopify, WooCommerce, and Amazon — not affiliated with Shopify Inc., Automattic Inc. (WooCommerce), or Amazon.com, Inc.",
+      "ShopCart MCP is a read-only shopper MCP server and does not replace Shopify's official Admin API or merchant-side UCP checkout integrations when you need private order management, customer PII, or inventory writes." + " " + getTrademarkDisclaimer("en"),
     faqHeading: "Frequently Asked Questions (Technical PAA)",
     faqs: [
       {
@@ -992,7 +993,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
       {
         question: "Does ChatGPT use MCP?",
         answer:
-          "Yes. ChatGPT supports custom remote MCP servers using Streamable HTTP and OAuth 2.1. Adding https://shopcart.wals.pro/mcp lets ChatGPT call ShopCart MCP's four read-only shopping tools directly."
+          "Yes. ChatGPT supports custom remote MCP servers using Streamable HTTP and OAuth 2.1. Adding https://shopcart.wals.pro/mcp lets ChatGPT call ShopCart MCP's six read-only shopping tools directly."
       },
       {
         question: "How do I run an MCP server?",
@@ -1007,7 +1008,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
       {
         question: "How does ShopCart MCP work alongside Shopify UCP and WooCommerce?",
         answer:
-          "ShopCart MCP uses a pluggable AdapterRegistry: it inspects public Shopify storefronts (even when a merchant has not enabled UCP), supports public WooCommerce Store API v1 shops, and builds official Amazon multi-item cart permalinks — all through the same four read-only MCP tools."
+          "ShopCart MCP uses a pluggable AdapterRegistry: it inspects public Shopify storefronts (even when a merchant has not enabled UCP), supports WooCommerce (Store API v1), BigCommerce, Shopware 6, and Magento 2 stores, builds official Amazon multi-item cart permalinks, and verifies any other product page via Schema.org/JSON-LD — all through the same six read-only MCP tools."
       }
     ],
     hreflang: {
@@ -1037,7 +1038,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
       "Technischer 4-Spalten-Vergleich aller Shopify-MCP-Server 2026 — Dev MCP, Storefront MCP / UCP und ShopCart MCP — inklusive Self-Hosting, ChatGPT- und Claude-Setup.",
     tldrLabel: "Kurzantwort:",
     tldrText:
-      "Im Jahr 2026 steht „Shopify MCP Server“ für drei unterschiedliche Werkzeuge: Shopifys @shopify/dev-mcp für Entwickler-Doku, Shopifys Storefront MCP / Universal Commerce Protocol (UCP unter /api/ucp/mcp) für einzelne Händler-Shops und ShopCart MCP für Käufer und shop-übergreifende KI-Agenten. ShopCart MCP läuft sofort auf jedem öffentlichen Shopify- oder WooCommerce-Shop ohne Händler-Setup — read-only, SSRF-gehärtet und MIT Open Source.",
+      "Im Jahr 2026 steht „Shopify MCP Server“ für drei unterschiedliche Werkzeuge: Shopifys @shopify/dev-mcp für Entwickler-Doku, Shopifys Storefront MCP / Universal Commerce Protocol (UCP unter /api/ucp/mcp) für einzelne Händler-Shops und ShopCart MCP für Käufer und shop-übergreifende KI-Agenten. ShopCart MCP läuft sofort in jedem öffentlichen Shop auf Shopify, WooCommerce, BigCommerce, Shopware 6 oder Magento 2 ohne Händler-Setup — read-only, SSRF-gehärtet und MIT Open Source.",
     intro:
       "Wer 2026 nach einem Shopify MCP Server sucht, stößt auf Entwickler-Tools, Händler-Endpunkte für Storefront/UCP, private Admin-API-Apps und Endkunden-Warenkorb-Server. Dieser technische Vergleich ordnet die Kategorien klar ein und zeigt, wie du einen MCP-Server lokal startest oder selbst hostest.",
     takeawaysHeading: "Das Wichtigste in Kürze",
@@ -1048,7 +1049,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
       },
       {
         lead: "Null Händler-Einrichtung bei öffentlichen Shops.",
-        text: "ShopCart MCP funktioniert sofort auf öffentlichen Shopify- und WooCommerce-Storefronts (plus offizielle Amazon-Warenkorb-Links) ohne App-Installation beim Händler."
+        text: "ShopCart MCP funktioniert sofort in öffentlichen Shops auf Shopify, WooCommerce, BigCommerce, Shopware 6 und Magento 2 (plus offizielle Amazon-Warenkorb-Links) ohne App-Installation beim Händler."
       },
       {
         lead: "Lokal per stdio oder gehostet per OAuth 2.1.",
@@ -1100,7 +1101,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
               "Shop-Reichweite",
               "Shopify-Doku & API-Schemas (kein Käufer-Warenkorb)",
               "Ein einzelner konfigurierter Händler-Shop",
-              "Jeder öffentliche Shopify- oder WooCommerce-Shop + Amazon-Cart-Links"
+              "Öffentliche Shops auf Shopify, WooCommerce, BigCommerce, Shopware 6 & Magento 2 + Amazon-Cart-Links + jeder Produktlink per Schema.org/JSON-LD"
             ],
             [
               "Händler-Setup nötig?",
@@ -1173,7 +1174,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
       },
       {
         name: "Verbindung mit inspect_store prüfen",
-        text: "Lass deine KI einen öffentlichen Shopify- oder WooCommerce-Shop prüfen, um Plattform, Währung und Firewall-Status auszulesen."
+        text: "Lass deine KI einen beliebigen öffentlichen Shop prüfen, um Plattform, Währung und Firewall-Status auszulesen."
       },
       {
         name: "Suchen, Varianten prüfen und Warenkorb-Link erstellen",
@@ -1185,7 +1186,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
     sources: SHOPIFY_MCP_SOURCES_DE,
     limitationsLabel: "Grenzen & Markenhinweis:",
     limitationsText:
-      "ShopCart MCP ist ein rein lesender Käufer-MCP-Server und ersetzt weder Shopifys offizielle Admin-API noch händlerseitige UCP-Checkout-Integrationen, wenn private Bestelldaten oder Schreibzugriffe benötigt werden. Unabhängiges Open-Source-Projekt für Shopify-, WooCommerce- und Amazon-Shops — nicht verbunden mit Shopify Inc., Automattic Inc. (WooCommerce) oder Amazon.com, Inc.",
+      "ShopCart MCP ist ein rein lesender Käufer-MCP-Server und ersetzt weder Shopifys offizielle Admin-API noch händlerseitige UCP-Checkout-Integrationen, wenn private Bestelldaten oder Schreibzugriffe benötigt werden." + " " + getTrademarkDisclaimer("de"),
     faqHeading: "Häufige technische Fragen zu Shopify MCP Servern",
     faqs: [
       {
@@ -1201,7 +1202,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
       {
         question: "Nutzt ChatGPT MCP?",
         answer:
-          "Ja. ChatGPT unterstützt Custom Remote MCP Server über Streamable HTTP mit OAuth 2.1. Nach dem Hinzufügen von https://shopcart.wals.pro/mcp kann ChatGPT alle vier Read-Only-Shopping-Tools von ShopCart MCP direkt nutzen."
+          "Ja. ChatGPT unterstützt Custom Remote MCP Server über Streamable HTTP mit OAuth 2.1. Nach dem Hinzufügen von https://shopcart.wals.pro/mcp kann ChatGPT alle sechs Read-Only-Shopping-Tools von ShopCart MCP direkt nutzen."
       },
       {
         question: "Wie betreibe oder starte ich einen MCP-Server?",
@@ -1216,7 +1217,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
       {
         question: "Wie passt ShopCart MCP mit Shopify UCP und WooCommerce zusammen?",
         answer:
-          "Über eine modulare AdapterRegistry unterstützt ShopCart MCP öffentliche Shopify-Storefronts (auch ohne aktiviertes Händler-UCP), öffentliche WooCommerce-Store-API-v1-Shops sowie offizielle Amazon-Multi-Artikel-Warenkorb-Links über dieselben vier Read-Only-Tools."
+          "Über eine modulare AdapterRegistry unterstützt ShopCart MCP öffentliche Shopify-Storefronts (auch ohne aktiviertes Händler-UCP), WooCommerce (Store API v1), BigCommerce, Shopware 6 und Magento 2, offizielle Amazon-Multi-Artikel-Warenkorb-Links sowie die Prüfung jeder anderen Produktseite per Schema.org/JSON-LD über dieselben sechs Read-Only-Tools."
       }
     ],
     hreflang: {

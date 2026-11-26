@@ -418,9 +418,12 @@ describe("OAuth 2.1 compliance & MCP auth", () => {
     // 2. Product-specific legal pages & security.txt
     const privacy = await request(app).get("/privacy?lang=en").expect(200);
     expect(privacy.text).toContain("Wals Professional Services GmbH");
-    expect(privacy.text).toContain("not affiliated with or endorsed by Shopify Inc.");
+    expect(privacy.text).toContain(
+      "not affiliated with or endorsed by Shopify, WooCommerce (Automattic), Amazon, BigCommerce, Shopware, or Adobe (Magento)"
+    );
     const terms = await request(app).get("/terms?lang=de").expect(200);
-    expect(terms.text).toContain("Shopify Inc.");
+    expect(terms.text).toContain("Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2");
+    expect(terms.text).toContain("nicht verbunden mit oder unterstützt von Shopify");
     const sec = await request(app).get("/.well-known/security.txt").expect(200);
     expect(sec.text).toContain("Contact: mailto:security@wals.pro");
 

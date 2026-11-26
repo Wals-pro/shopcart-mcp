@@ -113,9 +113,16 @@ describe("SEO & GEO shopping guide pages (/guides, 11 DE/EN detail routes, sitem
 
       // Brand & Team-Direktive 8 compliance: independent disclaimer, zero Odoo, zero internal audit metrics
       expect(html.toLowerCase()).not.toContain("odoo");
-      expect(html).toMatch(/nicht verbunden mit Shopify Inc\.|not affiliated with Shopify Inc\./);
-      expect(html).toMatch(/WooCommerce/);
-      expect(html).toMatch(/Amazon\.com, Inc\./);
+      expect(html).toMatch(
+        /nicht verbunden mit oder unterstützt von Shopify, WooCommerce \(Automattic\), Amazon, BigCommerce, Shopware oder Adobe \(Magento\)|not affiliated with or endorsed by Shopify, WooCommerce \(Automattic\), Amazon, BigCommerce, Shopware, or Adobe \(Magento\)/
+      );
+      // Every guide and the hub carry the shared platform & comfort block
+      expect(html).toContain('class="platform-block"');
+      for (const platform of ["Shopify", "WooCommerce", "BigCommerce", "Amazon", "Shopware 6", "Magento 2"]) {
+        expect(html).toContain(platform);
+      }
+      expect(html).toMatch(/get_store_policies|Rückgabe|returns/);
+      expect(html).not.toMatch(/Wals\.pro|WALS\.PRO/);
       expect(html).not.toMatch(/DataForSEO|Suchvolumen|search volume|54[.,]3\s*%|30[.,]4\s*%|1\.962/i);
 
       // Valid JSON-LD parsing
@@ -223,7 +230,8 @@ describe("SEO & GEO shopping guide pages (/guides, 11 DE/EN detail routes, sitem
 
     const shopifyCompEn = await request(app).get("/en/guides/shopify-mcp-server-comparison").expect(200);
     const theadCols = shopifyCompEn.text.match(/<th scope="col">/g) ?? [];
-    expect(theadCols).toHaveLength(4);
+    // 4-column comparison table + 4-column shared platform matrix
+    expect(theadCols).toHaveLength(8);
     expect(shopifyCompEn.text).toContain("@shopify/dev-mcp");
     expect(shopifyCompEn.text).toContain("/api/ucp/mcp");
     for (const paa of [
@@ -238,7 +246,7 @@ describe("SEO & GEO shopping guide pages (/guides, 11 DE/EN detail routes, sitem
 
     const shopifyCompDe = await request(app).get("/guides/shopify-mcp-server-vergleich").expect(200);
     const theadColsDe = shopifyCompDe.text.match(/<th scope="col">/g) ?? [];
-    expect(theadColsDe).toHaveLength(4);
+    expect(theadColsDe).toHaveLength(8);
   });
 
   it("links all 11 DE + EN guides from /guides and supports ?lang=de and ?lang=en", async () => {

@@ -191,7 +191,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "List Store Collections & Deals",
       description:
-        "List public collections from a Shopify storefront (GET /collections.json), returning handles, titles, and product counts, and automatically highlighting Sale, Black Friday, Outlet, Bestseller, Bundle, and Advent calendar deal collections. Returns a graceful notice on WooCommerce and Amazon stores.",
+        "List public collections from a Shopify storefront (GET /collections.json), returning handles, titles, and product counts, and automatically highlighting Sale, Black Friday, Outlet, Bestseller, Bundle, and Advent calendar deal collections. Shopify only: returns a graceful notice on every other platform.",
       inputSchema: {
         store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
         limit: z
@@ -442,7 +442,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Get Store Shipping & Return Policies",
       description:
-        "Fetch a Shopify store's shipping, delivery, and return/refund policies via native Storefront MCP FAQ search (when supported) plus public /policies endpoints, returning sanitized excerpts, structured shipping/return hints, and official policy URLs. Returns a graceful notice on WooCommerce and Amazon stores.",
+        "Fetch a Shopify store's shipping, delivery, and return/refund policies via native Storefront MCP FAQ search (when supported) plus public /policies endpoints, returning sanitized excerpts, structured shipping/return hints, and official policy URLs. Shopify only: returns a graceful notice on every other platform.",
       inputSchema: {
         store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
         topic: z

@@ -218,6 +218,16 @@
       spineY2 = new Float32Array(n);
       twistCos2 = new Float32Array(n);
 
+      // On phones the wave is a band above the text: keep the chip lane clear of the
+      // eyebrow badge so a chip can never touch or overlap it.
+      state.chipTop = 10;
+      state.chipBottom = Infinity;
+      if (state.mobile && heroContent) {
+        const badge = heroContent.querySelector(".eyebrow") || heroContent;
+        const badgeTop = badge.getBoundingClientRect().top - rect.top;
+        state.chipBottom = Math.max(state.chipTop, badgeTop - CHIP_H - 20);
+      }
+
       buildStrands();
       layoutChips();
     };
@@ -343,8 +353,15 @@
 
         const centerX = x + chip.width / 2;
         const u = clamp01((centerX - x0) / (x1 - x0));
-        const y =
+        let y =
           spineAt(u, t) + laneOffsets[chip.lane] + Math.sin(t * 0.6 + i * 1.7) * 5 - CHIP_H / 2;
+        if (mobile && Number.isFinite(state.chipBottom)) {
+          // Map the wave's vertical travel into the clear band above the eyebrow badge
+          const lo = h * 0.15 - CHIP_H / 2;
+          const hi = h * 0.6 - CHIP_H / 2;
+          const k = clamp01((y - lo) / Math.max(1, hi - lo));
+          y = state.chipTop + k * (state.chipBottom - state.chipTop);
+        }
 
         const fadeIn = smooth((x + chip.width * 0.5 - xStart) / 110);
         const fadeOut = smooth((w - (x + chip.width * 0.35)) / 120);

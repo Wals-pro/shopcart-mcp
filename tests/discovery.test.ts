@@ -32,9 +32,25 @@ describe("Agent discovery (GEO/AEO): llms.txt, llms-full.txt, robots.txt, sitema
     expect(res.text).toMatch(/^> .+/m);
     expect(res.text).toContain("https://shopcart.wals.pro/mcp");
     expect(res.text).toContain("https://shopcart.wals.pro/llms-full.txt");
-    for (const tool of ["inspect_store", "search_products", "get_product", "create_cart_link"]) {
+    for (const tool of [
+      "inspect_store",
+      "list_collections",
+      "search_products",
+      "get_product",
+      "get_store_policies",
+      "create_cart_link"
+    ]) {
       expect(res.text).toContain(tool);
     }
+    // Capability matrix: every connected platform is listed with its honest handoff
+    expect(res.text).toContain("## Supported Platforms & Capability Matrix");
+    for (const platform of ["Shopify", "WooCommerce", "BigCommerce", "Amazon", "Shopware 6", "Magento 2", "JSON-LD"]) {
+      expect(res.text).toContain(platform);
+    }
+    expect(res.text).toContain("/gp/aws/cart/add.html");
+    expect(res.text).toContain("## Comfort Features for Shoppers");
+    expect(res.text).toMatch(/not affiliated with or endorsed by Shopify, WooCommerce \(Automattic\), Amazon, BigCommerce, Shopware, or Adobe \(Magento\)/);
+    expect(res.text).not.toMatch(/all 4 tools|four tools|Shopify Inc\./i);
     for (const guide of GUIDE_DEFINITIONS) {
       expect(res.text).toContain(`https://shopcart.wals.pro${guide.path}`);
     }
@@ -58,6 +74,13 @@ describe("Agent discovery (GEO/AEO): llms.txt, llms-full.txt, robots.txt, sitema
     for (const guide of GUIDE_DEFINITIONS) {
       expect(res.text).toContain(`https://shopcart.wals.pro${guide.path}`);
     }
+    for (const platform of ["Shopify", "WooCommerce", "BigCommerce", "Amazon", "Shopware 6", "Magento 2", "JSON-LD"]) {
+      expect(res.text).toContain(platform);
+    }
+    for (const tool of ["list_collections", "get_store_policies", "search_affiliate_deals"]) {
+      expect(res.text).toContain(tool);
+    }
+    expect(res.text).not.toMatch(/all 4 tools|four tools|4 Read-Only Tools/i);
     expect(res.text).toContain("Kauft die KI über ShopCart automatisch für mich ein?");
     expect(res.text).toContain("Does ShopCart place orders or charge my card automatically?");
     expect(res.text).not.toMatch(/Wals\.pro|WALS\.PRO/);

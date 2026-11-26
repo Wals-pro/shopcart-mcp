@@ -20,6 +20,13 @@ import {
   startPromptHead,
   taskTail
 } from "./content.js";
+import {
+  getComfortFeatures,
+  getMatrixHeaders,
+  getPlatformRows,
+  getTrademarkDisclaimer,
+  PLATFORM_NAMES
+} from "./platforms.js";
 
 export type ResolvedDemoMedia =
   | { kind: "simulation" }
@@ -587,6 +594,33 @@ export function renderLandingPage(config: AppConfig, lang: Lang): string {
     )
     .join("\n        ");
 
+  const matrixHeaders = getMatrixHeaders(lang);
+  const matrixHtml = getPlatformRows(lang)
+    .map(
+      (row) => `<div class="matrix-row" role="row">
+          <div class="matrix-cell matrix-platform" role="rowheader">
+            <strong>${escapeHtml(row.name)}</strong>
+            <span>${escapeHtml(row.basis)}</span>
+          </div>
+          <div class="matrix-cell" role="cell" data-label="${escapeHtml(matrixHeaders.search)}">${escapeHtml(row.search)}</div>
+          <div class="matrix-cell" role="cell" data-label="${escapeHtml(matrixHeaders.live)}">${escapeHtml(row.live)}</div>
+          <div class="matrix-cell" role="cell" data-label="${escapeHtml(matrixHeaders.handoff)}">
+            <span class="handoff-badge handoff-${row.handoffLevel}">${escapeHtml(row.handoffLabel)}</span>
+            <span class="handoff-text">${escapeHtml(row.handoff)}</span>
+          </div>
+        </div>`
+    )
+    .join("\n        ");
+
+  const comfortHtml = getComfortFeatures(lang)
+    .map(
+      (feature) => `<li class="comfort-item">
+          <h3>${escapeHtml(feature.title)}</h3>
+          <p>${escapeHtml(feature.text)}</p>
+        </li>`
+    )
+    .join("\n        ");
+
   const faqHtml = faq
     .map(
       (item, idx) => `<details class="faq-item"${idx === 0 ? " open" : ""}>
@@ -653,7 +687,8 @@ ${
     <nav class="nav-links" aria-label="${de ? "Hauptnavigation" : "Main navigation"}">
       <a class="hide-sm" href="#demo">Demo</a>
       <a class="hide-sm" href="#how">${de ? "So funktioniert’s" : "How it works"}</a>
-      <a class="hide-sm" href="#examples">${de ? "Beispiele" : "Examples"}</a>
+      <a class="hide-sm" href="#shops">${de ? "Shops" : "Stores"}</a>
+      <a class="hide-md" href="#examples">${de ? "Beispiele" : "Examples"}</a>
       <a class="hide-sm" href="#pricing">${de ? "Preise" : "Pricing"}</a>
       <a class="hide-sm" href="#faq">FAQ</a>
       <a class="hide-md" href="/guides?lang=${lang}">${de ? "Ratgeber" : "Guides"}</a>
@@ -706,6 +741,13 @@ ${
           <li>${de ? "Keine Zahlungsdaten bei uns" : "No payment details with us"}</li>
           <li>${de ? "Kostenlos starten" : "Free to start"}</li>
         </ul>
+
+        <a class="hero-platforms" href="#shops">
+          <span class="hero-platforms-label">${de ? "Funktioniert mit" : "Works with"}</span>
+          <span class="hero-platforms-list">${PLATFORM_NAMES.map((name) => `<span>${escapeHtml(name)}</span>`).join("")}<span>${
+            de ? "+ jeder Shop per Produktlink" : "+ any store via product link"
+          }</span></span>
+        </a>
       </div>
     </div>
 
@@ -805,6 +847,59 @@ ${
           }</p>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- Platform & capability matrix: what is connected and how far the handoff goes -->
+  <section id="shops" class="section section-shops">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="section-kicker">${de ? "Unterstützte Shops" : "Supported stores"}</span>
+        <h2 class="section-title">${
+          de ? "In diesen Shops kauft deine KI für dich vor" : "Where your AI can prepare your shopping"
+        }</h2>
+        <p class="section-sub">${
+          de
+            ? "Sechs Shop-Systeme sind direkt angebunden, jeder andere Shop funktioniert per Produktlink. Die Tabelle zeigt ehrlich, was deine KI dort live prüft und wie der Einkauf bei dir ankommt."
+            : "Six store platforms are connected directly, and any other store works via product link. The table shows honestly what your AI verifies live and how the result reaches you."
+        }</p>
+      </div>
+
+      <div class="matrix" role="table" aria-label="${de ? "Unterstützte Shop-Systeme und Funktionen" : "Supported store platforms and capabilities"}">
+        <div class="matrix-head" role="row">
+          <span role="columnheader">${escapeHtml(matrixHeaders.platform)}</span>
+          <span role="columnheader">${escapeHtml(matrixHeaders.search)}</span>
+          <span role="columnheader">${escapeHtml(matrixHeaders.live)}</span>
+          <span role="columnheader">${escapeHtml(matrixHeaders.handoff)}</span>
+        </div>
+        ${matrixHtml}
+      </div>
+
+      <p class="matrix-note">${
+        de
+          ? "Voraussetzung ist immer ein öffentlich erreichbarer Shop. Passwortgeschützte Shops und Shops, die automatische Abrufe sperren, funktionieren nicht. Bestellen und bezahlen kannst in jedem Fall nur du."
+          : "The store always has to be publicly reachable. Password-protected stores and stores that block automated requests do not work. In every case, only you can order and pay."
+      }</p>
+    </div>
+  </section>
+
+  <!-- Comfort features -->
+  <section id="comfort" class="section">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="section-kicker">${de ? "Komfort" : "Comfort"}</span>
+        <h2 class="section-title">${
+          de ? "Mehr als ein Warenkorb-Link" : "More than a cart link"
+        }</h2>
+        <p class="section-sub">${
+          de
+            ? "Alles, was dir beim Einkaufen mit KI Rückfragen, Tabs und Tipparbeit spart."
+            : "Everything that saves you follow-up questions, tabs, and typing when shopping with AI."
+        }</p>
+      </div>
+      <ul class="comfort-grid">
+        ${comfortHtml}
+      </ul>
     </div>
   </section>
 
@@ -921,12 +1016,12 @@ ${
       <div class="section-head">
         <span class="section-kicker">${de ? "Für Entwickler &amp; Self-Hosting" : "For developers &amp; self-hosting"}</span>
         <h2 class="section-title">${
-          de ? "Open Source: ein Shopify MCP für Agentic Commerce" : "Open source: a Shopify MCP for agentic commerce"
+          de ? "Open Source: ein MCP-Server für Agentic Commerce" : "Open source: an MCP server for agentic commerce"
         }</h2>
         <p class="section-sub">${
           de
-            ? "Technisch ist ShopCart ein MCP-Server (Model Context Protocol) mit vier read-only Tools. Gehostet mit OAuth 2.1 oder lokal per <code>npx</code>, ganz ohne Konto."
-            : "Technically, ShopCart is an MCP server (Model Context Protocol) with four read-only tools. Hosted with OAuth 2.1 or locally via <code>npx</code>, no account required."
+            ? "Technisch ist ShopCart ein MCP-Server (Model Context Protocol) mit sechs read-only Tools: ein Shopify MCP mit Storefront-MCP- und UCP-Erkennung, dazu Adapter für WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2 und Schema.org/JSON-LD. Gehostet mit OAuth 2.1 oder lokal per <code>npx</code>, ganz ohne Konto."
+            : "Technically, ShopCart is an MCP server (Model Context Protocol) with six read-only tools: a Shopify MCP with Storefront MCP and UCP detection, plus adapters for WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2, and Schema.org/JSON-LD. Hosted with OAuth 2.1 or locally via <code>npx</code>, no account required."
         }</p>
       </div>
 
@@ -1110,41 +1205,59 @@ ${
       </div>
 
       <details class="dev-details">
-        <summary><span>${de ? "Die 4 read-only Tools im Detail" : "The 4 read-only tools in detail"}</span><span class="faq-icon" aria-hidden="true"></span></summary>
+        <summary><span>${de ? "Die 6 read-only Tools im Detail" : "The 6 read-only tools in detail"}</span><span class="faq-icon" aria-hidden="true"></span></summary>
         <div class="grid-2 dev-tools">
           <article class="card card-flat">
             <span class="tool-tag">inspect_store</span>
             <p>${
               de
-                ? "Prüft Shopify-Kompatibilität, Shop-Währung, Land und WAF-Verhalten."
-                : "Verifies Shopify compatibility, store currency, country, and WAF behavior."
+                ? "Erkennt das Shop-System (Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2 oder Schema.org/JSON-LD), Währung, Land und WAF-Verhalten."
+                : "Detects the store platform (Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2, or Schema.org/JSON-LD), currency, country, and WAF behavior."
             }</p>
             <div class="tool-sig">inspect_store({ store_url })</div>
+          </article>
+          <article class="card card-flat">
+            <span class="tool-tag">list_collections</span>
+            <p>${
+              de
+                ? "Listet Kollektionen eines Shopify-Shops und hebt Sale, Black Friday, Outlet, Bestseller und Bundles hervor."
+                : "Lists a Shopify store's collections and highlights sale, Black Friday, outlet, bestseller, and bundle collections."
+            }</p>
+            <div class="tool-sig">list_collections({ store_url, deals_only })</div>
           </article>
           <article class="card card-flat">
             <span class="tool-tag">search_products</span>
             <p>${
               de
-                ? "Katalogsuche mit Preis- und Verfügbarkeitsfiltern, WAF-resilient über <code>/search/suggest.json</code>."
-                : "Catalog search with price and stock filters, WAF-resilient via <code>/search/suggest.json</code>."
+                ? "Katalogsuche mit Preis- und Verfügbarkeitsfiltern, Kollektionsfilter (z. B. Sale oder Bestseller), Sortierung nach Preis oder Rabatt sowie <code>discount_percent</code> und <code>savings</code> je Treffer."
+                : "Catalog search with price and stock filters, collection filter (e.g. sale or bestsellers), sorting by price or discount, plus <code>discount_percent</code> and <code>savings</code> per result."
             }</p>
-            <div class="tool-sig">search_products({ store_url, query, max_price, available_only })</div>
+            <div class="tool-sig">search_products({ store_url, query, collection, max_price, available_only, sort_by })</div>
           </article>
           <article class="card card-flat">
             <span class="tool-tag">get_product</span>
             <p>${
               de
-                ? "Varianten, Optionen und Live-Bestand; Minor-Units exakt pro Währung, HTML und verstecktes Unicode entfernt."
-                : "Variants, options, and live stock; exact minor units per currency, HTML and hidden Unicode stripped."
+                ? "Varianten, Optionen und Live-Bestand; Minor-Units exakt pro Währung, HTML und verstecktes Unicode entfernt. Auf beliebigen Shops per Produkt-URL über Schema.org/JSON-LD."
+                : "Variants, options, and live stock; exact minor units per currency, HTML and hidden Unicode stripped. On any store by product URL via Schema.org/JSON-LD."
             }</p>
             <div class="tool-sig">get_product({ store_url, handle_or_url })</div>
+          </article>
+          <article class="card card-flat">
+            <span class="tool-tag">get_store_policies</span>
+            <p>${
+              de
+                ? "Versand-, Rückgabe- und Widerrufsregeln eines Shopify-Shops vor dem Checkout, aus Storefront MCP und <code>/policies</code>."
+                : "Shipping, return, and refund policies of a Shopify store before checkout, from Storefront MCP and <code>/policies</code>."
+            }</p>
+            <div class="tool-sig">get_store_policies({ store_url, topic, question })</div>
           </article>
           <article class="card card-flat">
             <span class="tool-tag">create_cart_link</span>
             <p>${
               de
-                ? "Geprüfter Warenkorb- oder Checkout-Permalink <code>/cart/&lt;id&gt;:&lt;qty&gt;</code>, niemals automatische Käufe."
-                : "Verified cart or checkout permalink <code>/cart/&lt;id&gt;:&lt;qty&gt;</code>, never auto-purchases."
+                ? "Shopify-Permalink <code>/cart/&lt;id&gt;:&lt;qty&gt;</code>, Amazon <code>/gp/aws/cart/add.html</code>, WooCommerce und BigCommerce je Artikel, sonst geprüfte Produktlinks. Niemals automatische Käufe."
+                : "Shopify permalink <code>/cart/&lt;id&gt;:&lt;qty&gt;</code>, Amazon <code>/gp/aws/cart/add.html</code>, WooCommerce and BigCommerce per item, verified product links elsewhere. Never auto-purchases."
             }</p>
             <div class="tool-sig">create_cart_link({ store_url, items, mode, verify_handles })</div>
           </article>
@@ -1189,8 +1302,8 @@ ${
     </div>
     <p class="disclaimer">${
       de
-        ? `Unabhängiges Community-Tool für Shopify-Shops — nicht verbunden mit oder unterstützt von Shopify Inc. Genannte Shops und Marken (z. B. SNOCKS, KERNenergie, PURELEI) dienen nur als Beispiele; es besteht keine Partnerschaft. Beispielpreise Stand ${EXAMPLE_PRICES_VERIFIED_DE}, Preise und Verfügbarkeit können sich ändern. Alle Markennamen gehören ihren jeweiligen Eigentümern.`
-        : `Independent community tool for Shopify stores — not affiliated with or endorsed by Shopify Inc. Stores and brands mentioned (e.g. SNOCKS, KERNenergie, Allbirds) are examples only; no partnership exists. Example prices as of ${EXAMPLE_PRICES_VERIFIED_EN}; prices and availability may change. All trademarks belong to their respective owners.`
+        ? `${escapeHtml(getTrademarkDisclaimer("de"))} Genannte Shops und Marken (z. B. SNOCKS, KERNenergie, PURELEI) dienen nur als Beispiele; es besteht keine Partnerschaft. Beispielpreise Stand ${EXAMPLE_PRICES_VERIFIED_DE}, Preise und Verfügbarkeit können sich ändern.`
+        : `${escapeHtml(getTrademarkDisclaimer("en"))} Stores and brands mentioned (e.g. SNOCKS, KERNenergie, Allbirds) are examples only; no partnership exists. Example prices as of ${EXAMPLE_PRICES_VERIFIED_EN}; prices and availability may change.`
     }</p>
   </div>
 </footer>

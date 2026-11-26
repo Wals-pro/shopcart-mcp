@@ -1,11 +1,11 @@
 {
   "name": "shopcart-mcp",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "mcpName": "io.github.Wals-pro/shopcart-mcp",
   "description": "Agentic Shopping & Cart MCP for Shopify, WooCommerce, Amazon, BigCommerce, Shopware 6, Magento 2, and Universal JSON-LD stores — local stdio OSS CLI and hosted OAuth 2.1 Streamable HTTP server",
   "license": "MIT",
   "type": "module",
-  "author": "Wals.pro <info@wals.pro>",
+  "author": "wals.pro <info@wals.pro>",
   "homepage": "https://shopcart.wals.pro",
   "repository": {
     "type": "git",

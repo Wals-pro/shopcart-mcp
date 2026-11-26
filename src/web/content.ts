@@ -1,6 +1,7 @@
 import type { Lang } from "../auth/pages.js";
 import { isPromoFreeProActive } from "../billing/quota.js";
 import type { AppConfig } from "../config.js";
+import { AMAZON_MARKETPLACES, getComfortFeatures, getHandoffSentence, getPlatformRows, getPlatformSentence } from "./platforms.js";
 
 /**
  * Shared consumer-facing content for the landing page, Schema.org JSON-LD,
@@ -315,7 +316,7 @@ export function getHowTo(lang: Lang): HowToContent {
 }
 
 // ---------------------------------------------------------------------------
-// FAQ (6 real consumer questions, in sync with FAQPage JSON-LD)
+// FAQ (8 real consumer questions, in sync with FAQPage JSON-LD)
 // ---------------------------------------------------------------------------
 
 export function getFaq(config: AppConfig, lang: Lang): FaqItem[] {
@@ -337,7 +338,15 @@ export function getFaq(config: AppConfig, lang: Lang): FaqItem[] {
       },
       {
         q: "In welchen Online-Shops funktioniert ShopCart?",
-        a: "ShopCart funktioniert in öffentlichen Shopify-Onlineshops weltweit, egal ob in Euro, US-Dollar oder Schweizer Franken. Dazu gehören viele bekannte Marken-Shops aus Mode, Outdoor, Food, Beauty und Technik, zum Beispiel SNOCKS, KERNenergie oder PURELEI. Passwortgeschützte Shops und große Marktplätze wie Amazon werden nicht unterstützt."
+        a: `${getPlatformSentence("de")} ${getHandoffSentence("de")} Passwortgeschützte Shops und Shops, die automatische Abrufe sperren, funktionieren nicht.`
+      },
+      {
+        q: "Kann ShopCart auch einen Amazon-Warenkorb füllen?",
+        a: `Ja. ShopCart erstellt den offiziellen Amazon-Warenkorb-Link für mehrere Artikel und Mengen, in 10 Marktplätzen (${AMAZON_MARKETPLACES}). Du öffnest den Link, Amazon zeigt dir seine eigene Bestätigungsseite mit aktuellen Preisen, und erst nach deinem Klick liegt alles im Warenkorb. Im gehosteten Dienst nennt deine KI die Artikel per ASIN oder Produktlink. Eine Live-Suche mit Preisen direkt im Chat gibt es bei Amazon nur im Self-Hosting mit eigenem Keepa- oder PA-API-Schlüssel.`
+      },
+      {
+        q: "Kann meine KI vor dem Kauf Versand, Rückgabe und Rabatte prüfen?",
+        a: "Ja, in Shopify-Shops. Deine KI liest Versandbedingungen und Rückgaberegeln direkt aus dem Shop, stöbert in Sale-, Black-Friday- und Bestseller-Kollektionen und nennt dir Rabatt in Prozent und Ersparnis pro Artikel. In anderen Shop-Systemen prüft sie Preis und Verfügbarkeit, die Versand- und Rückgaberegeln liest du dort auf der Shop-Seite nach."
       },
       {
         q: "Was kostet ShopCart?",
@@ -369,7 +378,15 @@ export function getFaq(config: AppConfig, lang: Lang): FaqItem[] {
     },
     {
       q: "Which online stores work with ShopCart?",
-      a: "ShopCart works with public Shopify online stores worldwide across EUR, USD, GBP, CHF, and other currencies. That covers many direct-to-consumer brands across apparel, gear, gifts, food, and lifestyle, for example Allbirds, SNOCKS, or GOT BAG. Password-protected storefronts and closed marketplaces like Amazon are not supported."
+      a: `${getPlatformSentence("en")} ${getHandoffSentence("en")} Password-protected stores and stores that block automated requests do not work.`
+    },
+    {
+      q: "Can ShopCart fill an Amazon cart too?",
+      a: `Yes. ShopCart creates the official Amazon cart link for several items and quantities, across 10 marketplaces (${AMAZON_MARKETPLACES}). You open the link, Amazon shows its own confirmation page with current prices, and nothing lands in your cart until you click. On the hosted service your AI names the items by ASIN or product link. Live Amazon search with prices inside the chat is only available when self-hosting with your own Keepa or PA-API key.`
+    },
+    {
+      q: "Can my AI check shipping, returns, and discounts before I buy?",
+      a: "Yes, in Shopify stores. Your AI reads shipping terms and return rules straight from the store, browses sale, Black Friday, and bestseller collections, and tells you the discount in percent and the savings per item. On other store platforms it verifies price and availability, and you read shipping and return rules on the store's own page."
     },
     {
       q: "How much does ShopCart cost?",
@@ -431,21 +448,12 @@ export function buildJsonLd(config: AppConfig, lang: Lang): Record<string, unkno
         applicationSubCategory: de ? "KI Shopping Assistent" : "AI shopping assistant",
         operatingSystem: "Web, iOS, Android, macOS, Windows, Linux",
         description: de
-          ? "ShopCart ist ein KI Shopping Assistent für Claude, ChatGPT und andere KI-Tools: Er findet echte Produkte, Größen und Preise in Shopify-Onlineshops und liefert einen fertigen Warenkorb-Link. Rein lesend, du prüfst und bezahlst selbst."
-          : "ShopCart is an AI shopping assistant for Claude, ChatGPT, and other AI tools: it finds real products, sizes, and prices in Shopify online stores and returns a ready-to-review cart link. Strictly read-only, you review and pay yourself.",
-        featureList: de
-          ? [
-              "Produktsuche in öffentlichen Shopify-Onlineshops",
-              "Live-Prüfung von Größen, Varianten, Preisen und Verfügbarkeit",
-              "Fertiger Warenkorb-Link zum Prüfen im Shop",
-              "Rein lesend: keine automatischen Käufe, keine Zahlungsdaten"
-            ]
-          : [
-              "Product search in public Shopify online stores",
-              "Live check of sizes, variants, prices, and stock",
-              "Ready-to-review cart link on the store's own website",
-              "Strictly read-only: no automatic purchases, no payment details"
-            ],
+          ? "ShopCart ist ein KI Shopping Assistent für Claude, ChatGPT und andere KI-Tools: Er findet echte Produkte, Größen und Preise in Online-Shops auf Shopify, WooCommerce, BigCommerce, Shopware 6 und Magento 2, erstellt Amazon-Warenkorb-Links und liefert einen fertigen Warenkorb- oder Produktlink. Rein lesend, du prüfst und bezahlst selbst."
+          : "ShopCart is an AI shopping assistant for Claude, ChatGPT, and other AI tools: it finds real products, sizes, and prices in online stores on Shopify, WooCommerce, BigCommerce, Shopware 6, and Magento 2, creates Amazon cart links, and returns a ready-to-review cart or product link. Strictly read-only, you review and pay yourself.",
+        featureList: [
+          ...getPlatformRows(lang).map((row) => `${row.name}: ${row.handoffLabel}`),
+          ...getComfortFeatures(lang).map((feature) => feature.title)
+        ],
         offers: [
           {
             "@type": "Offer",
