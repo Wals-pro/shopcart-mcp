@@ -5,7 +5,9 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   createAffiliateFeedProvider,
-  type AffiliateFeedProvider
+  createAwinPromotionsProvider,
+  type AffiliateFeedProvider,
+  type AwinPromotionsProvider
 } from "./adapters/affiliate-feed/index.js";
 import { AdapterRegistry } from "./adapters/registry.js";
 import { createBearerAuthMiddleware } from "./auth/bearer.js";
@@ -34,6 +36,7 @@ export interface CreateAppDeps {
   store: StorageBackend;
   registry?: AdapterRegistry;
   affiliateFeed?: AffiliateFeedProvider;
+  awinPromotions?: AwinPromotionsProvider;
   cimdResolver?: CimdResolver;
   emailSender?: EmailSender;
   otpService?: EmailOtpService;
@@ -113,6 +116,8 @@ export function createApp(deps: CreateAppDeps): Express {
   const { config, store } = deps;
   const registry = deps.registry ?? new AdapterRegistry();
   const affiliateFeed = deps.affiliateFeed ?? createAffiliateFeedProvider(config.affiliateFeed);
+  const awinPromotions =
+    deps.awinPromotions ?? createAwinPromotionsProvider(config.affiliateFeed);
   const cimdResolver = deps.cimdResolver ?? new CimdResolver();
   const otpService =
     deps.otpService ??
@@ -294,6 +299,8 @@ export function createApp(deps: CreateAppDeps): Express {
       registry,
       attribution: config.attribution,
       affiliateFeed,
+      awinPromotions,
+      comparison: config.comparison,
       concurrencyKey: `user:${auth.userId}`,
       consumeQuota: () => consumeUserToolQuota(auth.user, config, store)
     });

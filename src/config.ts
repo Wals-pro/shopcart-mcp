@@ -7,6 +7,10 @@ import {
   loadAttributionConfig,
   type AttributionConfig
 } from "./attribution/links.js";
+import {
+  loadComparisonConfig,
+  type ComparisonConfig
+} from "./comparison/deep-links.js";
 
 export interface AppConfig {
   port: number;
@@ -37,6 +41,7 @@ export interface AppConfig {
   reviewerTestCode: string | undefined;
   attribution: AttributionConfig;
   affiliateFeed: AffiliateFeedConfig;
+  comparison: ComparisonConfig;
   sessionSecret: string;
   appName: string;
   repoUrl: string;
@@ -155,6 +160,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     reviewerTestCode: reviewerEnabled ? rawReviewerCode : undefined,
     attribution: loadAttributionConfig(env),
     affiliateFeed: loadAffiliateFeedConfig(env),
+    comparison: loadComparisonConfig(env),
     sessionSecret,
     appName: "shopcart-mcp",
     repoUrl: "https://github.com/Wals-pro/shopcart-mcp",

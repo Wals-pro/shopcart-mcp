@@ -791,7 +791,7 @@ export class AwinFeedClient implements AffiliateFeedProvider {
       };
     }
 
-    const limit = Math.min(20, Math.max(1, Math.floor(opts.limit ?? 10)));
+    const limit = Math.min(25, Math.max(1, Math.floor(opts.limit ?? 10)));
     const loaded = await this.loadAllConfiguredFeeds(opts.concurrencyKey);
     const notices = [...loaded.notices];
 

@@ -316,7 +316,9 @@ describe("OAuth 2.1 compliance & MCP auth", () => {
       "get_product",
       "get_store_policies",
       "find_store_discounts",
-      "create_cart_link"
+      "create_cart_link",
+      "compare_prices",
+      "find_hot_deals"
     ]);
     for (const tool of tools) {
       expect(tool.title && tool.title.length > 0 && tool.title.length <= 64).toBe(true);

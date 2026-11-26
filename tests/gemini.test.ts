@@ -163,10 +163,12 @@ describe("Google Gemini JSON Schema compliance (dynamic tools/list)", () => {
       await Promise.all([server.connect(st), client.connect(ct)]);
 
       const { tools } = await client.listTools();
-      expect(tools.length).toBeGreaterThanOrEqual(includeAffiliate ? 8 : 7);
+      expect(tools.length).toBeGreaterThanOrEqual(includeAffiliate ? 10 : 9);
       const toolNames = tools.map((t) => t.name);
       expect(toolNames).toContain("find_store_discounts");
       expect(toolNames).toContain("create_cart_link");
+      expect(toolNames).toContain("compare_prices");
+      expect(toolNames).toContain("find_hot_deals");
       const cartTool = tools.find((t) => t.name === "create_cart_link");
       expect((cartTool?.inputSchema.properties as Record<string, unknown> | undefined)).toHaveProperty(
         "auto_apply_discount"
