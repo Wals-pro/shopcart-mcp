@@ -123,14 +123,14 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Inspect Store",
       description:
-        "Check an HTTPS online store URL to detect its platform (Shopify, WooCommerce, Amazon, or Universal Schema.org JSON-LD fallback), currency, country, WAF restrictions, and available catalog capabilities.",
+        "Check an HTTPS online store URL to detect its platform (Amazon, Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2 / Adobe Commerce, or Universal Schema.org JSON-LD fallback), currency, country, WAF restrictions, and available catalog capabilities.",
       inputSchema: {
         store_url: z
           .string()
           .min(3)
           .max(256)
           .describe(
-            "Store domain or HTTPS URL, e.g. 'snocks.com', '8bar-bikes.com', 'amazon.de', or 'thomann.de'"
+            "Store domain or HTTPS URL, e.g. 'snocks.com', '8bar-bikes.com', 'amazon.de', 'coxandcox.co.uk', or 'thomann.de'"
           )
       },
       annotations: makeAnnotations("Inspect Store")
@@ -155,11 +155,27 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
             );
           }
         } else if (store.wafRestricted) {
-          notices.push(
-            store.platform === "woocommerce"
-              ? "Store restricts /wp-json/wc/store/v1/products; direct cart links (?add-to-cart=...) remain available if you know the product or variation ID."
-              : "Store uses WAF rules that restrict /meta.json or /products.json; keyword search (/search/suggest.json), product detail (/products/<handle>.js), and cart permalinks remain available."
-          );
+          if (store.platform === "shopify") {
+            notices.push(
+              "Store uses WAF rules that restrict /meta.json or /products.json; keyword search (/search/suggest.json), product detail (/products/<handle>.js), and cart permalinks remain available."
+            );
+          } else if (store.platform === "woocommerce") {
+            notices.push(
+              "Store restricts /wp-json/wc/store/v1/products; direct cart links (?add-to-cart=...) remain available if you know the product or variation ID."
+            );
+          } else if (store.platform === "bigcommerce") {
+            notices.push(
+              "Store uses WAF rules that may restrict catalog pages; direct product URLs and /cart.php?action=add permalinks remain available when you know the product_id or SKU."
+            );
+          } else if (store.platform === "shopware") {
+            notices.push(
+              "Store restricts Store API or storefront endpoints via WAF/auth; ShopCart stays strictly read-only and never bypasses access controls."
+            );
+          } else {
+            notices.push(
+              "Store restricts GraphQL/catalog endpoints via WAF/auth; ShopCart stays strictly read-only and never bypasses access controls."
+            );
+          }
         }
         if (store.platform === "amazon" && !store.capabilities.liveSearch) {
           notices.push(
@@ -234,7 +250,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Search Store Products",
       description:
-        "Search a supported Shopify, WooCommerce, Amazon, or Universal JSON-LD storefront's public catalog by keyword (or by Shopify collection handle such as 'sale', 'black-friday', 'bestseller') with optional availability, min/max price filters, sort_by (including 'discount_desc' on Shopify), and automatic compare-at discount/savings calculation. For stores without an open search API (e.g. Amazon without PA-API/Keepa or Universal JSON-LD), returns structured agent_guidance and search/sitemap hints.",
+        "Search a supported storefront's public catalog (Shopify, WooCommerce, Amazon, BigCommerce, Shopware 6, Magento 2, or Universal JSON-LD) by keyword (or by Shopify collection handle such as 'sale', 'black-friday', 'bestseller') with optional availability, min/max price filters, sort_by (including 'discount_desc' on Shopify), and automatic compare-at discount/savings calculation. For stores without an open search API, returns structured agent_guidance and search/sitemap hints.",
       inputSchema: {
         store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
         query: z
@@ -384,7 +400,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Get Product Details & Variants",
       description:
-        "Retrieve verified live product details, sanitized description text, options, images, and exact variant/product IDs, SKUs/EANs, prices, compare-at discounts/savings, and stock availability for a product handle/slug, numeric ID, ASIN, or any public store's Schema.org JSON-LD product URL.",
+        "Retrieve verified live product details, sanitized description text, options, images, and exact variant/product IDs, SKUs/EANs, prices, compare-at discounts/savings, and stock availability for a product handle/slug/url_key, numeric ID, SKU, Shopware UUID, Amazon ASIN, or full HTTPS product URL.",
       inputSchema: {
         store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
         handle_or_url: z
@@ -392,7 +408,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           .min(1)
           .max(1000)
           .describe(
-            "Product handle/slug (e.g. 'rolltop-2-0'), numeric product ID, Amazon ASIN (e.g. 'B08N5WRWNW'), relative product path, or full HTTPS product URL"
+            "Product handle/slug/url_key (e.g. 'rolltop-2-0'), numeric product ID, SKU, Shopware UUID, Amazon ASIN (e.g. 'B08N5WRWNW'), relative product path, or full HTTPS product URL"
           )
       },
       annotations: makeAnnotations("Get Product Details & Variants")
@@ -494,7 +510,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Create Store Cart Link",
       description:
-        "Generate a read-only browser cart or checkout permalink from exact variant/product IDs and quantities (numeric IDs on Shopify/WooCommerce, 10-character ASINs / Amazon product URLs on Amazon), or a verified direct_product_link for Universal JSON-LD storefronts, optionally verifying live availability via verify_handles.",
+        "Generate a read-only browser cart/checkout permalink (Shopify /cart/<id>:<qty>, WooCommerce ?add-to-cart=, BigCommerce /cart.php?action=add, Amazon /gp/aws/cart/add.html) or verified direct_product_link (Shopware 6, Magento 2, Universal JSON-LD) without mutating server-side carts, optionally verifying live availability via verify_handles.",
       inputSchema: {
         store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
         items: z
@@ -507,7 +523,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           .min(1)
           .max(20)
           .describe(
-            "Line items with variant_id from get_product (numeric ID on Shopify/WooCommerce, 10-char Amazon ASIN / product URL, or SKU/product URL on universal JSON-LD stores) and quantity (1..99)"
+            "Line items with variant_id/product_id/SKU/ASIN from get_product (or product URL on universal JSON-LD stores) and quantity (1..99)"
           ),
         mode: z
           .enum(["cart", "checkout"])
@@ -526,7 +542,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           .max(10)
           .optional()
           .describe(
-            "Recommended: product handles/slugs, IDs, ASINs, or full product URLs whose variants should be verified live for stock and price"
+            "Recommended: product handles/slugs/paths, IDs, SKUs, ASINs, or full product URLs whose variants should be verified live for stock and price"
           )
       },
       annotations: makeAnnotations("Create Store Cart Link")

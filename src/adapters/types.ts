@@ -4,7 +4,14 @@ export interface Money {
   currency: string;
 }
 
-export type StorePlatform = "shopify" | "woocommerce" | "amazon" | "jsonld";
+export type StorePlatform =
+  | "shopify"
+  | "woocommerce"
+  | "amazon"
+  | "bigcommerce"
+  | "shopware"
+  | "magento"
+  | "jsonld";
 
 export type ProductAvailability =
   | "InStock"
@@ -34,6 +41,15 @@ export interface StoreInfo {
     jsonLdProduct?: boolean;
     searchActionUrl?: string | null;
     sitemaps?: string[];
+    storefrontMcpEndpoint?: string | null;
+    storefrontUcp?: boolean;
+    storefrontUcpTools?: string[];
+    storefrontUcpEndpoint?: string | null;
+    bigcommerceStorefront?: boolean;
+    bigcommerceCartPermalink?: boolean;
+    shopwareStoreApi?: boolean;
+    shopwareStorefrontSuggest?: boolean;
+    magentoGraphql?: boolean;
   };
 }
 

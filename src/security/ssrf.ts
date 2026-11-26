@@ -392,7 +392,17 @@ export async function safeFetch(
           method === "HEAD" ? Buffer.alloc(0) : await readBoundedBody(res, maxBytes);
         const contentType = res.headers.get("content-type") ?? "";
         const selectedHeaders: Record<string, string> = {};
-        for (const key of ["content-type", "cache-control", "etag", "powered-by", "server"]) {
+        for (const key of [
+          "content-type",
+          "cache-control",
+          "etag",
+          "powered-by",
+          "x-powered-by",
+          "server",
+          "x-bc-storefront-type",
+          "sw-context-token",
+          "x-magento-tags"
+        ]) {
           const val = res.headers.get(key);
           if (val !== null) selectedHeaders[key] = val;
         }

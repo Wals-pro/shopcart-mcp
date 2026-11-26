@@ -1,7 +1,10 @@
 import { isSameStoreSite } from "../security/sanitize.js";
 import { AmazonAdapter } from "./amazon/adapter.js";
+import { BigCommerceAdapter } from "./bigcommerce/adapter.js";
 import { UniversalJsonLdAdapter } from "./jsonld/adapter.js";
+import { MagentoAdapter } from "./magento/adapter.js";
 import { ShopifyAdapter } from "./shopify/adapter.js";
+import { ShopwareAdapter } from "./shopware/adapter.js";
 import { WooCommerceAdapter } from "./woocommerce/adapter.js";
 import type { StoreAdapter, StoreInfo } from "./types.js";
 
@@ -19,12 +22,21 @@ export class AdapterRegistry {
   private readonly cache = new Map<string, CachedResolution>();
 
   constructor(adapters?: StoreAdapter[]) {
-    // AmazonAdapter is registered first because its domain detection is purely synchronous (0 ms, no network probe),
-    // followed by dedicated platform adapters, with UniversalJsonLdAdapter strictly LAST as fallback.
+    // Deterministic priority order:
+    // 1. Amazon (0 ms synchronous hostname match)
+    // 2. Shopify (incl. Smart-Shopper & UCP /api/ucp/mcp)
+    // 3. WooCommerce (Store API v1)
+    // 4. BigCommerce (Stencil / BCData / /cart.php)
+    // 5. Shopware 6 (Store API / storefront markers)
+    // 6. Magento 2 / Adobe Commerce (read-only GraphQL)
+    // 7. Universal JSON-LD / Schema.org (STRICTLY LAST FALLBACK)
     this.adapters = adapters ?? [
       new AmazonAdapter(),
       new ShopifyAdapter(),
       new WooCommerceAdapter(),
+      new BigCommerceAdapter(),
+      new ShopwareAdapter(),
+      new MagentoAdapter(),
       new UniversalJsonLdAdapter()
     ];
   }

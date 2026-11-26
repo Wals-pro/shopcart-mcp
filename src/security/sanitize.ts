@@ -342,10 +342,26 @@ export function stripHtmlToText(
   return `${cleaned.slice(0, Math.max(0, maxLen - 1)).trimEnd()}…`;
 }
 
+const SHARED_PLATFORM_SUFFIXES = [
+  "myshopify.com",
+  "mybigcommerce.com",
+  "vercel.app",
+  "netlify.app",
+  "shopware.store",
+  "herokuapp.com",
+  "github.io"
+];
+
 export function sanitizeSafeUrl(
   rawUrl: string | null | undefined,
   storeOrigin: string,
-  options: { stripTracking?: boolean; allowShopifyCdn?: boolean } = {}
+  options: {
+    stripTracking?: boolean;
+    allowShopifyCdn?: boolean;
+    allowBigCommerceCdn?: boolean;
+    allowStoreSubdomains?: boolean;
+    allowedHosts?: string[];
+  } = {}
 ): string | null {
   if (!rawUrl || typeof rawUrl !== "string") return null;
   let trimmed = stripControlAndInvisible(rawUrl).trim();
@@ -371,11 +387,37 @@ export function sanitizeSafeUrl(
   const storeHost = new URL(storeOrigin).hostname.toLowerCase();
   const host = parsed.hostname.toLowerCase();
   const hostMatchesStore = host === storeHost || host === `www.${storeHost}` || `www.${host}` === storeHost;
-  const hostMatchesCdn =
+
+  let hostMatchesSubdomain = false;
+  if (options.allowStoreSubdomains && !hostMatchesStore) {
+    const baseDomain = storeHost.replace(/^www\./, "");
+    const isSharedSuffix = SHARED_PLATFORM_SUFFIXES.some(
+      (suffix) => baseDomain === suffix || baseDomain.endsWith(`.${suffix}`)
+    );
+    if (!isSharedSuffix && baseDomain.includes(".")) {
+      hostMatchesSubdomain = host.endsWith(`.${baseDomain}`);
+    }
+  }
+
+  const hostMatchesShopifyCdn =
     Boolean(options.allowShopifyCdn) &&
     (host === "cdn.shopify.com" || host.endsWith(".shopifycdn.com") || host.endsWith(".myshopify.com"));
 
-  if (!hostMatchesStore && !hostMatchesCdn) {
+  const hostMatchesBigCommerceCdn =
+    Boolean(options.allowBigCommerceCdn) &&
+    (/^cdn\d*\.bigcommerce\.com$/.test(host) || host.endsWith(".bigcommerce.com"));
+
+  const hostMatchesExplicit =
+    Array.isArray(options.allowedHosts) &&
+    options.allowedHosts.some((allowed) => allowed.toLowerCase() === host);
+
+  if (
+    !hostMatchesStore &&
+    !hostMatchesSubdomain &&
+    !hostMatchesShopifyCdn &&
+    !hostMatchesBigCommerceCdn &&
+    !hostMatchesExplicit
+  ) {
     return null;
   }
 
