@@ -883,4 +883,190 @@ describe("MCP Integration — find_store_discounts & create_cart_link auto-apply
     expect(optOutParamCart.payload.applied_discount_code).toBeUndefined();
     expect(optOutParamCart.payload.affiliate_disclosure).toBe(false);
   });
+
+  it("handles rule.params.discount as partner discount across find_store_discounts & create_cart_link and keeps host-alias disclosure consistent", async () => {
+    const emailSender = new MemoryEmailSender();
+    const config = loadConfig({
+      APP_ORIGIN: "https://shopcart.wals.pro",
+      STORAGE_BACKEND: "memory",
+      SESSION_SECRET: "test-session-secret-0123456789abcdef",
+      AFFILIATE_RULES_JSON: JSON.stringify([
+        {
+          domain: "params-partner.example",
+          network: "direct_partner",
+          params: { discount: "PARAMS20" }
+        },
+        {
+          domain: "params-only.example",
+          network: "direct_partner",
+          params: { DISCOUNT: "PARAMS20" }
+        },
+        {
+          domain: "www.alias-shop.example",
+          network: "direct_partner",
+          discount: "ALIAS15"
+        }
+      ])
+    });
+
+    const shopifyFetcher = async (url: string): Promise<SafeFetchResponse> => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/meta.json") {
+        // Redirect alias-shop.example canonical metadata to www.alias-shop.example
+        const canonicalHost =
+          parsed.hostname === "alias-shop.example" || parsed.hostname === "www.alias-shop.example"
+            ? "www.alias-shop.example"
+            : parsed.hostname;
+        return makeResponse(url, {
+          id: 99,
+          name: "Alias & Params Shop",
+          currency: "EUR",
+          country: "DE",
+          domain: canonicalHost
+        });
+      }
+      if (parsed.pathname === "/") {
+        if (parsed.hostname === "params-partner.example") {
+          return makeResponse(
+            url,
+            `<html><body><div class="announcement-bar">20% mit Code PARAMS20</div></body></html>`,
+            200,
+            "text/html"
+          );
+        }
+        return makeResponse(url, "<html><body>Welcome</body></html>", 200, "text/html");
+      }
+      if (parsed.pathname === "/collections.json") {
+        return makeResponse(url, { collections: [] });
+      }
+      return makeResponse(url, "Not Found", 404, "text/plain");
+    };
+
+    const app = createApp({
+      config,
+      store: new MemoryStore(),
+      registry: new AdapterRegistry([new ShopifyAdapter(new ShopifyClient(shopifyFetcher))]),
+      emailSender
+    });
+    const token = await issueBearerToken(app, emailSender);
+
+    const callTool = async (id: number, name: string, args: Record<string, unknown>) => {
+      const res = await request(app)
+        .post("/mcp")
+        .set("Authorization", `Bearer ${token}`)
+        .set("Accept", "application/json, text/event-stream")
+        .send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } })
+        .expect(200);
+      return {
+        isError: Boolean(res.body.result.isError),
+        payload: JSON.parse(res.body.result.content[0].text as string)
+      };
+    };
+
+    // 1. params.discount rule: storefront advertises PARAMS20 -> affiliate_disclosure: true + disclosure_note
+    const paramsOverlapCart = await callTool(41, "create_cart_link", {
+      store_url: "params-partner.example",
+      items: [{ variant_id: "57591990780169", quantity: 1 }],
+      mode: "cart"
+    });
+    expect(paramsOverlapCart.isError).toBe(false);
+    expect(new URL(paramsOverlapCart.payload.cart_url).searchParams.get("discount")).toBe("PARAMS20");
+    expect(paramsOverlapCart.payload.affiliate_disclosure).toBe(true);
+    expect(paramsOverlapCart.payload.disclosure_note).toBe(AFFILIATE_DISCLOSURE_NOTE);
+
+    // 2. params.discount rule: user/model supplies discount_code="params20" explicitly -> affiliate_disclosure: true
+    const paramsExplicitCart = await callTool(42, "create_cart_link", {
+      store_url: "params-partner.example",
+      items: [{ variant_id: "57591990780169", quantity: 1 }],
+      mode: "cart",
+      discount_code: "params20"
+    });
+    expect(paramsExplicitCart.isError).toBe(false);
+    expect(new URL(paramsExplicitCart.payload.cart_url).searchParams.get("discount")).toBe("params20");
+    expect(paramsExplicitCart.payload.discount_source).toBe("user_supplied");
+    expect(paramsExplicitCart.payload.affiliate_disclosure).toBe(true);
+    expect(paramsExplicitCart.payload.disclosure_note).toBe(AFFILIATE_DISCLOSURE_NOTE);
+
+    // 3. find_store_discounts surfaces rule.params.DISCOUNT as partner_rule (high confidence)
+    const paramsFound = await callTool(43, "find_store_discounts", {
+      store_url: "params-only.example"
+    });
+    expect(paramsFound.isError).toBe(false);
+    expect(paramsFound.payload.codes).toHaveLength(1);
+    expect(paramsFound.payload.codes[0]).toMatchObject({
+      code: "PARAMS20",
+      source: "partner_rule",
+      confidence: "high"
+    });
+
+    // 4. auto_apply_discount: false without discount_code -> discount NOT attached, affiliate_disclosure: false
+    const paramsOptOut = await callTool(44, "create_cart_link", {
+      store_url: "params-only.example",
+      items: [{ variant_id: "57591990780169", quantity: 1 }],
+      mode: "cart",
+      auto_apply_discount: false
+    });
+    expect(paramsOptOut.isError).toBe(false);
+    expect(new URL(paramsOptOut.payload.cart_url).searchParams.get("discount")).toBeNull();
+    expect(new URL(paramsOptOut.payload.cart_url).searchParams.get("DISCOUNT")).toBeNull();
+    expect(paramsOptOut.payload.affiliate_disclosure).toBe(false);
+
+    // 5. Host-alias consistency: rule pinned to www.alias-shop.example; discover via alias-shop.example
+    //    and pass discount_code explicitly to create_cart_link on alias-shop.example -> affiliate_disclosure: true
+    const aliasDisc = await callTool(45, "find_store_discounts", {
+      store_url: "alias-shop.example"
+    });
+    expect(aliasDisc.isError).toBe(false);
+    expect(aliasDisc.payload.codes[0]).toMatchObject({
+      code: "ALIAS15",
+      source: "partner_rule",
+      confidence: "high"
+    });
+
+    const aliasCart = await callTool(46, "create_cart_link", {
+      store_url: "alias-shop.example",
+      items: [{ variant_id: "57591990780169", quantity: 1 }],
+      mode: "cart",
+      discount_code: "ALIAS15"
+    });
+    expect(aliasCart.isError).toBe(false);
+    expect(new URL(aliasCart.payload.cart_url).searchParams.get("discount")).toBe("ALIAS15");
+    expect(aliasCart.payload.affiliate_disclosure).toBe(true);
+    expect(aliasCart.payload.disclosure_note).toBe(AFFILIATE_DISCLOSURE_NOTE);
+
+    // 6. Cross-site cache fallback is strictly excluded in ShopifyDiscountExtractor
+    let crossSiteFetches = 0;
+    const crossClient = new ShopifyClient(async (url) => {
+      const u = new URL(url);
+      if (u.pathname === "/meta.json") {
+        return makeResponse(url, { id: 1, name: "Store", currency: "EUR", country: "DE", domain: u.hostname });
+      }
+      if (u.pathname === "/") {
+        crossSiteFetches += 1;
+        const code = u.hostname === "site-a.example" ? "SITEA10" : "SITEB20";
+        return makeResponse(
+          url,
+          `<html><body><div class="announcement-bar">Use code ${code}</div></body></html>`,
+          200,
+          "text/html"
+        );
+      }
+      if (u.pathname === "/collections.json") {
+        return makeResponse(url, { collections: [] });
+      }
+      return makeResponse(url, "Not Found", 404, "text/plain");
+    });
+    const extractor = new ShopifyDiscountExtractor(crossClient);
+    // Warm cache for site-a.example
+    const resA = await extractor.findDiscounts("https://site-a.example");
+    expect(resA.codes.map((c) => c.code)).toEqual(["SITEA10"]);
+    // Simulate canonical origin pointing to a different site site-b.example when queried as site-a.example
+    const origGetCanonical = crossClient.getCanonicalOrigin.bind(crossClient);
+    crossClient.getCanonicalOrigin = (orig: string) =>
+      orig === "https://site-a.example" ? "https://site-b.example" : origGetCanonical(orig);
+    const resB = await extractor.findDiscounts("https://site-a.example", { fastMode: true });
+    expect(crossSiteFetches).toBe(2); // MUST NOT reuse site-a.example cache for site-b.example!
+    expect(resB.store_origin).toBe("https://site-b.example");
+    expect(resB.codes.map((c) => c.code)).toEqual(["SITEB20"]);
+  });
 });

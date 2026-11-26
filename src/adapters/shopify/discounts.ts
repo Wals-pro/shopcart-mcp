@@ -1,4 +1,8 @@
-import { matchAffiliateRule, type AttributionConfig } from "../../attribution/links.js";
+import {
+  getAffiliateRuleDiscount,
+  matchAffiliateRule,
+  type AttributionConfig
+} from "../../attribution/links.js";
 import {
   asciiLowerCase,
   isSameStoreSite,
@@ -1156,8 +1160,9 @@ export function extractPartnerRuleDiscounts(
     return [];
   }
   const matched = matchAffiliateRule(hostname, attribution.affiliateRules);
-  if (!matched?.discount) return [];
-  const code = matched.discount.trim();
+  const rawDiscount = matched ? getAffiliateRuleDiscount(matched) : undefined;
+  if (!matched || !rawDiscount) return [];
+  const code = rawDiscount.trim();
   if (!DISCOUNT_CODE_RE.test(code)) return [];
 
   const label = matched.network
@@ -1174,15 +1179,39 @@ export function extractPartnerRuleDiscounts(
   ];
 }
 
+function collectSameSitePartnerCodes(
+  canonicalOrigin: string,
+  attribution?: AttributionConfig,
+  extraOrigins?: readonly string[]
+): ExtractedDiscountCode[] {
+  if (!attribution?.affiliateRules.length) return [];
+  const seen = new Set<string>([canonicalOrigin]);
+  const allCodes = extractPartnerRuleDiscounts(canonicalOrigin, attribution);
+  if (extraOrigins) {
+    for (const extra of extraOrigins) {
+      if (!extra || seen.has(extra)) continue;
+      if (!isSameStoreSite(canonicalOrigin, extra)) continue;
+      seen.add(extra);
+      allCodes.push(...extractPartnerRuleDiscounts(extra, attribution));
+    }
+  }
+  return deduplicateAndSortCodes(allCodes);
+}
+
 /**
  * Merges configured partner rule discount codes into an existing StoreDiscountsResult
  * without mutating cached storefront data.
  */
 export function mergePartnerRuleDiscounts(
   result: StoreDiscountsResult,
-  attribution?: AttributionConfig
+  attribution?: AttributionConfig,
+  extraOrigins?: readonly string[]
 ): StoreDiscountsResult {
-  const partnerCodes = extractPartnerRuleDiscounts(result.store_origin, attribution);
+  const partnerCodes = collectSameSitePartnerCodes(
+    result.store_origin,
+    attribution,
+    extraOrigins
+  );
   const checkedSources = [...result.checked_sources];
   if (attribution?.affiliateRules.length && !checkedSources.includes("partner_rules")) {
     checkedSources.push("partner_rules");
@@ -1262,9 +1291,18 @@ export class ShopifyDiscountExtractor {
       }
     }
 
-    let cached = !opts.forceRefresh
-      ? this.getCached(effectiveOrigin, now) ?? this.getCached(origin, now)
-      : null;
+    let cached: CachedStoreDiscounts | null = null;
+    if (!opts.forceRefresh) {
+      const directHit = this.getCached(effectiveOrigin, now);
+      if (directHit && isSameStoreSite(effectiveOrigin, directHit.origin)) {
+        cached = directHit;
+      } else if (isSameStoreSite(effectiveOrigin, origin)) {
+        const fallbackHit = this.getCached(origin, now);
+        if (fallbackHit && isSameStoreSite(effectiveOrigin, fallbackHit.origin)) {
+          cached = fallbackHit;
+        }
+      }
+    }
 
     if (!cached) {
       const checkedSources: string[] = [];
@@ -1312,7 +1350,10 @@ export class ShopifyDiscountExtractor {
     }
 
     // Dynamically merge partner rules from AttributionConfig (never cached across configs)
-    const partnerCodes = extractPartnerRuleDiscounts(effectiveOrigin, opts.attribution);
+    const partnerCodes = collectSameSitePartnerCodes(cached.origin, opts.attribution, [
+      effectiveOrigin,
+      origin
+    ]);
     const checkedSources = [...cached.checked_sources];
     if (opts.attribution?.affiliateRules.length) {
       checkedSources.push("partner_rules");

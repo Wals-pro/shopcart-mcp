@@ -15,10 +15,16 @@ import type { DiscountSource } from "../adapters/types.js";
 import {
   AFFILIATE_DISCLOSURE_NOTE,
   applyAttribution,
+  getAffiliateRuleDiscount,
   loadAttributionConfig,
+  matchAffiliateRule,
   type AttributionConfig
 } from "../attribution/links.js";
-import { SOURCE_NOTICE_CATALOG, SOURCE_NOTICE_PRODUCT } from "../security/sanitize.js";
+import {
+  isSameStoreSite,
+  SOURCE_NOTICE_CATALOG,
+  SOURCE_NOTICE_PRODUCT
+} from "../security/sanitize.js";
 import { normalizeStoreOrigin, SsrfError } from "../security/ssrf.js";
 
 const SOURCE_NOTICE_POLICY =
@@ -544,7 +550,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
         const rawResult = await adapter.findStoreDiscounts(origin, {
           concurrencyKey: ctx.concurrencyKey
         });
-        return mergePartnerRuleDiscounts(rawResult, attribution);
+        return mergePartnerRuleDiscounts(rawResult, attribution, [origin]);
       })
   );
 
@@ -635,7 +641,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
               fastMode: true,
               concurrencyKey: ctx.concurrencyKey
             });
-            discovered = mergePartnerRuleDiscounts(rawDiscounts, attribution);
+            discovered = mergePartnerRuleDiscounts(rawDiscounts, attribution, [origin]);
           } catch (err) {
             if (
               err instanceof SsrfError &&
@@ -705,6 +711,77 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
             discountSource === "partner_rule"
         );
         let disclosureNote = decorated.disclosure_note;
+
+        // Ensure partner discount disclosure stays consistent across submitted origin,
+        // canonical result.store_origin, and same-site www./apex aliases.
+        if (!anyAffiliate && attribution.affiliateRules.length > 0) {
+          let finalDiscount: string | undefined;
+          try {
+            const parsedDecorated = new URL(decorated.url);
+            const direct = parsedDecorated.searchParams.get("discount")?.trim();
+            if (direct) {
+              finalDiscount = direct.toLowerCase();
+            } else {
+              for (const [k, v] of parsedDecorated.searchParams.entries()) {
+                if (k.toLowerCase() === "discount" && v.trim()) {
+                  finalDiscount = v.trim().toLowerCase();
+                  break;
+                }
+              }
+            }
+          } catch {
+            // ignore unparseable URL
+          }
+          if (!finalDiscount && effectiveDiscountCode) {
+            finalDiscount = effectiveDiscountCode.trim().toLowerCase();
+          }
+
+          if (finalDiscount) {
+            const candidateOrigins = new Set<string>([result.store_origin]);
+            if (isSameStoreSite(result.store_origin, origin)) {
+              candidateOrigins.add(origin);
+            }
+            for (const orig of [...candidateOrigins]) {
+              try {
+                const u = new URL(orig);
+                const h = u.hostname.toLowerCase();
+                const altHost = h.startsWith("www.") ? h.slice(4) : `www.${h}`;
+                const altOrigin = `${u.protocol}//${altHost}`;
+                if (isSameStoreSite(orig, altOrigin)) {
+                  candidateOrigins.add(altOrigin);
+                }
+              } catch {
+                // ignore
+              }
+            }
+
+            for (const candOrigin of candidateOrigins) {
+              try {
+                const candHost = new URL(candOrigin).hostname;
+                const matched = matchAffiliateRule(candHost, attribution.affiliateRules);
+                if (!matched) continue;
+                const ruleDiscount = getAffiliateRuleDiscount(matched);
+                const matchesRule =
+                  (ruleDiscount !== undefined && ruleDiscount.toLowerCase() === finalDiscount) ||
+                  Boolean(
+                    matched.params &&
+                      Object.entries(matched.params).some(
+                        ([k, v]) =>
+                          k.toLowerCase() === "discount" && v.trim().toLowerCase() === finalDiscount
+                      )
+                  );
+                if (matchesRule) {
+                  anyAffiliate = true;
+                  disclosureNote =
+                    disclosureNote ?? matched.disclosure_label ?? AFFILIATE_DISCLOSURE_NOTE;
+                  break;
+                }
+              } catch {
+                // ignore
+              }
+            }
+          }
+        }
         const decoratedAdditionalLinks = result.additional_cart_links?.map((link) => {
           const decLink = applyAttribution(link.cart_url, attribution, {
             kind: "cart",

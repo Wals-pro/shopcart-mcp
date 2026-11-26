@@ -18,6 +18,7 @@ import {
   DEFAULT_UTM_CAMPAIGN,
   DEFAULT_UTM_MEDIUM,
   DEFAULT_UTM_SOURCE,
+  getAffiliateRuleDiscount,
   loadAttributionConfig,
   matchAffiliateRule,
   validateDeeplinkTemplate
@@ -360,6 +361,26 @@ describe("Universal UTM Attribution & Affiliate Engine (src/attribution/links.ts
     expect(new URL(skippedParam.url).searchParams.get("DISCOUNT")).toBeNull();
     expect(new URL(skippedParam.url).searchParams.get("discount")).toBeNull();
     expect(skippedParam.affiliate_disclosure).toBe(false);
+
+    // Helper extracts discount from top-level rule.discount or case-insensitive rule.params.discount
+    expect(getAffiliateRuleDiscount({ domain: "a.example", discount: "TOP10" })).toBe("TOP10");
+    expect(
+      getAffiliateRuleDiscount({ domain: "b.example", params: { DISCOUNT: "PARAM10" } })
+    ).toBe("PARAM10");
+    expect(getAffiliateRuleDiscount({ domain: "c.example", ref: "onlyref" })).toBeUndefined();
+
+    // Matching an existing URL discount against case-insensitive rule.params.discount discloses monetization
+    // without adding a duplicate DISCOUNT param
+    const matchedExistingParam = applyAttribution(
+      "https://param-discount.example/cart/123:1?storefront=true&discount=param10",
+      discountRuleCfg,
+      { kind: "cart" }
+    );
+    const matchedParamUrl = new URL(matchedExistingParam.url);
+    expect(matchedParamUrl.searchParams.get("discount")).toBe("param10");
+    expect(matchedParamUrl.searchParams.get("DISCOUNT")).toBeNull();
+    expect(matchedExistingParam.affiliate_disclosure).toBe(true);
+    expect(matchedExistingParam.disclosure_note).toBe(AFFILIATE_DISCLOSURE_NOTE);
   });
 
   it("rejects unsafe deeplink templates and degrades safely on malformed JSON env vars", () => {
