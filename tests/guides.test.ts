@@ -18,7 +18,9 @@ const GUIDE_DETAIL_ROUTES = [
   "/en/guides/shopify-mcp-server-comparison",
   "/guides/shopify-mcp-server-vergleich",
   "/guides/gemini-warenkorb-erstellen",
-  "/guides/gemini-shopping-cart"
+  "/guides/gemini-shopping-cart",
+  "/guides/instinct-warenkorb-erstellen",
+  "/guides/instinct-shopping-cart"
 ] as const;
 
 const RECIPROCAL_HREFLANG_PAIRS: ReadonlyArray<readonly [string, string]> = [
@@ -27,7 +29,8 @@ const RECIPROCAL_HREFLANG_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ["/guides/chatgpt-instant-checkout-alternative", "/en/guides/chatgpt-instant-checkout-alternative"],
   ["/guides/chatgpt-amazon-warenkorb", "/en/guides/chatgpt-amazon-shopping-cart"],
   ["/guides/shopify-mcp-server-vergleich", "/en/guides/shopify-mcp-server-comparison"],
-  ["/guides/gemini-warenkorb-erstellen", "/guides/gemini-shopping-cart"]
+  ["/guides/gemini-warenkorb-erstellen", "/guides/gemini-shopping-cart"],
+  ["/guides/instinct-warenkorb-erstellen", "/guides/instinct-shopping-cart"]
 ];
 
 const ALL_GUIDE_ROUTES = ["/guides", ...GUIDE_DETAIL_ROUTES] as const;

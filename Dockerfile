@@ -20,6 +20,7 @@ COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY public ./public
+COPY skills ./skills
 COPY --from=builder /app/public/downloads/shopcart-mcp.mcpb ./public/downloads/shopcart-mcp.mcpb
 
 USER node

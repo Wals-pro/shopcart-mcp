@@ -14,12 +14,13 @@ Website & hosted server: <https://shopcart.wals.pro> · Guides: <https://shopcar
 
 ## English
 
-### Dual Mode: Local OSS (`stdio`) & Hosted OAuth 2.1 (`streamable-http`)
+### Three Modes: One-Shot CLI, Local OSS (`stdio`) & Hosted OAuth 2.1 (`streamable-http`)
 
 | Mode | Auth | Limits | Best For |
 |---|---|---|---|
-| **Local `stdio` (`npx shopcart-mcp`)** | None (zero telemetry) | Unlimited | Claude Desktop, Cursor, Claude Code, local agents |
-| **Hosted MCP (`https://shopcart.wals.pro/mcp`)** | OAuth 2.1 (CIMD + DCR + PKCE S256) | Free: 20 calls/day · Pro (€9/mo): 500 calls/day *(Free Pro launch promo through Dec 6, 2026)* | Claude.ai Web/Mobile, ChatGPT Custom Connectors, Google Gemini (Web, CLI, Enterprise) |
+| **One-Shot CLI (`npx -y shopcart-mcp <cmd>`)** | None (zero OAuth popup, JSON on `stdout`) | Unlimited | Instinct (cloud computer), Open Instinct microVMs, OpenClaw, Claude Code, Codex, Manus, Devin, shell scripts |
+| **Local `stdio` (`npx -y shopcart-mcp`, no args)** | None (zero telemetry) | Unlimited | Claude Desktop, Cursor, Claude Code, OpenClaw, Goose, Raycast |
+| **Hosted MCP (`https://shopcart.wals.pro/mcp`)** | OAuth 2.1 (CIMD + DCR + PKCE S256) | Free: 20 calls/day · Pro (€9/mo): 500 calls/day *(Free Pro launch promo through Dec 6, 2026)* | Claude.ai Web/Mobile, ChatGPT Custom Connectors, Google Gemini (Web, CLI, Enterprise), Open Instinct, MewCP, Agensi |
 
 ### Supported Platforms & Capability Matrix
 
@@ -120,12 +121,22 @@ const response = await ai.models.generateContent({
 });
 ```
 
-### Quick Start (Local `stdio`)
+### Quick Start (Local `stdio` & One-Shot CLI for Instinct / Autonomous Agents)
 
 ```bash
-# Run directly via npx (once published) or from source
+# Zero arguments: start the stdio MCP server (Claude Desktop, Cursor, OpenClaw)
 npx -y shopcart-mcp
+
+# One-Shot CLI subcommands (deterministic JSON on stdout, zero OAuth popup)
+npx -y shopcart-mcp inspect snocks.com
+npx -y shopcart-mcp search snocks.com "socken" --limit 3 --available
+npx -y shopcart-mcp product snocks.com <handle>
+npx -y shopcart-mcp policies snocks.com
+npx -y shopcart-mcp collections snocks.com --deals-only
+npx -y shopcart-mcp cart snocks.com <variantId>:1 [--discount CODE] [--note "Gift"]
 ```
+
+For **Instinct** (cloud computer via WhatsApp/iMessage), point your agent to [`https://shopcart.wals.pro/SKILL.md`](https://shopcart.wals.pro/SKILL.md). For **Open Instinct**, **MewCP**, and **Agensi** gateways, connect the Streamable HTTP MCP endpoint `https://shopcart.wals.pro/mcp`.
 
 From source:
 
@@ -178,8 +189,9 @@ Claude Desktop / Cursor MCP config:
 
 So nutzt du den Server:
 
-- **Lokal (`stdio`)**: Kostenlos, unbegrenzt, ohne Login und ohne Telemetrie unter MIT-Lizenz.
-- **Gehostet (OAuth 2.1)**: Sofort verbindbar in Claude.ai, ChatGPT Custom Connectors sowie Google Gemini (Web, Gemini CLI Extension `gemini extensions install https://github.com/Wals-pro/shopcart-mcp` und Gemini Enterprise).
+- **One-Shot CLI (`npx -y shopcart-mcp inspect/search/product/policies/collections/cart`)**: Deterministisches JSON auf `stdout` ohne OAuth-Popup — ideal für Instinct (Cloud-Computer per WhatsApp/iMessage über `https://shopcart.wals.pro/SKILL.md`), Open Instinct, OpenClaw, Claude Code, Codex, Manus und Devin.
+- **Lokal (`stdio`, ohne Argumente)**: Kostenlos, unbegrenzt, ohne Login und ohne Telemetrie unter MIT-Lizenz.
+- **Gehostet (Streamable HTTP + OAuth 2.1)**: Sofort verbindbar in Claude.ai, ChatGPT Custom Connectors, Google Gemini (Web, Gemini CLI Extension `gemini extensions install https://github.com/Wals-pro/shopcart-mcp` und Gemini Enterprise) sowie MCP-Gateways wie Open Instinct, MewCP und Agensi (`https://shopcart.wals.pro/mcp`).
   - **Free:** 20 Tool-Calls / Tag
   - **Pro (9 €/Monat):** 500 Tool-Calls / Tag
   - **Black-Friday-Launch-Aktion:** Bis einschließlich **06.12.2026** erhalten alle angemeldeten Konten automatisch 500 Calls/Tag kostenlos.
