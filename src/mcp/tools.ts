@@ -715,28 +715,22 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
         // Ensure partner discount disclosure stays consistent across submitted origin,
         // canonical result.store_origin, and same-site www./apex aliases.
         if (!anyAffiliate && attribution.affiliateRules.length > 0) {
-          let finalDiscount: string | undefined;
+          const finalDiscounts = new Set<string>();
           try {
             const parsedDecorated = new URL(decorated.url);
-            const direct = parsedDecorated.searchParams.get("discount")?.trim();
-            if (direct) {
-              finalDiscount = direct.toLowerCase();
-            } else {
-              for (const [k, v] of parsedDecorated.searchParams.entries()) {
-                if (k.toLowerCase() === "discount" && v.trim()) {
-                  finalDiscount = v.trim().toLowerCase();
-                  break;
-                }
+            for (const [k, v] of parsedDecorated.searchParams.entries()) {
+              if (k.toLowerCase() === "discount" && v.trim()) {
+                finalDiscounts.add(v.trim().toLowerCase());
               }
             }
           } catch {
             // ignore unparseable URL
           }
-          if (!finalDiscount && effectiveDiscountCode) {
-            finalDiscount = effectiveDiscountCode.trim().toLowerCase();
+          if (effectiveDiscountCode?.trim()) {
+            finalDiscounts.add(effectiveDiscountCode.trim().toLowerCase());
           }
 
-          if (finalDiscount) {
+          if (finalDiscounts.size > 0) {
             const candidateOrigins = new Set<string>([result.store_origin]);
             if (isSameStoreSite(result.store_origin, origin)) {
               candidateOrigins.add(origin);
@@ -761,15 +755,18 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
                 const matched = matchAffiliateRule(candHost, attribution.affiliateRules);
                 if (!matched) continue;
                 const ruleDiscount = getAffiliateRuleDiscount(matched);
-                const matchesRule =
-                  (ruleDiscount !== undefined && ruleDiscount.toLowerCase() === finalDiscount) ||
-                  Boolean(
-                    matched.params &&
-                      Object.entries(matched.params).some(
-                        ([k, v]) =>
-                          k.toLowerCase() === "discount" && v.trim().toLowerCase() === finalDiscount
-                      )
-                  );
+                const matchesRule = Array.from(finalDiscounts).some(
+                  (finalDiscount) =>
+                    (ruleDiscount !== undefined && ruleDiscount.toLowerCase() === finalDiscount) ||
+                    Boolean(
+                      matched.params &&
+                        Object.entries(matched.params).some(
+                          ([k, v]) =>
+                            k.toLowerCase() === "discount" &&
+                            v.trim().toLowerCase() === finalDiscount
+                        )
+                    )
+                );
                 if (matchesRule) {
                   anyAffiliate = true;
                   disclosureNote =

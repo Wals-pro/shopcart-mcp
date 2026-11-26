@@ -1179,6 +1179,46 @@ export function extractPartnerRuleDiscounts(
   ];
 }
 
+function getPartnerRuleDiscountSet(
+  origin: string,
+  attribution?: AttributionConfig
+): Set<string> {
+  const codes = new Set<string>();
+  if (!attribution?.affiliateRules.length) return codes;
+  let hostname: string;
+  try {
+    hostname = new URL(origin).hostname.toLowerCase();
+  } catch {
+    return codes;
+  }
+  const altHost = hostname.startsWith("www.") ? hostname.slice(4) : `www.${hostname}`;
+  for (const host of [hostname, altHost]) {
+    const matched = matchAffiliateRule(host, attribution.affiliateRules);
+    if (!matched) continue;
+    const primary = getAffiliateRuleDiscount(matched);
+    if (primary) codes.add(primary.trim().toUpperCase());
+    if (matched.params) {
+      for (const [k, v] of Object.entries(matched.params)) {
+        if (k.toLowerCase() === "discount" && v.trim()) {
+          codes.add(v.trim().toUpperCase());
+        }
+      }
+    }
+  }
+  return codes;
+}
+
+function filterOutPartnerRuleDiscounts(
+  codes: readonly ExtractedDiscountCode[],
+  origin: string,
+  attribution?: AttributionConfig
+): ExtractedDiscountCode[] {
+  if (codes.length === 0) return [];
+  const blocked = getPartnerRuleDiscountSet(origin, attribution);
+  if (blocked.size === 0) return [...codes];
+  return codes.filter((entry) => !blocked.has(entry.code.trim().toUpperCase()));
+}
+
 function collectSameSitePartnerCodes(
   canonicalOrigin: string,
   attribution?: AttributionConfig,
@@ -1201,16 +1241,37 @@ function collectSameSitePartnerCodes(
 /**
  * Merges configured partner rule discount codes into an existing StoreDiscountsResult
  * without mutating cached storefront data.
+ *
+ * When a caller supplies requested origin(s) and `result.store_origin` resolved to a
+ * cross-site canonical domain (`!isSameStoreSite`), partner codes for the cross-site
+ * domain are withheld so they cannot later drift onto a cart link on the requested host
+ * without affiliate disclosure if metadata cache evicts or re-verification fails.
  */
 export function mergePartnerRuleDiscounts(
   result: StoreDiscountsResult,
   attribution?: AttributionConfig,
   extraOrigins?: readonly string[]
 ): StoreDiscountsResult {
+  const requestedOrigins = (extraOrigins ?? []).filter(Boolean);
+  const isCrossSiteCanonical =
+    requestedOrigins.length > 0 &&
+    !requestedOrigins.some((orig) => isSameStoreSite(orig, result.store_origin));
+
+  if (isCrossSiteCanonical) {
+    const filteredCodes = filterOutPartnerRuleDiscounts(
+      result.codes,
+      result.store_origin,
+      attribution
+    );
+    return filteredCodes.length === result.codes.length
+      ? result
+      : { ...result, codes: filteredCodes };
+  }
+
   const partnerCodes = collectSameSitePartnerCodes(
     result.store_origin,
     attribution,
-    extraOrigins
+    requestedOrigins
   );
   const checkedSources = [...result.checked_sources];
   if (attribution?.affiliateRules.length && !checkedSources.includes("partner_rules")) {
@@ -1349,17 +1410,22 @@ export class ShopifyDiscountExtractor {
       }
     }
 
-    // Dynamically merge partner rules from AttributionConfig (never cached across configs)
-    const partnerCodes = collectSameSitePartnerCodes(cached.origin, opts.attribution, [
-      effectiveOrigin,
-      origin
-    ]);
+    // Dynamically merge partner rules from AttributionConfig (never cached across configs).
+    // Guard cross-site canonical origins with isSameStoreSite so a cross-site partner code
+    // cannot be surfaced under a requested origin and later lack disclosure on host drift.
+    const sameSiteOrigin = isSameStoreSite(origin, cached.origin);
+    const partnerCodes = sameSiteOrigin
+      ? collectSameSitePartnerCodes(cached.origin, opts.attribution, [effectiveOrigin, origin])
+      : [];
     const checkedSources = [...cached.checked_sources];
-    if (opts.attribution?.affiliateRules.length) {
+    if (sameSiteOrigin && opts.attribution?.affiliateRules.length) {
       checkedSources.push("partner_rules");
     }
 
-    const mergedCodes = deduplicateAndSortCodes([...cached.codes, ...partnerCodes]);
+    const baseCodes = sameSiteOrigin
+      ? cached.codes
+      : filterOutPartnerRuleDiscounts(cached.codes, cached.origin, opts.attribution);
+    const mergedCodes = deduplicateAndSortCodes([...baseCodes, ...partnerCodes]);
 
     return {
       store_origin: cached.origin,

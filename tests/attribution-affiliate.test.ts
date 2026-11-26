@@ -921,4 +921,175 @@ describe("MCP tool integration & /privacy + /terms affiliate disclosure", () => 
       expect(parsed.searchParams.get("utm_campaign"), sample.name).toBe("shopcart_mcp");
     }
   });
+
+  it("handles merchant-controlled mixed-case and multi-value discount params on product URLs without duplicate params or missed disclosure", async () => {
+    const cfg = loadAttributionConfig({
+      AFFILIATE_RULES_JSON: JSON.stringify([
+        { domain: "top-rule.example", network: "direct_partner", discount: "PARTNER10" },
+        { domain: "param-rule.example", network: "direct_partner", params: { DISCOUNT: "PARAM20" } }
+      ])
+    });
+
+    // 1. Mixed-case merchant ?Discount=MERCHANT5 must NOT get a duplicate discount/DISCOUNT param
+    const merchantTop = applyAttribution(
+      "https://top-rule.example/products/shoe?Discount=MERCHANT5",
+      cfg,
+      { kind: "product" }
+    );
+    const merchantTopUrl = new URL(merchantTop.url);
+    const merchantTopKeys = Array.from(merchantTopUrl.searchParams.keys()).filter(
+      (k) => k.toLowerCase() === "discount"
+    );
+    expect(merchantTopKeys).toEqual(["Discount"]);
+    expect(merchantTopUrl.searchParams.get("Discount")).toBe("MERCHANT5");
+    expect(merchantTop.affiliate_disclosure).toBe(false);
+
+    const merchantParam = applyAttribution(
+      "https://param-rule.example/products/shoe?Discount=MERCHANT5",
+      cfg,
+      { kind: "product" }
+    );
+    const merchantParamUrl = new URL(merchantParam.url);
+    const merchantParamKeys = Array.from(merchantParamUrl.searchParams.keys()).filter(
+      (k) => k.toLowerCase() === "discount"
+    );
+    expect(merchantParamKeys).toEqual(["Discount"]);
+    expect(merchantParam.affiliate_disclosure).toBe(false);
+
+    // 2. Mixed-case ?Discount=PARTNER10 discloses monetization without duplicating the param
+    const matchingMixed = applyAttribution(
+      "https://top-rule.example/products/shoe?Discount=partner10",
+      cfg,
+      { kind: "product" }
+    );
+    const matchingMixedKeys = Array.from(new URL(matchingMixed.url).searchParams.keys()).filter(
+      (k) => k.toLowerCase() === "discount"
+    );
+    expect(matchingMixedKeys).toEqual(["Discount"]);
+    expect(matchingMixed.affiliate_disclosure).toBe(true);
+    expect(matchingMixed.disclosure_note).toBe(AFFILIATE_DISCLOSURE_NOTE);
+
+    // 3. Multi-value discount params (?discount=OTHER&Discount=PARAM20) MUST still disclose
+    const multiVal = applyAttribution(
+      "https://param-rule.example/products/shoe?discount=OTHER&Discount=param20",
+      cfg,
+      { kind: "product" }
+    );
+    expect(multiVal.affiliate_disclosure).toBe(true);
+    expect(multiVal.disclosure_note).toBe(AFFILIATE_DISCLOSURE_NOTE);
+
+    // 4. End-to-end search_products aggregation and get_product with merchant-controlled query strings
+    const emailSender = new MemoryEmailSender();
+    const appConfig = loadConfig({
+      APP_ORIGIN: "https://shopcart.wals.pro",
+      STORAGE_BACKEND: "memory",
+      SESSION_SECRET: "test-session-secret-0123456789abcdef",
+      AFFILIATE_RULES_JSON: JSON.stringify([
+        { domain: "top-rule.example", network: "direct_partner", discount: "PARTNER10" }
+      ])
+    });
+
+    const shopifyFetcher = async (url: string): Promise<SafeFetchResponse> => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/meta.json") {
+        return makeResponse(
+          url,
+          JSON.stringify({ id: 7, name: "Top Rule Shop", currency: "EUR", country: "DE", domain: parsed.hostname }),
+          200,
+          "application/json"
+        );
+      }
+      if (parsed.pathname === "/search/suggest.json") {
+        return makeResponse(
+          url,
+          JSON.stringify({
+            resources: {
+              results: {
+                products: [
+                  {
+                    id: 1,
+                    handle: "first-shoe",
+                    title: "First Shoe",
+                    available: true,
+                    price: "99.00",
+                    url: "/products/first-shoe?Discount=PARTNER10"
+                  },
+                  {
+                    id: 2,
+                    handle: "second-shoe",
+                    title: "Second Shoe",
+                    available: true,
+                    price: "79.00",
+                    url: "/products/second-shoe?Discount=MERCHANT5"
+                  }
+                ]
+              }
+            }
+          }),
+          200,
+          "application/json"
+        );
+      }
+      if (parsed.pathname === "/products/first-shoe.js") {
+        return makeResponse(
+          url,
+          JSON.stringify({
+            id: 1,
+            handle: "first-shoe",
+            title: "First Shoe",
+            available: true,
+            url: "/products/first-shoe?discount=OTHER&Discount=PARTNER10",
+            options: ["Title"],
+            variants: [{ id: 101, title: "Default Title", available: true, price: 9900 }]
+          }),
+          200,
+          "application/json"
+        );
+      }
+      return makeResponse(url, "Not Found", 404, "text/plain");
+    };
+
+    const app = createApp({
+      config: appConfig,
+      store: new MemoryStore(),
+      registry: new AdapterRegistry([new ShopifyAdapter(new ShopifyClient(shopifyFetcher))]),
+      emailSender
+    });
+    const token = await issueBearerToken(app, emailSender);
+
+    const searchRes = await request(app)
+      .post("/mcp")
+      .set("Authorization", `Bearer ${token}`)
+      .set("Accept", "application/json, text/event-stream")
+      .send({
+        jsonrpc: "2.0",
+        id: 21,
+        method: "tools/call",
+        params: { name: "search_products", arguments: { store_url: "top-rule.example", query: "shoe" } }
+      })
+      .expect(200);
+    const searchData = JSON.parse(searchRes.body.result.content[0].text as string);
+    expect(searchData.affiliate_disclosure).toBe(true);
+    expect(searchData.disclosure_note).toBe(AFFILIATE_DISCLOSURE_NOTE);
+    // Second product keeps its merchant ?Discount=MERCHANT5 without adding a duplicate discount=
+    const secondKeys = Array.from(new URL(searchData.products[1].url).searchParams.keys()).filter(
+      (k) => k.toLowerCase() === "discount"
+    );
+    expect(secondKeys).toEqual(["Discount"]);
+
+    const detailRes = await request(app)
+      .post("/mcp")
+      .set("Authorization", `Bearer ${token}`)
+      .set("Accept", "application/json, text/event-stream")
+      .send({
+        jsonrpc: "2.0",
+        id: 22,
+        method: "tools/call",
+        params: { name: "get_product", arguments: { store_url: "top-rule.example", handle_or_url: "first-shoe" } }
+      })
+      .expect(200);
+    const detailData = JSON.parse(detailRes.body.result.content[0].text as string);
+    expect(detailData.affiliate_disclosure).toBe(true);
+    expect(detailData.disclosure_note).toBe(AFFILIATE_DISCLOSURE_NOTE);
+  });
 });

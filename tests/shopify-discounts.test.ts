@@ -1,5 +1,5 @@
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AdapterRegistry } from "../src/adapters/registry.js";
 import { ShopifyAdapter } from "../src/adapters/shopify/adapter.js";
 import { ShopifyClient } from "../src/adapters/shopify/client.js";
@@ -9,6 +9,7 @@ import {
   extractDiscountsFromHtml,
   extractPartnerRuleDiscounts,
   isValidDiscountCodeCandidate,
+  mergePartnerRuleDiscounts,
   ShopifyDiscountExtractor,
   SOURCE_NOTICE_DISCOUNTS
 } from "../src/adapters/shopify/discounts.js";
@@ -1068,5 +1069,222 @@ describe("MCP Integration — find_store_discounts & create_cart_link auto-apply
     expect(crossSiteFetches).toBe(2); // MUST NOT reuse site-a.example cache for site-b.example!
     expect(resB.store_origin).toBe("https://site-b.example");
     expect(resB.codes.map((c) => c.code)).toEqual(["SITEB20"]);
+  });
+
+  it("prevents cross-site canonical partner-code drift without affiliate disclosure across metadata cache eviction (Trigger 1) and registry expiry with failed canonical probe (Trigger 2)", async () => {
+    let failNewbrandMeta = false;
+    const emailSender = new MemoryEmailSender();
+    const config = loadConfig({
+      APP_ORIGIN: "https://shopcart.wals.pro",
+      STORAGE_BACKEND: "memory",
+      SESSION_SECRET: "test-session-secret-0123456789abcdef",
+      AFFILIATE_RULES_JSON: JSON.stringify([
+        { domain: "newbrand.example", network: "direct_partner", discount: "PARTNER20" }
+      ])
+    });
+
+    const shopifyFetcher = async (url: string): Promise<SafeFetchResponse> => {
+      const parsed = new URL(url);
+      if (parsed.pathname === "/meta.json") {
+        if (parsed.hostname === "oldbrand.example") {
+          return makeResponse(url, {
+            shop_id: 1001,
+            name: "Old Brand",
+            currency: "EUR",
+            country: "DE",
+            domain: "newbrand.example"
+          });
+        }
+        if (parsed.hostname === "newbrand.example") {
+          if (failNewbrandMeta) {
+            return makeResponse(url, "Service Unavailable", 503, "text/plain");
+          }
+          return makeResponse(url, {
+            shop_id: 2002,
+            name: "New Brand",
+            currency: "EUR",
+            country: "DE",
+            domain: "newbrand.example"
+          });
+        }
+      }
+      if (parsed.pathname === "/") {
+        if (parsed.hostname === "newbrand.example") {
+          return makeResponse(
+            url,
+            `<html><body>
+              <div class="announcement-bar">Promo code: PUBLIC10</div>
+            </body></html>`,
+            200,
+            "text/html"
+          );
+        }
+        return makeResponse(url, "<html><body>Old Brand Storefront</body></html>", 200, "text/html");
+      }
+      if (parsed.pathname === "/collections.json") {
+        return makeResponse(url, { collections: [] });
+      }
+      return makeResponse(url, "Not Found", 404, "text/plain");
+    };
+
+    const shopifyClient = new ShopifyClient(shopifyFetcher);
+    const app = createApp({
+      config,
+      store: new MemoryStore(),
+      registry: new AdapterRegistry([new ShopifyAdapter(shopifyClient)]),
+      emailSender
+    });
+    const token = await issueBearerToken(app, emailSender);
+
+    const callTool = async (id: number, name: string, args: Record<string, unknown>) => {
+      const res = await request(app)
+        .post("/mcp")
+        .set("Authorization", `Bearer ${token}`)
+        .set("Accept", "application/json, text/event-stream")
+        .send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } })
+        .expect(200);
+      return {
+        isError: Boolean(res.body.result.isError),
+        payload: JSON.parse(res.body.result.content[0].text as string)
+      };
+    };
+
+    // 1. Cross-site discovery on oldbrand.example (canonical -> newbrand.example):
+    //    MUST NOT surface newbrand.example's partner code PARTNER20 (neither via partner_rule
+    //    nor from overlapping HTML text), while non-partner storefront codes (PUBLIC10) remain available.
+    const crossDisc = await callTool(51, "find_store_discounts", {
+      store_url: "oldbrand.example"
+    });
+    expect(crossDisc.isError).toBe(false);
+    expect(crossDisc.payload.store_origin).toBe("https://newbrand.example");
+    const crossCodes = (crossDisc.payload.codes as Array<{ code: string; source: string }>).map(
+      (c) => c.code
+    );
+    expect(crossCodes).not.toContain("PARTNER20");
+    expect(crossCodes).toContain("PUBLIC10");
+
+    // Direct discovery on the canonical domain newbrand.example STILL surfaces PARTNER20 as partner_rule.
+    const directDisc = await callTool(52, "find_store_discounts", {
+      store_url: "newbrand.example"
+    });
+    expect(directDisc.isError).toBe(false);
+    expect(directDisc.payload.store_origin).toBe("https://newbrand.example");
+    expect(directDisc.payload.codes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "PARTNER20",
+          source: "partner_rule",
+          confidence: "high"
+        })
+      ])
+    );
+
+    // Also verify mergePartnerRuleDiscounts strips overlapping HTML partner codes on cross-site canonicals
+    const crossHtmlMerged = mergePartnerRuleDiscounts(
+      {
+        store_origin: "https://newbrand.example",
+        codes: [
+          {
+            code: "PARTNER20",
+            context_snippet: "Use code PARTNER20",
+            source: "homepage_announcement",
+            confidence: "high"
+          },
+          {
+            code: "PUBLIC10",
+            context_snippet: "Promo code: PUBLIC10",
+            source: "homepage_announcement",
+            confidence: "high"
+          }
+        ],
+        automatic_deals: [],
+        checked_sources: ["homepage_html"],
+        source_notice: SOURCE_NOTICE_DISCOUNTS,
+        disclaimer: DISCOUNT_DISCLAIMER
+      },
+      config.attribution,
+      ["https://oldbrand.example"]
+    );
+    expect(crossHtmlMerged.codes.map((c) => c.code)).toEqual(["PUBLIC10"]);
+
+    // Control: while metadata is live, create_cart_link(oldbrand.example) builds on newbrand.example
+    // and discloses affiliate monetization whenever PARTNER20 is on the cart URL.
+    const controlCart = await callTool(53, "create_cart_link", {
+      store_url: "oldbrand.example",
+      items: [{ variant_id: "57591990780169", quantity: 1 }],
+      mode: "cart",
+      discount_code: "PARTNER20"
+    });
+    expect(controlCart.isError).toBe(false);
+    const controlUrl = new URL(controlCart.payload.cart_url);
+    expect(controlUrl.hostname).toBe("newbrand.example");
+    expect(controlUrl.searchParams.get("discount")).toBe("PARTNER20");
+    expect(controlCart.payload.affiliate_disclosure).toBe(true);
+    expect(controlCart.payload.disclosure_note).toBe(AFFILIATE_DISCLOSURE_NOTE);
+
+    // Trigger 1: Metadata-cache eviction (clear only ShopifyClient metadata cache, keep AdapterRegistry & discount cache)
+    shopifyClient.clearCache();
+    const trigger1Cart = await callTool(54, "create_cart_link", {
+      store_url: "oldbrand.example",
+      items: [{ variant_id: "57591990780169", quantity: 1 }],
+      mode: "cart"
+    });
+    expect(trigger1Cart.isError).toBe(false);
+    const trigger1Url = new URL(trigger1Cart.payload.cart_url);
+    expect(trigger1Url.hostname).toBe("oldbrand.example");
+    // No undisclosed partner code can land on oldbrand.example
+    expect(trigger1Url.searchParams.get("discount")).not.toBe("PARTNER20");
+    expect(trigger1Cart.payload.affiliate_disclosure).toBe(false);
+
+    // Direct cart on canonical domain newbrand.example with PARTNER20 still discloses even after cache eviction
+    const directAfterEvict = await callTool(55, "create_cart_link", {
+      store_url: "newbrand.example",
+      items: [{ variant_id: "57591990780169", quantity: 1 }],
+      mode: "cart",
+      discount_code: "PARTNER20"
+    });
+    expect(directAfterEvict.isError).toBe(false);
+    expect(new URL(directAfterEvict.payload.cart_url).hostname).toBe("newbrand.example");
+    expect(directAfterEvict.payload.affiliate_disclosure).toBe(true);
+    expect(directAfterEvict.payload.disclosure_note).toBe(AFFILIATE_DISCLOSURE_NOTE);
+
+    // Trigger 2: Re-warm live canonical state, then advance time past 15-minute registry/metadata TTL
+    // and fail newbrand.example /meta.json (503) before calling create_cart_link directly.
+    const rewarmDisc = await callTool(56, "find_store_discounts", {
+      store_url: "oldbrand.example"
+    });
+    expect(rewarmDisc.isError).toBe(false);
+    expect(rewarmDisc.payload.store_origin).toBe("https://newbrand.example");
+    expect(
+      (rewarmDisc.payload.codes as Array<{ code: string }>).map((c) => c.code)
+    ).not.toContain("PARTNER20");
+
+    const baseNow = Date.now();
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(baseNow + 16 * 60 * 1000);
+    failNewbrandMeta = true;
+    try {
+      const trigger2Cart = await callTool(57, "create_cart_link", {
+        store_url: "oldbrand.example",
+        items: [{ variant_id: "57591990780169", quantity: 1 }],
+        mode: "cart"
+      });
+      expect(trigger2Cart.isError).toBe(false);
+      const trigger2Url = new URL(trigger2Cart.payload.cart_url);
+      expect(trigger2Url.hostname).toBe("oldbrand.example");
+      expect(trigger2Url.searchParams.get("discount")).not.toBe("PARTNER20");
+      expect(trigger2Cart.payload.affiliate_disclosure).toBe(false);
+    } finally {
+      failNewbrandMeta = false;
+      nowSpy.mockRestore();
+    }
+
+    // Direct ShopifyDiscountExtractor.findDiscounts with opts.attribution also guards cross-site partner codes
+    const directExtractor = new ShopifyDiscountExtractor(new ShopifyClient(shopifyFetcher));
+    const directExtractorRes = await directExtractor.findDiscounts("https://oldbrand.example", {
+      attribution: config.attribution
+    });
+    expect(directExtractorRes.store_origin).toBe("https://newbrand.example");
+    expect(directExtractorRes.codes.map((c) => c.code)).not.toContain("PARTNER20");
+    expect(directExtractorRes.codes.map((c) => c.code)).toContain("PUBLIC10");
   });
 });
