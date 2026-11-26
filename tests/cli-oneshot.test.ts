@@ -649,7 +649,8 @@ describe("CLI process E2E (one-shot flags + zero-arg stdio MCP backward compatib
         "find_store_discounts",
         "create_cart_link",
         "compare_prices",
-        "find_hot_deals"
+        "find_hot_deals",
+        "match_visual_product"
       ]);
     } finally {
       child.kill("SIGTERM");

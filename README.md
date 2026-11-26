@@ -47,16 +47,20 @@ What the shopper gets differs by platform, and ShopCart MCP says so honestly in 
 
 ### Tools
 
-All 6 tools are read-only (`readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true`):
+All 10 core tools are read-only (`readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true`):
 
 1. **`inspect_store`** — Detects the platform (Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2, or Universal JSON-LD), resolves currency/country, WAF restrictions, and catalog capabilities including Shopify Storefront MCP and UCP endpoints.
 2. **`list_collections`** — Lists a Shopify store's public collections and flags Sale, Black Friday, and Bestseller collections.
 3. **`search_products`** — WAF-resilient product search with normalized prices, availability/price filters, `collection` filter, and `sort_by` (`relevance`, `price_asc`, `price_desc`, `discount_desc`).
-4. **`get_product`** — Returns exact variant IDs (numeric IDs on Shopify/WooCommerce, ASINs on Amazon), prices in minor units with ISO 4217 exponents, compare-at discounts, and availability. On any other store, verifies a product URL via Schema.org/JSON-LD.
+4. **`get_product`** — Returns exact variant IDs (numeric IDs on Shopify/WooCommerce, ASINs on Amazon), prices in minor units with ISO 4217 exponents, compare-at discounts, and availability. On any other store, verifies a product URL via Schema.org/JSON-LD. Pass optional `include_thumbnail: true` when visually confirming a product match against a user-uploaded photo (SSRF-hardened, JPEG/PNG/WebP only, ≤ 512 KB, zero-retention).
 5. **`get_store_policies`** — Shipping, returns, and FAQ answers from the store's public policy pages (Shopify), sanitized and marked as untrusted store content.
-6. **`create_cart_link`** — Generates the deterministic handoff: Shopify cart permalinks (`/cart/<vid>:<qty>` or checkout mode), Amazon multi-item cart links, per-item add-to-cart links on WooCommerce and BigCommerce, or verified direct product links, with optional live variant verification via `verify_handles`.
+6. **`find_store_discounts`** — Discovers official, publicly advertised promo codes and automatic checkout deals on Shopify storefronts plus configured partner rules.
+7. **`create_cart_link`** — Generates the deterministic handoff: Shopify cart permalinks (`/cart/<vid>:<qty>` or checkout mode), Amazon multi-item cart links, per-item add-to-cart links on WooCommerce and BigCommerce, or verified direct product links, with optional live variant verification via `verify_handles`.
+8. **`compare_prices`** — Compares prices across merchants by keyword or EAN/GTIN barcode, combining live partner offers (when configured) with 1-click regional comparison portal links (Geizhals, idealo, billiger.de, Toppreise.ch, Google Shopping).
+9. **`find_hot_deals`** — Discovers active partner promotions and vouchers (when configured) alongside 1-click regional deal community search links (Preisjäger, mydealz, HotUKDeals, Dealabs, Slickdeals).
+10. **`match_visual_product`** — Zero-cost visual product search: accepts structured attributes extracted by your vision model from a user photo (`product_type`, `brand`, `model_or_text`, `ean`, `color`, `material`, `style_keywords`), queries up to 5 validated `target_stores` in parallel (plus configured partner feeds / exact EAN lookup), and returns deterministically ranked matches with confidence scores and web-search fallback queries.
 
-Self-hosted only: an optional seventh tool, `search_affiliate_deals`, appears when you configure your own Awin product feed. It is not enabled on the hosted server.
+Self-hosted only: an optional eleventh tool, `search_affiliate_deals`, appears when you configure your own Awin product feed. It is not enabled on the hosted server.
 
 ### Google Gemini Setup (Web, CLI, Enterprise & SDK)
 

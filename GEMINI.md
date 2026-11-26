@@ -15,8 +15,9 @@ Follow this exact sequence whenever a user asks to find products, compare prices
    - Keep `query` short (1–3 words) in the store's language (e.g. German for DACH stores, English for US/UK stores).
    - Use `sort_by: "discount_desc"` on Shopify to surface the strongest genuine markdowns first.
    - Note: `search_products` returns product handles and price ranges, **not** individual `variant_id`s.
-4. **`get_product(store_url, handle_or_url)`** — Always call before confirming a size/color or building a cart link.
+4. **`get_product(store_url, handle_or_url, include_thumbnail?)`** — Always call before confirming a size/color or building a cart link.
    - Returns exact `variant_id` values, options/titles, SKU/EAN, live `available` stock status, `price`, and `compare_at_price`.
+   - Pass `include_thumbnail: true` (default `false`) only when visually confirming a product match against a user-uploaded photo.
    - On any store without a dedicated search adapter (Universal Schema.org/JSON-LD), pass the full HTTPS product URL to verify live price, currency, availability, and SKU/EAN/GTIN.
 5. **`get_store_policies(store_url, topic?, question?)`** *(Shopify only)* — Check shipping costs, free-shipping thresholds, delivery times, and return/refund policies before handing over the cart.
 6. **`find_store_discounts(store_url)`** *(Shopify + configured partner rules)* — Discover official, publicly advertised promo/discount codes (announcement bars, Black Friday / sale banners, deal collection descriptions) and automatic no-code-needed checkout deals.
@@ -24,6 +25,7 @@ Follow this exact sequence whenever a user asks to find products, compare prices
    - Always pass `verify_handles` so the server re-verifies live stock and unit prices.
    - Default to `mode: "cart"`; use `mode: "checkout"` only if the user explicitly asks to skip straight to checkout.
    - On Shopify, `auto_apply_discount` defaults to `true` when `discount_code` is omitted so verified public promo codes or configured partner rules are attached automatically (set `auto_apply_discount: false` to skip). Pass `discount_code` only if supplied by the user or returned by `find_store_discounts` — never invent coupon codes.
+8. **`match_visual_product(product_type, brand?, model_or_text?, ean?, color?, material?, style_keywords?, target_stores?, ...)`** — When the user uploads a product photo, extract visible visual attributes and match across up to 5 stores in parallel (plus configured partner feeds), then confirm via `get_product(..., include_thumbnail=true)` before calling `create_cart_link`.
 
 ## Platform Handoff Reality (Always Be Honest)
 

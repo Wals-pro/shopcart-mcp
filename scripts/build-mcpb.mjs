@@ -122,10 +122,13 @@ export function createMcpbManifest(version) {
       "- `inspect_store` — Detect platform (Amazon, Shopify incl. UCP, WooCommerce, BigCommerce, Shopware 6, Magento 2, or Universal JSON-LD), currency, country, WAF behavior, and capabilities.",
       "- `list_collections` — Browse Shopify store collections and automatically highlight Sale, Black Friday, Bestseller, and seasonal deal collections.",
       "- `search_products` — Search public product catalogs across supported storefronts (or Amazon via optional PA-API/Keepa) with availability, price, and discount sorting (`discount_desc`, `price_asc`, `price_desc`).",
-      "- `get_product` — Fetch sanitized product details, options, images, stock, compare-at discounts, and exact variant/SKU IDs or Amazon ASINs.",
+      "- `get_product` — Fetch sanitized product details, options, images, stock, compare-at discounts, and exact variant/SKU IDs or Amazon ASINs (plus optional verified thumbnail via `include_thumbnail=true`).",
       "- `get_store_policies` — Check Shopify shipping thresholds, delivery times, and return/refund policies via native Storefront MCP and public `/policies` pages.",
       "- `find_store_discounts` — Discover official, publicly advertised Shopify promo codes (Black Friday / sale banners, deal collections) and automatic checkout deals, plus configured partner rules.",
       "- `create_cart_link` — Build one verified cart link (Shopify with automatic promo-code discovery, Amazon), one add-to-cart link per item (WooCommerce, BigCommerce), or verified direct product links (Shopware 6, Magento 2, JSON-LD) so you review and complete checkout yourself.",
+      "- `compare_prices` — Compare product prices across merchants by keyword or EAN/GTIN barcode with optional live partner offers and 1-click regional comparison portal links.",
+      "- `find_hot_deals` — Discover active partner promotions and vouchers alongside 1-click regional deal community search links.",
+      "- `match_visual_product` — Match a product seen in a user-uploaded photo across up to 5 public online stores in parallel using structured visual attributes and deterministic scoring.",
       "",
       "Includes built-in SSRF protection and prompt-injection sanitization. Independent open-source project by wals.pro, not affiliated with or endorsed by Shopify, WooCommerce (Automattic), Amazon, BigCommerce, Shopware, or Adobe (Magento)."
     ].join("\n"),
@@ -205,6 +208,21 @@ export function createMcpbManifest(version) {
         name: "create_cart_link",
         description:
           "Generate the read-only handoff from exact variant IDs or ASINs and quantities: one cart link on Shopify (with optional automatic promo-code application) and Amazon, one add-to-cart link per item on WooCommerce and BigCommerce, verified direct product links on Shopware 6, Magento 2, and JSON-LD stores. Optionally verifies live availability via verify_handles."
+      },
+      {
+        name: "compare_prices",
+        description:
+          "Compare product prices across merchants by keyword or 8-14 digit EAN/GTIN barcode, combining live partner product feed offers (when configured) with instant 1-click regional price comparison links."
+      },
+      {
+        name: "find_hot_deals",
+        description:
+          "Discover active partner promotions and verified voucher codes (when configured) alongside instant 1-click regional deal community search links."
+      },
+      {
+        name: "match_visual_product",
+        description:
+          "Match a product seen in a user-uploaded photo across up to 5 public online stores in parallel (plus configured partner feeds and exact EAN lookup) using structured visual attributes extracted by your vision model."
       }
     ],
     tools_generated: false,
