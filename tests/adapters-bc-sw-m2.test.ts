@@ -780,6 +780,7 @@ describe("AdapterRegistry & SSRF protection across all adapters", () => {
       "bigcommerce",
       "shopware",
       "magento",
+      "ucp",
       "jsonld"
     ]);
 

@@ -1049,6 +1049,41 @@ export function sanitizeCliOutput(payload: unknown): unknown {
       }
       store.capabilities = caps;
     }
+    if (store.ucp && typeof store.ucp === "object" && !Array.isArray(store.ucp)) {
+      const ucp = { ...(store.ucp as Record<string, unknown>) };
+      if (typeof ucp.manifestUrl === "string") {
+        const safeManifest = enforceShellSafeHttpsUrl(ucp.manifestUrl);
+        if (safeManifest) ucp.manifestUrl = safeManifest;
+        else delete ucp.manifestUrl;
+      }
+      if (ucp.endpoints && typeof ucp.endpoints === "object" && !Array.isArray(ucp.endpoints)) {
+        const nextEndpoints: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(ucp.endpoints as Record<string, unknown>)) {
+          if (typeof v === "string") {
+            const safeEp = enforceShellSafeHttpsUrl(v);
+            if (safeEp) nextEndpoints[k] = safeEp;
+          }
+        }
+        ucp.endpoints = nextEndpoints;
+      }
+      if (ucp.services && typeof ucp.services === "object" && !Array.isArray(ucp.services)) {
+        const nextServices: Record<string, unknown> = {};
+        for (const [svcKey, svcVal] of Object.entries(ucp.services as Record<string, unknown>)) {
+          if (!svcVal || typeof svcVal !== "object" || Array.isArray(svcVal)) continue;
+          const svc = { ...(svcVal as Record<string, unknown>) };
+          for (const epField of ["restEndpoint", "mcpEndpoint", "a2aEndpoint"] as const) {
+            if (typeof svc[epField] === "string") {
+              const safeEp = enforceShellSafeHttpsUrl(svc[epField]);
+              if (safeEp) svc[epField] = safeEp;
+              else delete svc[epField];
+            }
+          }
+          nextServices[svcKey] = svc;
+        }
+        ucp.services = nextServices;
+      }
+      store.ucp = ucp;
+    }
     obj.store = store;
   }
 
@@ -1186,6 +1221,20 @@ export function sanitizeCliOutput(payload: unknown): unknown {
     const safeCartUrl = sanitizeOptionalShellUrl(obj.cart_url);
     if (safeCartUrl !== undefined) obj.cart_url = safeCartUrl;
     else delete obj.cart_url;
+  }
+  if (obj.ucp_checkout && typeof obj.ucp_checkout === "object" && !Array.isArray(obj.ucp_checkout)) {
+    const ucpCheckout = { ...(obj.ucp_checkout as Record<string, unknown>) };
+    if ("continue_url" in ucpCheckout) {
+      const safeContinueUrl = sanitizeOptionalShellUrl(ucpCheckout.continue_url);
+      if (safeContinueUrl !== undefined) ucpCheckout.continue_url = safeContinueUrl;
+      else delete ucpCheckout.continue_url;
+    }
+    if ("session_id" in ucpCheckout && typeof ucpCheckout.session_id === "string") {
+      const safeSid = sanitizeGenericVariantId(ucpCheckout.session_id);
+      if (safeSid) ucpCheckout.session_id = safeSid;
+      else delete ucpCheckout.session_id;
+    }
+    obj.ucp_checkout = ucpCheckout;
   }
   if (Array.isArray(obj.items)) {
     obj.items = (obj.items as Array<Record<string, unknown>>).filter(

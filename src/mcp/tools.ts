@@ -280,7 +280,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Inspect Store",
       description:
-        "Check an HTTPS online store URL to detect its platform (Amazon, Second-Hand & Refurbished Marketplaces, Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2 / Adobe Commerce, or Universal Schema.org JSON-LD fallback), currency, country, WAF restrictions, and available catalog capabilities.",
+        "Check an HTTPS online store URL to detect its platform (Amazon, Second-Hand & Refurbished Marketplaces, Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2 / Adobe Commerce, Universal UCP /.well-known/ucp, or Universal Schema.org JSON-LD fallback), currency, country, WAF restrictions, UCP discovery diagnostics, and available catalog capabilities.",
       inputSchema: {
         store_url: z
           .string()
@@ -308,6 +308,17 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
               ? `${store.name ?? store.origin} is a supported secondhand/refurbished marketplace (handoff_tier: "search_handoff"). Use search_secondhand_marketplaces to search multiple secondhand platforms in 1 call, or pass a shared single-item URL directly to get_product to verify live price and Schema.org itemCondition.`
               : `${store.name ?? store.origin} is a WAF-protected secondhand/refurbished marketplace (handoff_tier: "search_handoff", zero scraping). Use search_secondhand_marketplaces (or search_products) to build verified pre-filtered search links for the user's browser.`
           );
+        } else if (store.platform === "ucp") {
+          notices.push(
+            `Detected Universal Commerce Protocol (UCP v${store.ucp?.version ?? "unknown"}) via /.well-known/ucp.${
+              store.ucp?.checkoutHandoffSupported
+                ? " Zero-liability checkout handoff is available via create_cart_link (merchant remains Merchant of Record)."
+                : " Use get_product with a full product URL for live Schema.org JSON-LD price/stock verification."
+            }`
+          );
+          if (store.ucp?.warnings?.length) {
+            notices.push(...store.ucp.warnings);
+          }
         } else if (store.platform === "jsonld") {
           notices.push(
             "Handled via Universal Schema.org JSON-LD fallback: pass a full product page URL to get_product for verified live price, currency, stock availability, and SKU/EAN. create_cart_link returns a verified direct_product_link."
@@ -338,6 +349,14 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
             notices.push(
               "Store restricts GraphQL/catalog endpoints via WAF/auth; ShopCart stays strictly read-only and never bypasses access controls."
             );
+          }
+        }
+        if (store.platform !== "ucp" && store.ucp?.supported) {
+          notices.push(
+            `Store also publishes a UCP v${store.ucp.version ?? "unknown"} manifest at /.well-known/ucp (${store.ucp.capabilities.length} capability/capabilities detected; zero-liability handoff model).`
+          );
+          if (store.ucp.warnings?.length) {
+            notices.push(...store.ucp.warnings);
           }
         }
         if (store.platform === "amazon" && !store.capabilities.liveSearch) {

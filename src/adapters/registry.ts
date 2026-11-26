@@ -6,6 +6,7 @@ import { MagentoAdapter } from "./magento/adapter.js";
 import { SecondhandMarketplaceAdapter } from "./secondhand/adapter.js";
 import { ShopifyAdapter } from "./shopify/adapter.js";
 import { ShopwareAdapter } from "./shopware/adapter.js";
+import { UniversalUcpAdapter } from "./ucp/adapter.js";
 import { WooCommerceAdapter } from "./woocommerce/adapter.js";
 import type { StoreAdapter, StoreInfo } from "./types.js";
 
@@ -31,17 +32,24 @@ export class AdapterRegistry {
     // 5. BigCommerce (Stencil / BCData / /cart.php)
     // 6. Shopware 6 (Store API / storefront markers)
     // 7. Magento 2 / Adobe Commerce (read-only GraphQL)
-    // 8. Universal JSON-LD / Schema.org (STRICTLY LAST FALLBACK)
-    this.adapters = adapters ?? [
-      new AmazonAdapter(),
-      new SecondhandMarketplaceAdapter(),
-      new ShopifyAdapter(),
-      new WooCommerceAdapter(),
-      new BigCommerceAdapter(),
-      new ShopwareAdapter(),
-      new MagentoAdapter(),
-      new UniversalJsonLdAdapter()
-    ];
+    // 8. Universal UCP Meta-Adapter (/.well-known/ucp — Wix, Custom UCP, etc.)
+    // 9. Universal JSON-LD / Schema.org (STRICTLY LAST FALLBACK)
+    if (adapters) {
+      this.adapters = adapters;
+    } else {
+      const jsonLdAdapter = new UniversalJsonLdAdapter();
+      this.adapters = [
+        new AmazonAdapter(),
+        new SecondhandMarketplaceAdapter({ jsonLdAdapter }),
+        new ShopifyAdapter(),
+        new WooCommerceAdapter(),
+        new BigCommerceAdapter(),
+        new ShopwareAdapter(),
+        new MagentoAdapter(),
+        new UniversalUcpAdapter({ jsonLdFallback: jsonLdAdapter }),
+        jsonLdAdapter
+      ];
+    }
   }
 
   getDefault(): StoreAdapter {
@@ -96,14 +104,24 @@ export class AdapterRegistry {
     signal?: AbortSignal
   ): Promise<{ adapter: StoreAdapter; store: StoreInfo | null }> {
     const now = Date.now();
+    const ucpAdapter = this.adapters.find(
+      (a): a is UniversalUcpAdapter => a instanceof UniversalUcpAdapter
+    );
     for (const adapter of this.adapters) {
       if (signal?.aborted) {
         throw signal.reason instanceof Error ? signal.reason : new Error("Store resolution aborted");
       }
       const store = await adapter.detect(origin, concurrencyKey);
       if (store) {
-        this.cacheResolution(origin, adapter, store, now);
-        return { adapter, store };
+        const enrichedStore =
+          ucpAdapter &&
+          store.platform !== "amazon" &&
+          store.platform !== "secondhand" &&
+          store.platform !== "ucp"
+            ? await ucpAdapter.enrichStoreInfo(store, concurrencyKey)
+            : store;
+        this.cacheResolution(origin, adapter, enrichedStore, now);
+        return { adapter, store: enrichedStore };
       }
     }
     return { adapter: this.getDefault(), store: null };
@@ -141,6 +159,7 @@ export class AdapterRegistry {
  * be spent by anonymous callers.
  */
 export function createIsolatedStoreCheckRegistry(): AdapterRegistry {
+  const jsonLdAdapter = new UniversalJsonLdAdapter();
   return new AdapterRegistry([
     new AmazonAdapter({ env: {} }),
     new ShopifyAdapter(),
@@ -148,6 +167,7 @@ export function createIsolatedStoreCheckRegistry(): AdapterRegistry {
     new BigCommerceAdapter(),
     new ShopwareAdapter(),
     new MagentoAdapter(),
-    new UniversalJsonLdAdapter()
+    new UniversalUcpAdapter({ jsonLdFallback: jsonLdAdapter }),
+    jsonLdAdapter
   ]);
 }
