@@ -365,6 +365,15 @@ export function createApp(deps: CreateAppDeps): Express {
     res.status(200).setHeader("Content-Type", "application/xml; charset=utf-8").send(renderSitemapXml(config));
   });
 
+  if (config.indexNowKey) {
+    const indexNowKey = config.indexNowKey;
+    app.get(`/${indexNowKey}.txt`, (_req, res) => {
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      res.status(200).setHeader("Content-Type", "text/plain; charset=utf-8").send(indexNowKey);
+    });
+  }
+
   app.get("/privacy", (req, res) => {
     const lang = detectLang(req.query.lang, req.headers["accept-language"]);
     res.setHeader("X-Content-Type-Options", "nosniff");

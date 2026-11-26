@@ -10,17 +10,32 @@ const GUIDE_DETAIL_ROUTES = [
   "/guides/chatgpt-warenkorb-erstellen",
   "/guides/adventskalender-mit-ki-finden",
   "/en/guides/shop-with-claude",
-  "/en/guides/chatgpt-shopify-cart"
+  "/en/guides/chatgpt-shopify-cart",
+  "/en/guides/chatgpt-instant-checkout-alternative",
+  "/guides/chatgpt-instant-checkout-alternative",
+  "/en/guides/chatgpt-amazon-shopping-cart",
+  "/guides/chatgpt-amazon-warenkorb",
+  "/en/guides/shopify-mcp-server-comparison",
+  "/guides/shopify-mcp-server-vergleich"
 ] as const;
+
+const RECIPROCAL_HREFLANG_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  ["/guides/mit-claude-online-einkaufen", "/en/guides/shop-with-claude"],
+  ["/guides/chatgpt-warenkorb-erstellen", "/en/guides/chatgpt-shopify-cart"],
+  ["/guides/chatgpt-instant-checkout-alternative", "/en/guides/chatgpt-instant-checkout-alternative"],
+  ["/guides/chatgpt-amazon-warenkorb", "/en/guides/chatgpt-amazon-shopping-cart"],
+  ["/guides/shopify-mcp-server-vergleich", "/en/guides/shopify-mcp-server-comparison"]
+];
 
 const ALL_GUIDE_ROUTES = ["/guides", ...GUIDE_DETAIL_ROUTES] as const;
 
-function makeGuidesApp() {
+function makeGuidesApp(extraEnv: Record<string, string> = {}) {
   const config = loadConfig({
     APP_ORIGIN: "https://shopcart.wals.pro",
     STORAGE_BACKEND: "memory",
     SESSION_SECRET: "test-session-secret-0123456789abcdef",
-    PROMO_FREE_PRO_UNTIL: "2026-12-06T23:59:59+01:00"
+    PROMO_FREE_PRO_UNTIL: "2026-12-06T23:59:59+01:00",
+    ...extraEnv
   });
   return { config, app: createApp({ config, store: new MemoryStore() }) };
 }
@@ -46,9 +61,11 @@ function extractJsonLdBlocks(html: string): Array<Record<string, unknown>> {
   return blocks;
 }
 
-describe("SEO & GEO shopping guide pages (/guides, DE/EN detail routes, sitemap & CSS)", () => {
-  it("serves all 6 guide routes with HTTP 200, strict CSP, valid meta lengths, canonical, hreflang, OG tags, and 1-click AI deeplinks", async () => {
+describe("SEO & GEO shopping guide pages (/guides, 11 DE/EN detail routes, sitemap & CSS)", () => {
+  it("serves all 12 guide routes with HTTP 200, strict CSP, valid meta lengths, canonical, hreflang, OG tags, and 1-click AI deeplinks", async () => {
     const { app } = makeGuidesApp();
+
+    expect(GUIDE_DEFINITIONS).toHaveLength(GUIDE_DETAIL_ROUTES.length);
 
     for (const route of ALL_GUIDE_ROUTES) {
       const res = await request(app).get(route).expect(200);
@@ -94,9 +111,12 @@ describe("SEO & GEO shopping guide pages (/guides, DE/EN detail routes, sitemap 
       expect(html).toMatch(/href="https:\/\/claude\.ai\/new\?q=[^"]+"/);
       expect(html).toMatch(/href="https:\/\/chatgpt\.com\/\?q=[^"]+"/);
 
-      // Brand compliance: independent Shopify disclaimer + zero Odoo mentions
+      // Brand & Team-Direktive 8 compliance: independent disclaimer, zero Odoo, zero internal audit metrics
       expect(html.toLowerCase()).not.toContain("odoo");
       expect(html).toMatch(/nicht verbunden mit Shopify Inc\.|not affiliated with Shopify Inc\./);
+      expect(html).toMatch(/WooCommerce/);
+      expect(html).toMatch(/Amazon\.com, Inc\./);
+      expect(html).not.toMatch(/DataForSEO|Suchvolumen|search volume|54[.,]3\s*%|30[.,]4\s*%|1\.962/i);
 
       // Valid JSON-LD parsing
       const ldBlocks = extractJsonLdBlocks(html);
@@ -104,7 +124,7 @@ describe("SEO & GEO shopping guide pages (/guides, DE/EN detail routes, sitemap 
     }
   });
 
-  it("includes valid Article, FAQPage, and HowTo JSON-LD plus wals.pro blog structure on all 5 detail guides", async () => {
+  it("includes valid Article, FAQPage, and HowTo JSON-LD plus wals.pro blog structure on all 11 detail guides", async () => {
     const { app } = makeGuidesApp();
 
     for (const route of GUIDE_DETAIL_ROUTES) {
@@ -122,7 +142,7 @@ describe("SEO & GEO shopping guide pages (/guides, DE/EN detail routes, sitemap 
       const faqPage = ldBlocks[1]!;
       const mainEntity = faqPage.mainEntity as Array<Record<string, unknown>>;
       expect(Array.isArray(mainEntity)).toBe(true);
-      expect(mainEntity.length).toBeGreaterThanOrEqual(4);
+      expect(mainEntity.length).toBeGreaterThanOrEqual(5);
 
       const howTo = ldBlocks[2]!;
       const steps = howTo.step as Array<Record<string, unknown>>;
@@ -141,7 +161,87 @@ describe("SEO & GEO shopping guide pages (/guides, DE/EN detail routes, sitemap 
     }
   });
 
-  it("links all 5 DE + EN guides from /guides and supports ?lang=de and ?lang=en", async () => {
+  it("enforces reciprocal DE <-> EN hreflang pairs for all 5 bilingual guide pairs", async () => {
+    const { app } = makeGuidesApp();
+
+    for (const [deRoute, enRoute] of RECIPROCAL_HREFLANG_PAIRS) {
+      const deRes = await request(app).get(deRoute).expect(200);
+      const enRes = await request(app).get(enRoute).expect(200);
+
+      expect(deRes.text).toContain(`<link rel="alternate" hreflang="de" href="https://shopcart.wals.pro${deRoute}">`);
+      expect(deRes.text).toContain(`<link rel="alternate" hreflang="en" href="https://shopcart.wals.pro${enRoute}">`);
+      expect(enRes.text).toContain(`<link rel="alternate" hreflang="de" href="https://shopcart.wals.pro${deRoute}">`);
+      expect(enRes.text).toContain(`<link rel="alternate" hreflang="en" href="https://shopcart.wals.pro${enRoute}">`);
+    }
+  });
+
+  it("upgrades existing guides to evergreen Question H1s and moves Black Friday promo to optional seasonal note on /en/guides/chatgpt-shopify-cart", async () => {
+    const { app: promoApp } = makeGuidesApp({ PROMO_FREE_PRO_UNTIL: "2026-12-06T23:59:59+01:00" });
+    const { app: evergreenApp } = makeGuidesApp({ PROMO_FREE_PRO_UNTIL: "2025-01-01T00:00:00Z" });
+
+    const chatgptEnPromo = await request(promoApp).get("/en/guides/chatgpt-shopify-cart").expect(200);
+    expect(extractTagContent(chatgptEnPromo.text, "h1")).toBe(
+      "Can ChatGPT Create a Shopping Cart? Yes — via Open MCP (2026 Guide)"
+    );
+    expect(extractTagContent(chatgptEnPromo.text, "title").toLowerCase()).not.toContain("black friday");
+    expect(chatgptEnPromo.text).toContain('class="seasonal-note"');
+
+    const chatgptEnPostPromo = await request(evergreenApp).get("/en/guides/chatgpt-shopify-cart").expect(200);
+    expect(chatgptEnPostPromo.text).not.toContain('class="seasonal-note"');
+
+    const chatgptDe = await request(promoApp).get("/guides/chatgpt-warenkorb-erstellen").expect(200);
+    expect(extractTagContent(chatgptDe.text, "h1")).toBe(
+      "Kann ChatGPT einen Warenkorb erstellen? Ja — per offenem MCP (2026)"
+    );
+
+    const claudeDe = await request(promoApp).get("/guides/mit-claude-online-einkaufen").expect(200);
+    expect(extractTagContent(claudeDe.text, "h1")).toBe(
+      "Kann Claude online einkaufen &amp; einen Warenkorb bauen? (2026 Guide)"
+    );
+
+    const claudeEn = await request(promoApp).get("/en/guides/shop-with-claude").expect(200);
+    expect(extractTagContent(claudeEn.text, "h1")).toBe(
+      "Can Claude Build a Shopping Cart? Shop Any Store via MCP (2026)"
+    );
+  });
+
+  it("covers honest Amazon permalink reality and 4-column Shopify MCP comparison tables with all technical PAA", async () => {
+    const { app } = makeGuidesApp();
+
+    const amazonEn = await request(app).get("/en/guides/chatgpt-amazon-shopping-cart").expect(200);
+    expect(amazonEn.text).toContain("/gp/aws/cart/add.html");
+    expect(amazonEn.text).toContain("10");
+    expect(amazonEn.text).toContain("Keepa");
+    expect(amazonEn.text).toContain("PA-API 5.0");
+    expect(amazonEn.text).toContain("WooCommerce");
+    expect(amazonEn.text).toContain("Shopify");
+
+    const amazonDe = await request(app).get("/guides/chatgpt-amazon-warenkorb").expect(200);
+    expect(amazonDe.text).toContain("/gp/aws/cart/add.html");
+    expect(amazonDe.text).toContain("Keepa");
+    expect(amazonDe.text).toContain("WooCommerce");
+
+    const shopifyCompEn = await request(app).get("/en/guides/shopify-mcp-server-comparison").expect(200);
+    const theadCols = shopifyCompEn.text.match(/<th scope="col">/g) ?? [];
+    expect(theadCols).toHaveLength(4);
+    expect(shopifyCompEn.text).toContain("@shopify/dev-mcp");
+    expect(shopifyCompEn.text).toContain("/api/ucp/mcp");
+    for (const paa of [
+      "Is there an MCP server for Shopify?",
+      "What is MCP in Shopify?",
+      "Does ChatGPT use MCP?",
+      "How do I run an MCP server?",
+      "Can I host my own MCP?"
+    ]) {
+      expect(shopifyCompEn.text).toContain(paa);
+    }
+
+    const shopifyCompDe = await request(app).get("/guides/shopify-mcp-server-vergleich").expect(200);
+    const theadColsDe = shopifyCompDe.text.match(/<th scope="col">/g) ?? [];
+    expect(theadColsDe).toHaveLength(4);
+  });
+
+  it("links all 11 DE + EN guides from /guides and supports ?lang=de and ?lang=en", async () => {
     const { app } = makeGuidesApp();
 
     const deRes = await request(app).get("/guides?lang=de").expect(200);
@@ -175,6 +275,7 @@ describe("SEO & GEO shopping guide pages (/guides, DE/EN detail routes, sitemap 
     const sitemap = await request(app).get("/sitemap.xml").expect(200);
     expect(sitemap.headers["content-type"]).toContain("application/xml");
     expect(sitemap.text).toContain('xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"');
+    expect(sitemap.text).toContain('xmlns:xhtml="http://www.w3.org/1999/xhtml"');
     expect(sitemap.text).toContain("<loc>https://shopcart.wals.pro/</loc>");
     for (const route of ALL_GUIDE_ROUTES) {
       expect(sitemap.text).toContain(`<loc>https://shopcart.wals.pro${route}</loc>`);
@@ -203,10 +304,10 @@ describe("SEO & GEO shopping guide pages (/guides, DE/EN detail routes, sitemap 
     expect(res.text).not.toContain("<script>alert(1)</script>");
     expect(res.text).not.toContain(xssPayload);
 
-    // Sanity check: none of the static guide definitions leak raw HTML tags
+    // Sanity check: all guide definitions obey SEO meta bounds
     for (const g of GUIDE_DEFINITIONS) {
-      expect(g.metaTitle.length).toBeLessThanOrEqual(70);
-      expect(g.metaDescription.length).toBeLessThanOrEqual(160);
+      expect(g.metaTitle.length, `${g.path} metaTitle <= 70`).toBeLessThanOrEqual(70);
+      expect(g.metaDescription.length, `${g.path} metaDescription <= 160`).toBeLessThanOrEqual(160);
     }
   });
 });

@@ -2,76 +2,30 @@ import { Router, type Request, type Response } from "express";
 import type { AppConfig } from "../config.js";
 import { detectLang, escapeHtml, type Lang } from "../auth/pages.js";
 import { isPromoFreeProActive } from "../billing/quota.js";
+import { ANSWER_PAGE_GUIDES } from "./guides-answer-pages.js";
+import {
+  PUBLISHED_ISO,
+  SOURCES_DE,
+  SOURCES_EN,
+  UPDATED_ISO,
+  type GuideDefinition,
+  type GuideFaqItem,
+  type GuideHowToStep,
+  type GuideSeasonalNote,
+  type GuideSection,
+  type GuideSource,
+  type GuideTable
+} from "./guides-types.js";
 
-export interface GuideFaqItem {
-  question: string;
-  answer: string;
-}
-
-export interface GuideHowToStep {
-  name: string;
-  text: string;
-}
-
-export interface GuideTable {
-  id: string;
-  caption: string;
-  headers: [string, string, string];
-  rows: Array<[string, string, string]>;
-}
-
-export interface GuideSection {
-  heading: string;
-  paragraphs: string[];
-  bullets?: Array<{ lead: string; text: string }>;
-  orderedSteps?: Array<{ lead: string; text: string }>;
-  table?: GuideTable;
-  takeaway: string;
-}
-
-export interface GuideSource {
-  label: string;
-  url: string;
-  retrieved: string;
-}
-
-export interface GuideDefinition {
-  path: string;
-  lang: Lang;
-  category: string;
-  title: string;
-  metaTitle: string;
-  metaDescription: string;
-  cardSummary: string;
-  tldrLabel: string;
-  tldrText: string;
-  intro: string;
-  takeawaysHeading: string;
-  takeaways: Array<{ lead: string; text: string }>;
-  primaryAssistant: "claude" | "chatgpt";
-  starterPrompt: string;
-  ctaHeading: string;
-  ctaSubtext: string;
-  sections: GuideSection[];
-  howToName: string;
-  howToDescription: string;
-  howToSteps: GuideHowToStep[];
-  sourcesHeading: string;
-  sourcesIntro: string;
-  sources: GuideSource[];
-  limitationsLabel: string;
-  limitationsText: string;
-  faqHeading: string;
-  faqs: GuideFaqItem[];
-  hreflang: {
-    de: string;
-    en: string;
-    xDefault: string;
-  };
-  publishedDate: string;
-  modifiedDate: string;
-  keywords: string[];
-}
+export type {
+  GuideDefinition,
+  GuideFaqItem,
+  GuideHowToStep,
+  GuideSeasonalNote,
+  GuideSection,
+  GuideSource,
+  GuideTable
+};
 
 const GUIDES_CSP = [
   "default-src 'self'",
@@ -84,70 +38,22 @@ const GUIDES_CSP = [
   "frame-ancestors 'none'"
 ].join("; ");
 
-const PUBLISHED_ISO = "2026-11-25";
-
-const SOURCES_DE: GuideSource[] = [
-  {
-    label: "ShopCart MCP Produktseite & Dokumentation",
-    url: "https://shopcart.wals.pro/?lang=de",
-    retrieved: "25.11.2026"
-  },
-  {
-    label: "ShopCart MCP Open-Source-Repository auf GitHub (MIT-Lizenz)",
-    url: "https://github.com/Wals-pro/shopcart-mcp",
-    retrieved: "25.11.2026"
-  },
-  {
-    label: "Shopify Developer Docs: Create cart permalinks",
-    url: "https://shopify.dev/docs/apps/build/checkout/create-cart-permalinks",
-    retrieved: "25.11.2026"
-  },
-  {
-    label: "Model Context Protocol — Offizielle Einführung",
-    url: "https://modelcontextprotocol.io/docs/getting-started/intro",
-    retrieved: "25.11.2026"
-  }
-];
-
-const SOURCES_EN: GuideSource[] = [
-  {
-    label: "ShopCart MCP Product Page & Documentation",
-    url: "https://shopcart.wals.pro/?lang=en",
-    retrieved: "2026-11-25"
-  },
-  {
-    label: "ShopCart MCP Open-Source Repository on GitHub (MIT License)",
-    url: "https://github.com/Wals-pro/shopcart-mcp",
-    retrieved: "2026-11-25"
-  },
-  {
-    label: "Shopify Developer Docs: Create cart permalinks",
-    url: "https://shopify.dev/docs/apps/build/checkout/create-cart-permalinks",
-    retrieved: "2026-11-25"
-  },
-  {
-    label: "Model Context Protocol — Official Introduction",
-    url: "https://modelcontextprotocol.io/docs/getting-started/intro",
-    retrieved: "2026-11-25"
-  }
-];
-
-export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
+const CORE_GUIDES: readonly GuideDefinition[] = [
   {
     path: "/guides/mit-claude-online-einkaufen",
     lang: "de",
     category: "Claude Shopping Guide",
-    title: "Mit Claude direkt in Online-Shops einkaufen & Warenkorb bauen",
-    metaTitle: "Mit Claude online einkaufen & Warenkorb bauen | ShopCart MCP",
+    title: "Kann Claude online einkaufen & einen Warenkorb bauen? (2026 Guide)",
+    metaTitle: "Kann Claude online einkaufen & einen Warenkorb bauen? (2026)",
     metaDescription:
-      "Lass Claude Produkte, Größen und Live-Preise in Shopify-Shops prüfen und einen fertigen Warenkorb-Link bauen — read-only, DSGVO-konform und kostenlos.",
+      "Ja: Mit ShopCart MCP prüft Claude Größen, Bestand & Live-Preise in Shopify- & WooCommerce-Shops und baut einen Warenkorb-Link — read-only.",
     cardSummary:
-      "Verbinde Claude.ai oder Claude Desktop in zwei Klicks mit öffentlichen Shopify-Shops und lass dir geprüfte Multi-Artikel-Warenkörbe erstellen.",
-    tldrLabel: "Kurz gesagt:",
+      "Ja: Verbinde Claude.ai oder Claude Desktop in zwei Klicks mit ShopCart MCP und lass dir geprüfte Multi-Artikel-Warenkörbe erstellen.",
+    tldrLabel: "Kurzantwort:",
     tldrText:
-      "Mit ShopCart MCP verbindet sich Claude direkt mit öffentlichen Shopify-Onlineshops, prüft Größen, Farben, Live-Preise und Lagerbestand und liefert dir einen fertigen Warenkorb-Link — du prüfst und bezahlst immer selbst im Browser.",
+      "Ja — Claude kann 2026 echte Warenkörbe in tausenden Online-Shops bauen, ohne dass du Zahlungsdaten teilen musst. Mit dem kostenlosen OAuth-2.1-Connector ShopCart MCP (https://shopcart.wals.pro/mcp) prüft Claude.ai oder Claude Desktop Varianten, Größen, Bestand und Live-Preise direkt in öffentlichen Shopify- und WooCommerce-Shops — plus offizielle Amazon-Cart-Links — und liefert einen fertigen Browser-Warenkorb-Link zum Selbstbezahlen.",
     intro:
-      "Du möchtest beim Online-Shopping Zeit sparen, ohne dich durch zwanzig Tabs und ausverkaufte Größen zu klicken? In diesem Praxis-Guide siehst du, wie du Claude als deinen persönlichen KI-Shopping-Assistenten über Shopify MCP sicher mit öffentlichen Online-Shops verbindest und in Sekunden einen geprüften Warenkorb im Browser öffnest.",
+      "Du möchtest beim Online-Shopping Zeit sparen, ohne dich durch zwanzig Tabs und ausverkaufte Größen zu klicken? In diesem Praxis-Guide siehst du, wie Claude über das offene Model Context Protocol (MCP) echte, geprüfte Warenkörbe zusammenstellt — ganz ohne fragile Browser-Extensions und ohne automatischen Kaufabschluss.",
     takeawaysHeading: "Das Wichtigste in Kürze",
     takeaways: [
       {
@@ -159,12 +65,12 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
         text: "ShopCart MCP arbeitet strikt lesend (read-only) und löst niemals Bestellungen aus — Adresse, Versandart und Zahlung bleiben komplett in deinem Browser."
       },
       {
-        lead: "In 30 Sekunden startklar.",
-        text: "In Claude.ai verbindest du den gehosteten OAuth-2.1-Connector unter https://shopcart.wals.pro/mcp; lokal auf dem Rechner läuft die MIT-Open-Source-CLI ohne Konto."
+        lead: "Funktioniert in Claude.ai Web, Mobile, Desktop & Claude Code.",
+        text: "In Claude.ai verbindest du https://shopcart.wals.pro/mcp in zwei Klicks per OAuth 2.1; lokal auf dem Rechner läuft die MIT-Open-Source-CLI ohne Konto."
       },
       {
-        lead: "Funktioniert in tausenden Shopify-Shops.",
-        text: "Egal ob Mode, Outdoor, Food oder Geschenke — ShopCart MCP verarbeitet Währungen wie EUR, CHF, USD und GBP automatisch korrekt."
+        lead: "Weltweite Währungen statt lokaler Liefer-Apps.",
+        text: "Unterstützt öffentliche Shopify- und WooCommerce-Shops in EUR, CHF, USD und GBP sowie offizielle Amazon-Multi-Artikel-Links über 10 Marktplätze."
       }
     ],
     primaryAssistant: "claude",
@@ -175,23 +81,23 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       "Öffnet einen fertigen Shopping-Prompt direkt in Claude oder ChatGPT — inklusive Einrichtungshilfe, falls ShopCart MCP noch nicht verbunden ist.",
     sections: [
       {
-        heading: "Warum normale KI-Suche beim Online-Shopping oft scheitert",
+        heading: "Warum normale KI-Suche und Browser-Extensions beim Shopping bremsen",
         paragraphs: [
-          "Wenn du Claude ohne direkte Shop-Anbindung nach einem Produkt fragst, greift der Assistent auf allgemeine Websuchen oder gecachte Suchmaschinen-Snippets zurück. Das Ergebnis sind oft allgemeine Kategorieseiten, veraltete Preise oder Artikel, bei denen genau deine Größe beim Öffnen ausverkauft ist.",
-          "Noch zäher wird es, sobald du mehrere Teile kombinieren willst — etwa zwei Packungen weiße und eine Packung schwarze Sneaker-Socken in Größe 43 bis 46. Am Ende öffnest du doch wieder jeden Tab von Hand und klickst alle Varianten einzeln in den Warenkorb."
+          "Wenn du Claude ohne direkte Shop-Anbindung nach einem Produkt fragst, greift der Assistent auf allgemeine Websuchen oder gecachte Snippets zurück. Das Ergebnis sind oft Kategorieseiten, veraltete Preise oder Artikel, bei denen deine Größe beim Öffnen bereits vergriffen ist.",
+          "Browser-Automatisierungs-Extensions klicken sich zwar durch Webseiten, scheitern aber schnell an Cookie-Bannern, dynamischen Menüs oder Popups und funktionieren nicht auf dem Smartphone. Strukturierte MCP-Abfragen liefern dagegen exakte Varianten-IDs und deterministische Warenkorb-Links in Sekunden."
         ],
         takeaway:
-          "Fazit: Ohne Live-Zugriff auf Varianten-IDs und Lagerbestand bleibt KI-Shopping eine Linkliste statt echter Zeitersparnis."
+          "Fazit: Strukturierter MCP-Lesezugriff ersetzt sowohl veraltete Linklisten als auch fehleranfällige Browser-Klickbots."
       },
       {
-        heading: "So baut dir Claude in vier Schritten einen echten Shopify-Warenkorb",
+        heading: "So baut dir Claude in vier Schritten einen echten Warenkorb",
         paragraphs: [
-          "ShopCart MCP nutzt das offene Model Context Protocol (MCP), um Claude vier klar begrenzte Lese-Werkzeuge bereitzustellen. Statt HTML-Seiten zu raten, ruft der Server strukturierte Katalogdaten direkt vom jeweiligen Shopify-Shop ab und erzeugt einen offiziellen Warenkorb-Permalink."
+          "ShopCart MCP nutzt das offene Model Context Protocol (MCP), um Claude vier klar begrenzte Lese-Werkzeuge bereitzustellen. Statt HTML-Seiten zu raten, ruft der Server strukturierte Katalogdaten direkt vom jeweiligen Shop ab und erzeugt einen offiziellen Warenkorb-Permalink."
         ],
         orderedSteps: [
           {
             lead: "Shop prüfen (inspect_store):",
-            text: "Prüft, ob die Domain ein unterstützter öffentlicher Shopify-Shop ist, und liest Währung, Land sowie eventuelle Firewall-Regeln aus."
+            text: "Erkennt automatisch öffentliche Shopify- und WooCommerce-Shops (sowie Amazon-Marktplätze für Cart-Links) und liest Währung, Land und Firewall-Regeln aus."
           },
           {
             lead: "Katalog durchsuchen (search_products):",
@@ -199,7 +105,7 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
           },
           {
             lead: "Varianten und Lagerbestand prüfen (get_product):",
-            text: "Lädt die exakten numerischen Varianten-IDs für jede Größe und Farbe samt Live-Preis, echtem Streichpreis und Verfügbarkeit."
+            text: "Lädt die exakten Varianten-IDs für jede Größe und Farbe samt Live-Preis, echtem Streichpreis und Verfügbarkeit."
           },
           {
             lead: "Warenkorb-Link bauen (create_cart_link):",
@@ -210,50 +116,60 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
           "Fazit: Vier feste Prüfschritte sorgen dafür, dass exakt die richtige Größe, Farbe und Stückzahl im Warenkorb landet."
       },
       {
-        heading: "Normale KI-Suche vs. Claude mit ShopCart MCP im Vergleich",
+        heading: "Claude Websuche vs. Browser-Extension vs. Claude + ShopCart MCP",
         paragraphs: [
-          "Der Unterschied zeigt sich sofort, sobald konkrete Größen, echte Streichpreise und mehrere Artikel in einem Einkauf zusammenkommen."
+          "Der Vergleich zeigt, warum ein dedizierter Read-Only-MCP-Connector zuverlässiger arbeitet als Websuche oder reine Browser-Steuerung."
         ],
         table: {
           id: "claude-compare-table",
-          caption: "Vergleich: Normale KI-Websuche gegenüber Claude mit ShopCart MCP",
-          headers: ["Kriterium", "Normale KI-Websuche", "Claude + ShopCart MCP"],
+          caption: "Vergleich: Claude Websuche, Browser-Extension (Claude in Chrome) und Claude mit ShopCart MCP",
+          headers: [
+            "Kriterium",
+            "Claude Websuche",
+            "Browser-Extension (Claude in Chrome)",
+            "Claude + ShopCart MCP"
+          ],
           rows: [
             [
               "Preise & Rabatte",
               "Oft veraltet aus gecachten Snippets",
+              "Langsames Seitenladen, anfällig für Popups",
               "Live vom Shop geladen inklusive echtem Streichpreis"
             ],
             [
               "Größen- & Farbcheck",
-              "Meist nicht zuverlässig pro Variante sichtbar",
-              "Exakte Prüfung je Varianten-ID und Lagerstatus"
+              "Nicht zuverlässig pro Variante sichtbar",
+              "Muss Dropdowns einzeln klicken",
+              "Exakte Live-Prüfung je Varianten-ID und Lagerstatus"
             ],
             [
-              "Ergebnis für dich",
-              "Mehrere lose Produktlinks zum Nachklicken",
-              "Ein geprüfter Warenkorb-Link mit allen Artikeln & Mengen"
+              "Smartphone-Nutzung (Mobile)",
+              "Nur Textlinks",
+              "Nicht verfügbar (Desktop-Browser nötig)",
+              "Funktioniert in Claude.ai Web, Mobile & Desktop"
             ],
             [
-              "Multi-Artikel-Bundles",
+              "Multi-Artikel-Warenkorb",
               "Manuell pro Tab zusammenklicken",
-              "Bis zu 20 Positionen in einem Browser-Warenkorb"
+              "Mehrminütige Klick-Sequenz",
+              "Bis zu 20 Positionen in einem geprüften Browser-Link"
             ],
             [
               "Sicherheit beim Kauf",
               "Manueller Checkout im Browser",
-              "Strikt read-only — Prüfung & Zahlung bleiben im Browser"
+              "Teilt aktive Browser-Session",
+              "Strikt read-only — Prüfung & Zahlung bleiben komplett im Browser"
             ]
           ]
         },
         takeaway:
-          "Fazit: Sobald Größenverfügbarkeit oder mehrere Artikel eine Rolle spielen, spart Claude mit ShopCart MCP den gesamten Klickweg."
+          "Fazit: Claude mit ShopCart MCP funktioniert mobil wie am Desktop, ist deterministisch und berührt niemals deine aktive Login-Session."
       },
       {
         heading: "In 30 Sekunden mit Claude.ai oder Claude Desktop verbinden",
         paragraphs: [
           "Für Claude.ai (Web & Mobile) öffnest du einfach die Connector-Einstellungen, hinterlegst die Server-Adresse https://shopcart.wals.pro/mcp und bestätigst die OAuth-2.1-Anmeldung in zwei Klicks. Danach steht dir ShopCart MCP in jedem Chat zur Verfügung.",
-          "Wenn du lokal mit Claude Desktop oder Claude Code arbeitest, kannst du alternativ die kostenlose Open-Source-CLI unter MIT-Lizenz direkt per npx -y shopcart-mcp starten — ganz ohne Konto und ohne Telemetrie. Im gehosteten Dienst sind 20 Abfragen pro Tag dauerhaft gratis; im Pro-Tarif (9 €/Monat) gibt es 500 Abfragen pro Tag — während der Black-Friday-Launch-Aktion bis 06.12.2026 für alle angemeldeten Konten kostenlos."
+          "Wenn du lokal mit Claude Desktop oder Claude Code arbeitest, kannst du alternativ die kostenlose Open-Source-CLI unter MIT-Lizenz direkt per npx -y shopcart-mcp starten — ganz ohne Konto und ohne Telemetrie. Im gehosteten Dienst sind 20 Abfragen pro Tag dauerhaft gratis; im Pro-Tarif (9 €/Monat) gibt es 500 Abfragen pro Tag."
         ],
         takeaway:
           "Fazit: Du startest in unter einer Minute und wählst frei zwischen gehostetem 2-Klick-Komfort und lokalem Open-Source-Betrieb."
@@ -268,9 +184,9 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
           "Fazit: Claude übernimmt Recherche und Warenkorb-Bau, während Datenschutz und Kaufentscheidung zu 100 % bei dir bleiben."
       }
     ],
-    howToName: "Mit Claude in 3 Schritten einen geprüften Shopify-Warenkorb erstellen",
+    howToName: "Mit Claude in 3 Schritten einen geprüften Online-Warenkorb erstellen",
     howToDescription:
-      "So verbindest du Claude über ShopCart MCP mit öffentlichen Shopify-Shops und öffnest einen fertig gepackten Warenkorb-Link im Browser.",
+      "So verbindest du Claude über ShopCart MCP mit öffentlichen Shopify- und WooCommerce-Shops (sowie Amazon-Cart-Links) und öffnest einen fertigen Warenkorb im Browser.",
     howToSteps: [
       {
         name: "ShopCart MCP in Claude verbinden",
@@ -278,7 +194,7 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       },
       {
         name: "Shop, Artikel, Größen und Budget nennen",
-        text: "Schreibe Claude im Chat, in welchem Shopify-Shop gesucht werden soll und welche Produkte, Farben, Größen oder welches Preislimit du möchtest."
+        text: "Schreibe Claude im Chat, in welchem Online-Shop gesucht werden soll und welche Produkte, Farben, Größen oder welches Preislimit du möchtest."
       },
       {
         name: "Geprüften Warenkorb-Link öffnen und selbst bezahlen",
@@ -286,37 +202,37 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       }
     ],
     sourcesHeading: "Quellen und Grenzen",
-    sourcesIntro: "Dieser Ratgeber stützt sich auf folgende geprüfte Quellen (alle abgerufen am 25.11.2026):",
+    sourcesIntro: "Dieser Ratgeber stützt sich auf folgende geprüfte Quellen (alle abgerufen am 26.11.2026):",
     sources: SOURCES_DE,
     limitationsLabel: "Grenzen:",
     limitationsText:
-      "ShopCart MCP funktioniert ausschließlich in öffentlichen Shopify-Onlineshops ohne Login-Schranke. Geschlossene Marktplätze wie Amazon, passwortgeschützte B2B-Shops oder andere Shopsysteme werden nicht unterstützt. Bei Marken mit regionalen Länder-Domains solltest du Claude direkt die passende EU- oder DE-Domain nennen, damit Währung und Lagerbestand stimmen.",
+      "Die volle Live-Katalog-, Varianten- und Bestandsprüfung funktioniert auf öffentlichen Shopify- und WooCommerce-Storefronts ohne Login-Schranke. Für Amazon unterstützt ShopCart MCP offizielle Multi-Artikel-Warenkorb-Links (/gp/aws/cart/add.html) über 10 Marktplätze kombiniert mit Websuche oder optional Keepa/PA-API — kein automatischer Checkout. Passwortgeschützte B2B-Portale werden nicht unterstützt.",
     faqHeading: "Häufige Fragen zum Einkaufen mit Claude",
     faqs: [
       {
-        question: "Kauft Claude mit ShopCart MCP automatisch für mich ein?",
+        question: "Kann Claude automatisch für mich einkaufen oder bezahlen?",
         answer:
-          "Nein. Alle Werkzeuge in ShopCart MCP arbeiten rein lesend und erzeugen lediglich einen Warenkorb-Link für deinen Browser. Du prüfst Preise, Versandkosten und Mengen selbst im Online-Shop und schließt den Kauf wie gewohnt ab."
+          "Nein. Alle Werkzeuge in ShopCart MCP arbeiten strikt rein lesend (read-only) und erzeugen lediglich einen geprüften Warenkorb-Link für deinen Browser. Du prüfst Preise, Versandkosten und Mengen selbst im Online-Shop und schließt den Kauf wie gewohnt ab."
       },
       {
-        question: "Funktioniert ShopCart MCP in Claude.ai Web, Mobile und Claude Desktop?",
+        question: "Funktioniert das Einkaufen mit Claude auch auf dem Smartphone?",
         answer:
-          "Ja. In Claude.ai Web und Mobile verbindest du den gehosteten OAuth-2.1-Server https://shopcart.wals.pro/mcp als Custom Connector. In Claude Desktop und Claude Code kannst du sowohl den gehosteten Server als auch die lokale Open-Source-CLI via npx -y shopcart-mcp nutzen."
+          "Ja. Da ShopCart MCP als gehosteter Remote-OAuth-2.1-Server (https://shopcart.wals.pro/mcp) läuft, funktioniert der Connector direkt in Claude.ai Web und in der Claude Mobile App genauso wie in Claude Desktop und Claude Code."
       },
       {
         question: "In welchen Online-Shops kann Claude Warenkörbe erstellen?",
         answer:
-          "ShopCart MCP unterstützt tausende öffentliche Shopify-Onlineshops weltweit in Währungen wie Euro, Schweizer Franken, US-Dollar oder Britischem Pfund. Passwortgeschützte Storefronts und geschlossene Marktplätze wie Amazon werden nicht unterstützt."
+          "Claude durchsucht tausende öffentliche Shopify- und WooCommerce-Onlineshops weltweit live inklusive Größen- und Bestandscheck in EUR, CHF, USD oder GBP. Für Amazon erstellt ShopCart MCP zudem offizielle Multi-Artikel-Warenkorb-Links (/gp/aws/cart/add.html) über 10 Marktplätze."
       },
       {
         question: "Was kostet ShopCart MCP für Claude?",
         answer:
-          "Der gehostete Free-Tarif bietet dauerhaft 20 Abfragen pro Tag kostenlos. Im Pro-Tarif stehen 500 Abfragen pro Tag für 9 € im Monat bereit — während der Black-Friday-Launch-Aktion bis zum 06.12.2026 erhalten alle angemeldeten Konten automatisch 500 Abfragen pro Tag gratis. Lokal unter MIT-Lizenz ist die Nutzung unbegrenzt kostenlos."
+          "Der gehostete Free-Tarif bietet dauerhaft 20 Abfragen pro Tag kostenlos. Im Pro-Tarif stehen 500 Abfragen pro Tag für 9 € im Monat bereit. Lokal über npx -y shopcart-mcp (MIT-Lizenz) ist die Nutzung unbegrenzt kostenlos."
       },
       {
         question: "Speichert ShopCart MCP meine Claude-Chats oder Zahlungsdaten?",
         answer:
-          "Nein. ShopCart MCP speichert weder Chat-Verläufe noch Lieferadressen, Shop-Logins oder Zahlungsdaten. Im gehosteten EU-Betrieb werden ausschließlich Konto-E-Mail, verschlüsselte Anmelde-Hashes und der tägliche Nutzungszähler gespeichert."
+          "Nein. ShopCart MCP speichert weder Chat-Verläufe noch Lieferadressen, Shop-Logins oder Zahlungsdaten. Im gehosteten EU-Betrieb (europe-west1) werden ausschließlich Konto-E-Mail, verschlüsselte Anmelde-Hashes und der tägliche Nutzungszähler gespeichert."
       }
     ],
     hreflang: {
@@ -325,11 +241,11 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       xDefault: "/en/guides/shop-with-claude"
     },
     publishedDate: PUBLISHED_ISO,
-    modifiedDate: PUBLISHED_ISO,
+    modifiedDate: UPDATED_ISO,
     keywords: [
-      "claude online einkaufen",
-      "claude shopping",
-      "shopify mcp",
+      "kann claude online einkaufen",
+      "claude warenkorb bauen",
+      "claude shopping mcp",
       "ki warenkorb erstellen",
       "shopcart mcp"
     ]
@@ -338,34 +254,34 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
     path: "/guides/chatgpt-warenkorb-erstellen",
     lang: "de",
     category: "ChatGPT Shopping Guide",
-    title: "ChatGPT Warenkorb in Shopify-Shops automatisch füllen",
-    metaTitle: "ChatGPT Warenkorb in Shopify-Shops füllen | ShopCart MCP",
+    title: "Kann ChatGPT einen Warenkorb erstellen? Ja — per offenem MCP (2026)",
+    metaTitle: "Kann ChatGPT einen Warenkorb erstellen? Ja — per MCP (2026)",
     metaDescription:
-      "Verbinde ChatGPT per Custom MCP Connector mit öffentlichen Shopify-Shops: Live-Varianten prüfen, echte Rabatte erkennen und fertigen Warenkorb-Link öffnen.",
+      "Ja: Auch ohne Instant Checkout baut ChatGPT 2026 per ShopCart MCP geprüfte Warenkörbe für Shopify, WooCommerce & Amazon-Links — read-only.",
     cardSummary:
-      "So verbindest du ChatGPT über Custom Connectors mit ShopCart MCP und lässt dir lieferbare Produkte direkt als fertigen Warenkorb-Link zusammenstellen.",
-    tldrLabel: "Kurz gesagt:",
+      "Ja — trotz zurückgefahrenem Instant Checkout baut ChatGPT 2026 über ShopCart MCP echte, geprüfte Warenkörbe zum Selbstbezahlen im Browser.",
+    tldrLabel: "Kurzantwort:",
     tldrText:
-      "Über den Custom MCP Connector https://shopcart.wals.pro/mcp greift ChatGPT live auf öffentliche Shopify-Shops zu, prüft Größen, Lagerbestand und echte Rabatte und gibt dir einen fertigen Warenkorb-Link zum Selbstbezahlen im Browser.",
+      "Ja — ChatGPT kann 2026 fertige Warenkörbe erstellen, obwohl OpenAI den eigenständigen Instant Checkout zurückgefahren hat. Über das offene Model Context Protocol (MCP) verbindet sich ChatGPT mit ShopCart MCP (https://shopcart.wals.pro/mcp), prüft Größen, Live-Preise und Lagerbestand direkt in öffentlichen Shopify- und WooCommerce-Shops (plus offizielle Amazon-Cart-Links) und liefert einen geprüften Warenkorb-Link zum Selbstbezahlen.",
     intro:
-      "Du nutzt ChatGPT bereits für Produktrecherche und Preisvergleiche, willst aber endlich von losen Empfehlungen zu einem echten, geprüften Warenkorb kommen? Dieser Leitfaden zeigt dir Schritt für Schritt, wie du ShopCart MCP in ChatGPT verbindest und in Sekunden ganze Einkaufslisten bündelst.",
+      "Viele ältere Blogartikel und Kurzvideos behaupten noch immer, ChatGPT könne höchstens Text-Einkaufslisten schreiben und keinen echten Warenkorb füllen. Mit Custom MCP Connectors ist diese Aussage 2026 überholt: Hier siehst du, wie ChatGPT in Sekunden einen geprüften Warenkorb-Link baut.",
     takeawaysHeading: "Das Wichtigste in Kürze",
     takeaways: [
       {
-        lead: "Ein Connector für tausende Shopify-Shops.",
-        text: "Du verbindest ShopCart MCP einmalig per OAuth 2.1 in ChatGPT und kannst anschließend beliebige öffentliche Shopify-Storefronts direkt im Chat abfragen."
+        lead: "Funktioniert auch nach dem Rückzug von Instant Checkout.",
+        text: "Statt auf geschlossene In-Chat-Bezahlstrecken angewiesen zu sein, nutzt ChatGPT das offene Model Context Protocol (MCP) für echte Warenkorb-Links."
       },
       {
         lead: "Live-Varianten statt ausverkaufter Treffer.",
-        text: "ChatGPT liest exakte Größen, Farben, Stückzahlen und aktuelle Preise live vom Shop, bevor der Warenkorb-Link erstellt wird."
+        text: "Auf öffentlichen Shopify- und WooCommerce-Shops liest ChatGPT exakte Größen, Farben, Stückzahlen und aktuelle Preise live vor dem Link-Bau."
       },
       {
         lead: "Mehrere Artikel in einem Klick im Warenkorb.",
-        text: "Bis zu 20 Positionen lassen sich in einem geprüften Shopify-Warenkorb-Permalink kombinieren — ganz ohne Tab-Wechsel."
+        text: "Bis zu 20 Positionen landen gebündelt in einem geprüften Browser-Warenkorb — plus offizielle Amazon-Multi-Artikel-Links über 10 Marktplätze."
       },
       {
         lead: "Kein Auto-Checkout, volle Kontrolle.",
-        text: "ShopCart MCP ist strikt read-only. Du öffnest den Link in deinem Browser, kontrollierst den Warenkorb auf der Shop-Seite und bezahlst selbst."
+        text: "ShopCart MCP ist strikt read-only und EU-gehostet. Du öffnest den Link im Browser, kontrollierst den Warenkorb auf der Shop-Seite und bezahlst selbst."
       }
     ],
     primaryAssistant: "chatgpt",
@@ -373,16 +289,16 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       "Nutze den ShopCart MCP Connector (https://shopcart.wals.pro/mcp) — falls er noch nicht verbunden ist, führe mich kurz durch das 2-Klick-Setup. Finde mir dann auf got-bag.com lieferbare wasserdichte Rolltop-Rucksäcke unter 180 €, vergleiche Farben und Preise und erstelle mir einen geprüften Warenkorb-Link.",
     ctaHeading: "Sofort in ChatGPT oder Claude starten",
     ctaSubtext:
-      "Ein Klick öffnet den fertigen Beispiel-Prompt — dein KI-Assistent führt dich bei Bedarf direkt durch die kurze Verbindung mit ShopCart MCP.",
+      "Ein Klick öffnet den fertigen Beispiel-Prompt — dein KI-Assistent führt dich bei Bedarf direkt durch die kurze 2-Klick-Verbindung mit ShopCart MCP.",
     sections: [
       {
-        heading: "Warum ChatGPT Shopping mit Shopify MCP mehr leistet als die normale Websuche",
+        heading: "Warum viele Antworten noch „Nein“ sagen — und was 2026 per MCP geht",
         paragraphs: [
-          "Die eingebaute Websuche von ChatGPT eignet sich gut für erste Inspiration, stößt beim konkreten Einkaufen aber schnell an Grenzen: Produktseiten sind oft veraltet gecacht, Varianten-Verfügbarkeiten fehlen und am Ende musst du jeden einzelnen Artikel manuell im Shop zusammenklicken.",
-          "Genau hier setzt sicheres Agentic Commerce mit ShopCart MCP an: ChatGPT erhält als KI-Shopping-Assistent direkten Lesezugriff auf strukturierte Katalog- und Variantendaten öffentlicher Shopify-Shops. Statt nur über ein Produkt zu sprechen, prüft ChatGPT live, ob deine Wunschgröße auf Lager ist, und baut dir einen funktionierenden Warenkorb-Link."
+          "Ohne aktiven MCP-Connector liefert die normale ChatGPT-Websuche tatsächlich nur Text-Einkaufslisten oder einzelne Produkt-URLs mit oft veralteten Preisen. Hinzu kommt, dass OpenAI seinen eigenständigen In-Chat-Instant-Checkout Anfang 2026 zurückgefahren hat — viele Artikel schließen daraus fälschlich, fertige KI-Warenkörbe seien nicht möglich.",
+          "Über Custom MCP Connectors ändert sich das grundlegend: Mit ShopCart MCP erhält ChatGPT strukturierten Lesezugriff auf öffentliche Shopify- und WooCommerce-Kataloge, prüft Größen und Bestand live und erzeugt einen offiziellen Warenkorb-Link, der alle Artikel auf einmal in deinem Browser lädt."
         ],
         takeaway:
-          "Fazit: Durch Shopify MCP wird aus unverbindlicher ChatGPT-Recherche ein geprüfter, sofort bestellbarer Warenkorb."
+          "Fazit: Nicht der ChatGPT-Chat allein, sondern ChatGPT + offenes MCP macht aus Textlisten echte, geprüfte Warenkörbe."
       },
       {
         heading: "ChatGPT Custom Connector einrichten und Warenkorb füllen",
@@ -396,7 +312,7 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
           },
           {
             lead: "Einkaufsauftrag mit Budget und Größen formulieren:",
-            text: "Nenne ChatGPT die gewünschte Shopify-Shop-Domain sowie Artikel, Farben, Größen, Stückzahlen oder dein Maximalbudget."
+            text: "Nenne ChatGPT die gewünschte Shop-Domain sowie Artikel, Farben, Größen, Stückzahlen oder dein Maximalbudget."
           },
           {
             lead: "Live-Prüfung abwarten:",
@@ -404,51 +320,61 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
           },
           {
             lead: "Fertigen Warenkorb-Link im Browser öffnen:",
-            text: "Über create_cart_link erhältst du einen geprüften Link (/cart/<variant_id>:<menge>?storefront=true), der alle Artikel direkt im Online-Shop lädt."
+            text: "Über create_cart_link erhältst du einen geprüften Warenkorb-Link, der alle Artikel direkt auf der Shop-Website lädt — zum entspannten Prüfen und Selbstbezahlen."
           }
         ],
         takeaway:
           "Fazit: Einmal verbunden, erledigt ChatGPT den kompletten Varianten- und Bestandsabgleich automatisch im Hintergrund."
       },
       {
-        heading: "ChatGPT Websuche vs. ChatGPT mit ShopCart MCP",
+        heading: "ChatGPT Websuche vs. Instant Checkout vs. ChatGPT + ShopCart MCP",
         paragraphs: [
-          "Gerade bei mehreren Produkten, knappen Größen oder Sale-Aktionen macht der Live-Katalogzugriff den entscheidenden Unterschied."
+          "Gerade bei mehreren Produkten, knappen Größen oder DACH-Shops zeigt der direkte Vergleich den Unterschied."
         ],
         table: {
           id: "chatgpt-compare-table",
-          caption: "Vergleich zwischen normaler ChatGPT-Websuche und ChatGPT mit ShopCart MCP",
-          headers: ["Funktion", "ChatGPT Websuche", "ChatGPT + ShopCart MCP"],
+          caption: "Vergleich: ChatGPT Websuche, zurückgefahrener Instant Checkout und ChatGPT mit ShopCart MCP",
+          headers: [
+            "Funktion",
+            "ChatGPT Websuche",
+            "Zurückgefahrener Instant Checkout",
+            "ChatGPT + ShopCart MCP"
+          ],
           rows: [
             [
               "Warenkorb direkt füllen",
-              "Nicht möglich — nur Einzellinks",
-              "Ja — geprüfter Warenkorb-Permalink mit Wunschmengen"
+              "Nein — nur Textliste & Einzellinks",
+              "Eigenständiger In-Chat-Flow 2026 zurückgefahren",
+              "Ja — geprüfter Multi-Artikel-Warenkorb-Permalink"
             ],
             [
               "Größen & Farben live prüfen",
               "Oft unvollständig oder veraltet",
-              "Jede Varianten-ID wird live auf Lieferbarkeit geprüft"
+              "Nur bei angebundenen Pilot-Händlern",
+              "Live je Varianten-ID auf öffentlichen Shopify- & WooCommerce-Shops"
             ],
             [
-              "Budget-Filter",
-              "Ungefähre Schätzung aus Snippets",
-              "Exakter Filter (min_price / max_price) in Shop-Währung"
+              "Budget- & Rabatt-Prüfung",
+              "Schätzung aus Such-Snippets",
+              "Eingeschränkt",
+              "Exakter Filter (min_price / max_price) & echter Streichpreis"
             ],
             [
-              "Echte Rabatte erkennen",
-              "Anfällig für veraltete Banner",
-              "Prüft Live-Preis gegen echten compare_at_price"
+              "DACH- & EU-Verfügbarkeit",
+              "Ja (ohne Warenkorb-Bau)",
+              "Stark US-zentriert",
+              "EU-gehostet (europe-west1), EUR, CHF, GBP & USD"
             ],
             [
               "Datenschutz & Bezahlung",
               "Checkout im Browser",
+              "Zahlungsdaten im KI-Ökosystem",
               "Strikt read-only — keine Zahlungsdaten bei ShopCart MCP"
             ]
           ]
         },
         takeaway:
-          "Fazit: ChatGPT plus ShopCart MCP liefert präzise Warenkörbe statt fehleranfälliger Link-Sammlungen."
+          "Fazit: ChatGPT plus ShopCart MCP liefert präzise, plattformoffene Warenkörbe ohne Zahlungs-Lock-in."
       },
       {
         heading: "Praxisbeispiele: So formulierst du starke Shopping-Prompts",
@@ -462,7 +388,7 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       {
         heading: "Kosten, EU-Hosting und Read-Only-Garantie",
         paragraphs: [
-          "Der gehostete MCP-Server von wals.pro läuft in der EU (Google Cloud, europe-west1) und umfasst im Free-Tarif dauerhaft 20 Abfragen pro Tag kostenlos. Für größere Einkaufsrunden bietet der Pro-Tarif 500 Abfragen pro Tag für 9 € im Monat — während der Black-Friday-Launch-Aktion bis einschließlich 06.12.2026 nutzen alle angemeldeten Konten automatisch 500 Abfragen pro Tag gratis.",
+          "Der gehostete MCP-Server von wals.pro läuft in der EU (Google Cloud, europe-west1) und umfasst im Free-Tarif dauerhaft 20 Abfragen pro Tag kostenlos. Für größere Einkaufsrunden bietet der Pro-Tarif 500 Abfragen pro Tag für 9 € im Monat — lokal per npx -y shopcart-mcp ist die Open-Source-CLI unter MIT-Lizenz unbegrenzt gratis.",
           "ShopCart MCP speichert weder Chat-Verläufe noch Lieferadressen, Shop-Zugänge oder Zahlungsdaten. Jeder Kaufabschluss erfolgt direkt zwischen dir und dem Händler im Browser."
         ],
         takeaway:
@@ -471,7 +397,7 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
     ],
     howToName: "ChatGPT mit ShopCart MCP verbinden und Warenkorb erstellen",
     howToDescription:
-      "Schritt-für-Schritt-Anleitung, wie du ShopCart MCP als Custom Connector in ChatGPT hinzufügst und geprüfte Shopify-Warenkörbe baust.",
+      "Schritt-für-Schritt-Anleitung, wie du ShopCart MCP als Custom Connector in ChatGPT hinzufügst und geprüfte Browser-Warenkörbe baust.",
     howToSteps: [
       {
         name: "Custom MCP Connector in ChatGPT eintragen",
@@ -479,7 +405,7 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       },
       {
         name: "Produkte, Größen und Budget im Chat angeben",
-        text: "Nenne ChatGPT die gewünschte Shopify-Shop-Domain, die gesuchten Artikel, Varianten und dein Budget."
+        text: "Nenne ChatGPT die gewünschte Shop-Domain, die gesuchten Artikel, Varianten und dein Budget."
       },
       {
         name: "Geprüften Warenkorb-Link öffnen",
@@ -487,17 +413,27 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       }
     ],
     sourcesHeading: "Quellen und Grenzen",
-    sourcesIntro: "Dieser Leitfaden basiert auf den folgenden geprüften Quellen (alle abgerufen am 25.11.2026):",
+    sourcesIntro: "Dieser Leitfaden basiert auf den folgenden geprüften Quellen (alle abgerufen am 26.11.2026):",
     sources: SOURCES_DE,
     limitationsLabel: "Grenzen:",
     limitationsText:
-      "ShopCart MCP unterstützt ausschließlich öffentliche Shopify-Storefronts ohne Login-Pflicht. Marktplätze wie Amazon, eBay oder Shops anderer Systeme werden nicht unterstützt. Manche Shops schützen Teile ihrer Endpunkte per Firewall (WAF) — in diesen Fällen funktionieren Stichwortsuche, direkter Produktabruf und Warenkorb-Link dennoch zuverlässig.",
+      "Vollständige unauthentifizierte Live-Katalog-, Varianten- und Bestandsprüfung gilt für öffentliche Shopify- und WooCommerce-Shops ohne Login-Pflicht. Bei Amazon sperrt die Plattform automatisierte Checkout-Bots; ShopCart MCP unterstützt dort offizielle Multi-Artikel-Warenkorb-Links (/gp/aws/cart/add.html) über 10 Marktplätze kombiniert mit Websuche oder optional Keepa/PA-API. Passwortgeschützte B2B-Shops werden nicht unterstützt.",
     faqHeading: "Häufige Fragen zu ChatGPT & Warenkorb-Links",
     faqs: [
       {
-        question: "Wie verbinde ich ShopCart MCP mit ChatGPT?",
+        question: "Nutzt ChatGPT MCP?",
         answer:
-          "Füge in den Custom-Connector-Einstellungen von ChatGPT die URL https://shopcart.wals.pro/mcp hinzu und bestätige die kurze OAuth-2.1-Anmeldung. Danach erkennt ChatGPT alle vier Read-Only-Shopping-Tools automatisch."
+          "Ja. ChatGPT unterstützt Custom Remote MCP Connectors mit Streamable HTTP und OAuth 2.1. Nach dem Hinzufügen von https://shopcart.wals.pro/mcp greift ChatGPT direkt auf die vier Read-Only-Shopping-Tools von ShopCart MCP zu."
+      },
+      {
+        question: "Warum behaupten manche Suchergebnisse, ChatGPT könne keinen Warenkorb erstellen?",
+        answer:
+          "Weil viele ältere Artikel nur die normale ChatGPT-Websuche betrachten oder sich auf den 2026 zurückgefahrenen Instant Checkout beziehen. Mit einem offenen MCP-Server wie ShopCart MCP erstellt ChatGPT heute zuverlässig echte Multi-Artikel-Warenkorb-Links."
+      },
+      {
+        question: "Funktioniert ein ChatGPT-Warenkorb auch bei Amazon?",
+        answer:
+          "Amazon blockiert automatisierte Drittanbieter-Checkout-Bots und offenes Katalog-Scraping. Mit ShopCart MCP kannst du jedoch offizielle Amazon-Multi-Artikel-Links (/gp/aws/cart/add.html) für 10 Marktplätze erzeugen — kombiniert mit Websuche oder optional Keepa/PA-API — während öffentliche Shopify- und WooCommerce-Shops volle Live-Suche bieten."
       },
       {
         question: "Kann ChatGPT mit ShopCart MCP selbstständig bestellen oder bezahlen?",
@@ -505,19 +441,14 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
           "Nein. ShopCart MCP arbeitet rein lesend und erzeugt ausschließlich einen Warenkorb-Link. ChatGPT kann weder Zahlungsdaten einsehen noch eine Bestellung auslösen — du bezahlst immer selbst im Browser."
       },
       {
-        question: "Wie viele Produkte passen in einen ChatGPT-Warenkorb-Link?",
+        question: "Baut dieser Guide einen Online-Shop oder einen Käufer-Warenkorb?",
         answer:
-          "Mit create_cart_link lassen sich bis zu 20 unterschiedliche Artikelpositionen mit Stückzahlen von jeweils 1 bis 99 in einem einzigen geprüften Shopify-Warenkorb-Link bündeln."
-      },
-      {
-        question: "Funktioniert das auch mit Rabattcodes?",
-        answer:
-          "Ja. Wenn du einen gültigen Gutscheincode besitzt und ihn ChatGPT im Prompt nennst, kann der Code optional an den Warenkorb-Link übergeben werden. ShopCart MCP erfindet jedoch niemals eigene Rabattcodes."
+          "Einen echten Käufer-Warenkorb für bestehende Online-Shops. ShopCart MCP ist ein Einkaufs-Connector für Endkunden, kein Website-Baukasten zum Erstellen eigener Shops."
       },
       {
         question: "Was kostet die Nutzung von ShopCart MCP in ChatGPT?",
         answer:
-          "Im Free-Tarif sind 20 Tool-Aufrufe pro Tag dauerhaft kostenlos. Im Pro-Tarif erhältst du 500 Aufrufe pro Tag für 9 €/Monat — während der Black-Friday-Launch-Aktion bis 06.12.2026 ist das 500er-Kontingent für alle angemeldeten Konten kostenlos."
+          "Im Free-Tarif sind 20 Tool-Aufrufe pro Tag dauerhaft kostenlos. Im Pro-Tarif erhältst du 500 Aufrufe pro Tag für 9 €/Monat. Lokal unter MIT-Lizenz (npx -y shopcart-mcp) ist die Nutzung unbegrenzt kostenlos."
       }
     ],
     hreflang: {
@@ -526,12 +457,12 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       xDefault: "/en/guides/chatgpt-shopify-cart"
     },
     publishedDate: PUBLISHED_ISO,
-    modifiedDate: PUBLISHED_ISO,
+    modifiedDate: UPDATED_ISO,
     keywords: [
+      "kann chatgpt einen warenkorb erstellen",
       "chatgpt warenkorb erstellen",
-      "chatgpt shopping",
+      "chatgpt shopping mcp",
       "chatgpt shopify warenkorb",
-      "shopify mcp",
       "ki einkaufsassistent"
     ]
   },
@@ -678,7 +609,7 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       }
     ],
     sourcesHeading: "Quellen und Grenzen",
-    sourcesIntro: "Dieser Ratgeber basiert auf folgenden geprüften Quellen (alle abgerufen am 25.11.2026):",
+    sourcesIntro: "Dieser Ratgeber basiert auf folgenden geprüften Quellen (alle abgerufen am 26.11.2026):",
     sources: SOURCES_DE,
     limitationsLabel: "Grenzen & Markenhinweis:",
     limitationsText:
@@ -693,7 +624,7 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       {
         question: "Kann ich mehrere Shops wie KERNenergie, SNOCKS und PURELEI vergleichen?",
         answer:
-          "Ja. Claude und ChatGPT können mehrere öffentliche Shopify-Shops nacheinander abfragen, Preise und Verfügbarkeiten übersichtlich gegenüberstellen und dir für deinen gewählten Shop einen fertigen Warenkorb-Link bauen."
+          "Ja. Claude und ChatGPT können mehrere öffentliche Shopify- und WooCommerce-Shops nacheinander abfragen, Preise und Verfügbarkeiten übersichtlich gegenüberstellen und dir für deinen gewählten Shop einen fertigen Warenkorb-Link bauen."
       },
       {
         question: "Prüft ShopCart MCP echte Black-Friday-Rabatte?",
@@ -717,7 +648,7 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       xDefault: "/guides/adventskalender-mit-ki-finden"
     },
     publishedDate: PUBLISHED_ISO,
-    modifiedDate: PUBLISHED_ISO,
+    modifiedDate: UPDATED_ISO,
     keywords: [
       "adventskalender finden ki",
       "black friday ki",
@@ -730,34 +661,34 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
     path: "/en/guides/shop-with-claude",
     lang: "en",
     category: "Claude Shopping Guide",
-    title: "How to Build Real Shopping Carts with Claude",
-    metaTitle: "How to Build Real Shopping Carts with Claude | ShopCart MCP",
+    title: "Can Claude Build a Shopping Cart? Shop Any Store via MCP (2026)",
+    metaTitle: "Can Claude Build a Shopping Cart? Shop via MCP (2026)",
     metaDescription:
-      "Connect Claude to public Shopify stores with ShopCart MCP: verify live sizes, stock, and prices, and get a ready-to-review browser cart link — read-only.",
+      "Yes: Connect Claude to ShopCart MCP to verify live stock, sizes, and prices on public Shopify & WooCommerce stores and get a read-only cart link.",
     cardSummary:
-      "Connect Claude.ai or Claude Desktop to public Shopify storefronts in two clicks and turn natural shopping prompts into verified multi-item cart links.",
-    tldrLabel: "TL;DR:",
+      "Yes: Connect Claude.ai or Claude Desktop in two clicks to verify live stock and build real multi-item shopping carts globally — strictly read-only.",
+    tldrLabel: "Direct Answer:",
     tldrText:
-      "ShopCart MCP connects Claude directly to public Shopify storefronts so your AI verifies live sizes, colors, stock, and prices and hands you a ready-to-open shopping cart link — strictly read-only, while you stay in full control of checkout.",
+      "Yes — Claude can build verified multi-item shopping carts across thousands of public Shopify and WooCommerce stores (plus official Amazon multi-item cart links) using ShopCart MCP (https://shopcart.wals.pro/mcp). Unlike regional grocery-only apps, ShopCart MCP works globally in EUR, USD, GBP, and CHF, checks live stock per variant ID, and returns a strictly read-only browser cart link you review and pay yourself.",
     intro:
-      "Tired of asking an AI shopping assistant for recommendations only to click through ten tabs and discover your size is sold out? This guide shows you how to connect Claude to public Shopify stores via Shopify MCP in under a minute and build a verified Claude shopping cart in one shot.",
+      "Tired of reading that Claude can only shop inside a couple of regional grocery apps or requires fragile browser automation? This 2026 guide shows how to connect Claude via the open Model Context Protocol (MCP) to verify live stock and build a ready-to-open shopping cart in seconds.",
     takeawaysHeading: "Key Takeaways",
     takeaways: [
       {
-        lead: "Real shopping carts instead of plain links.",
-        text: "Claude fetches exact numeric variant IDs and live inventory, combining up to 20 items and quantities into a single clickable cart permalink."
+        lead: "Global multi-item carts instead of regional grocery silos.",
+        text: "Works across independent public Shopify and WooCommerce stores in EUR, USD, GBP, and CHF — plus official Amazon multi-item cart permalinks across 10 marketplaces."
       },
       {
         lead: "Strictly read-only by architecture.",
-        text: "Your AI never places orders, never sees payment cards, and never accesses store logins — you review and pay directly in your own browser."
+        text: "Claude never places orders, never sees payment cards, and never accesses store logins — you review and pay directly in your own browser."
       },
       {
-        lead: "Two simple ways to connect.",
-        text: "Use the hosted OAuth 2.1 endpoint at https://shopcart.wals.pro/mcp in Claude.ai Web/Mobile, or run the free MIT-licensed CLI locally via npx -y shopcart-mcp."
+        lead: "Works on Claude.ai Web, Mobile, Desktop, and Claude Code.",
+        text: "Connect the hosted OAuth 2.1 endpoint at https://shopcart.wals.pro/mcp in two clicks, or run the free MIT-licensed CLI locally via npx -y shopcart-mcp."
       },
       {
-        lead: "Works across global Shopify stores.",
-        text: "Supports public storefronts worldwide across EUR, USD, GBP, CHF, and other ISO 4217 currencies with automatic minor-unit price normalization."
+        lead: "Deterministic variant & stock verification.",
+        text: "Claude checks exact variant IDs, sizes, colors, and genuine compare-at markdowns live before creating your cart link."
       }
     ],
     primaryAssistant: "claude",
@@ -768,31 +699,31 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       "Launch a ready-to-run shopping prompt directly in Claude or ChatGPT — including quick connector guidance if you have not linked ShopCart MCP yet.",
     sections: [
       {
-        heading: "Why standard AI web search breaks down when shopping",
+        heading: "Why regional grocery apps and browser bots fall short for Claude shopping",
         paragraphs: [
-          "When you ask Claude to find a jacket, sneaker size, or gift bundle via ordinary web search, the model relies on indexed snippets that go stale quickly. Prices can be outdated, sale labels may no longer apply, and specific sizes or colors are rarely verified in real time.",
-          "Assembling a multi-item basket is even more tedious. Even if an assistant surfaces three matching product URLs, you still have to open each page, select every variant manually, and add every item to your cart one by one."
+          "Most articles answering \"Can Claude build a shopping cart?\" only mention country-specific grocery apps or browser extensions that click through web pages one element at a time. Those approaches break on popups, skip desktop-to-mobile portability, and cover only a tiny slice of online stores.",
+          "With ShopCart MCP, Claude talks directly to structured public storefront endpoints instead of guessing from cached snippets or fragile DOM selectors — giving you a deterministic, ready-to-open cart link in one shot."
         ],
         takeaway:
-          "Takeaway: Without live variant and inventory lookups, AI shopping stops at generic links instead of saving real time."
+          "Takeaway: An open MCP server lets Claude build verified carts globally without regional lock-in or brittle browser clicking."
       },
       {
-        heading: "How Claude builds a verified Shopify cart in four read-only steps",
+        heading: "How Claude builds a verified shopping cart in four read-only steps",
         paragraphs: [
-          "ShopCart MCP uses the open Model Context Protocol (MCP) to give Claude four focused read-only tools for public Shopify storefronts. Instead of scraping HTML guesses, the server reads structured catalog endpoints live and builds an official Shopify cart permalink."
+          "ShopCart MCP uses the open Model Context Protocol (MCP) to give Claude four focused read-only tools. Instead of scraping HTML guesses, the server reads structured catalog endpoints live and builds an official cart permalink."
         ],
         orderedSteps: [
           {
             lead: "Inspect the store (inspect_store):",
-            text: "Confirms the domain is a public Shopify storefront and resolves its canonical origin, currency, country, and firewall rules."
+            text: "Detects public Shopify and WooCommerce storefronts (or Amazon marketplaces for cart permalinks) and resolves canonical origin, currency, country, and firewall rules."
           },
           {
             lead: "Search the catalog (search_products):",
-            text: "Finds matching products with optional filters for live availability and minimum or maximum price in the store's native currency."
+            text: "Finds matching products on public Shopify and WooCommerce stores with optional filters for live availability and minimum or maximum price in native currency."
           },
           {
             lead: "Verify variants and stock (get_product):",
-            text: "Retrieves exact numeric variant IDs for every size and color alongside live pricing, genuine compare-at discounts, and in-stock status."
+            text: "Retrieves exact variant IDs for every size and color alongside live pricing, genuine compare-at discounts, and in-stock status."
           },
           {
             lead: "Create the cart link (create_cart_link):",
@@ -803,50 +734,60 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
           "Takeaway: Four deterministic read-only calls ensure the exact sizes, colors, and quantities land in your cart."
       },
       {
-        heading: "Standard AI web search vs. Claude with ShopCart MCP",
+        heading: "Regional grocery apps vs. browser bots vs. Claude + ShopCart MCP",
         paragraphs: [
-          "Here is how a live MCP shopping workflow compares to asking an AI assistant to browse open web results."
+          "Compare the three main ways people try to shop with Claude in 2026."
         ],
         table: {
           id: "claude-en-compare-table",
-          caption: "Comparison of standard AI web search versus Claude with ShopCart MCP",
-          headers: ["Dimension", "Standard AI Web Search", "Claude + ShopCart MCP"],
+          caption: "Comparison of regional grocery apps, browser automation extensions, and Claude with ShopCart MCP",
+          headers: [
+            "Dimension",
+            "Regional Grocery Apps",
+            "Browser Automation Extensions",
+            "Claude + ShopCart MCP"
+          ],
           rows: [
             [
-              "Live prices & discounts",
-              "Often cached or stale search snippets",
-              "Fetched live from the store with genuine compare-at prices"
+              "Store & country coverage",
+              "Single region / groceries only",
+              "Desktop browser only; breaks on anti-bot walls",
+              "Global Shopify & WooCommerce stores + 10 Amazon cart marketplaces"
             ],
             [
               "Size & color stock check",
-              "Frequently guessed or unavailable",
-              "Verified per exact numeric variant ID before linking"
+              "Limited to grocery SKUs",
+              "Slow manual DOM clicking",
+              "Verified live per exact variant ID before linking"
             ],
             [
-              "Output you receive",
-              "Multiple plain product links",
-              "One verified cart link preloaded with all items & quantities"
+              "Mobile support (Claude.ai App)",
+              "App-dependent",
+              "No (requires desktop browser extension)",
+              "Yes — works on Claude.ai Web, Mobile, Desktop & Claude Code"
             ],
             [
               "Multi-item bundles",
-              "Manual click-through for every item",
-              "Up to 20 line items combined into a single browser cart"
+              "One partner grocer at a time",
+              "Fragile multi-step click scripts",
+              "Up to 20 line items combined into one verified cart link"
             ],
             [
-              "Checkout safety",
-              "Manual in browser",
+              "Checkout & privacy safety",
+              "Tied to third-party partner account",
+              "Shares live browser cookies & sessions",
               "Strictly read-only — review and payment stay in your browser"
             ]
           ]
         },
         takeaway:
-          "Takeaway: Whenever exact sizing, stock checks, or multi-item bundles matter, Claude with ShopCart MCP removes the tab juggling."
+          "Takeaway: Claude with ShopCart MCP works globally, runs on mobile and desktop, and never touches your active browser cookies or payment cards."
       },
       {
         heading: "Set up ShopCart MCP in Claude.ai or Claude Desktop in 30 seconds",
         paragraphs: [
           "In Claude.ai (Web or Mobile), open your custom connector settings, paste https://shopcart.wals.pro/mcp, and complete the two-click OAuth 2.1 sign-in. No config files or developer tools are needed.",
-          "If you prefer running everything locally in Claude Desktop, Claude Code, or Cursor, launch the MIT-licensed open-source CLI via npx -y shopcart-mcp with unlimited calls and zero telemetry. Hosted accounts include 20 free tool calls per day permanently, while Pro offers 500 calls/day for €9/month — and during our Black Friday Launch Promo through December 6, 2026, all signed-in accounts receive 500 calls/day free."
+          "If you prefer running everything locally in Claude Desktop, Claude Code, or Cursor, launch the MIT-licensed open-source CLI via npx -y shopcart-mcp with unlimited calls and zero telemetry. Hosted accounts include 20 free tool calls per day permanently, while Pro offers 500 calls/day for €9/month."
         ],
         takeaway:
           "Takeaway: Hosted setup takes two clicks, while local open-source users get unlimited usage with no account required."
@@ -861,9 +802,9 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
           "Takeaway: Claude handles research and cart assembly, while privacy and final checkout remain 100 percent under your control."
       }
     ],
-    howToName: "How to build a verified Shopify shopping cart with Claude",
+    howToName: "How to build a verified shopping cart with Claude via MCP",
     howToDescription:
-      "Connect ShopCart MCP to Claude and generate a verified browser cart link for any public Shopify storefront.",
+      "Connect ShopCart MCP to Claude and generate a verified browser cart link for public Shopify and WooCommerce stores or official Amazon cart permalinks.",
     howToSteps: [
       {
         name: "Connect ShopCart MCP to Claude",
@@ -871,7 +812,7 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       },
       {
         name: "Describe products, sizes, and budget",
-        text: "Tell Claude which public Shopify store to search along with your preferred products, colors, sizes, quantities, or maximum budget."
+        text: "Tell Claude which store to search along with your preferred products, colors, sizes, quantities, or maximum budget."
       },
       {
         name: "Open the verified cart link and check out yourself",
@@ -879,13 +820,18 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       }
     ],
     sourcesHeading: "Sources and Limitations",
-    sourcesIntro: "This guide is grounded in the following verified sources (all retrieved on 2026-11-25):",
+    sourcesIntro: "This guide is grounded in the following verified sources (all retrieved on 2026-11-26):",
     sources: SOURCES_EN,
     limitationsLabel: "Limitations:",
     limitationsText:
-      "ShopCart MCP works only with public Shopify storefronts that do not require a login to view products. Closed marketplaces such as Amazon, password-protected B2B portals, and non-Shopify stores are not supported. For brands with separate regional domains (such as US and EU storefronts), specify your local domain so currency and stock match your shipping country.",
+      "Full unauthenticated live catalog, stock, and variant verification applies to public Shopify and WooCommerce storefronts without login gates. On Amazon, automated checkout bots are restricted; ShopCart MCP supports official Amazon multi-item cart permalinks (/gp/aws/cart/add.html) across 10 marketplaces paired with web search or optional Keepa/PA-API keys. Password-protected B2B portals are not supported.",
     faqHeading: "Frequently Asked Questions",
     faqs: [
+      {
+        question: "Can Claude shop for you?",
+        answer:
+          "Yes — with ShopCart MCP connected, Claude can search public Shopify and WooCommerce stores live, verify sizes, stock, and prices, and hand you a ready-to-open browser cart link (plus official multi-item Amazon cart permalinks). For your safety, Claude never pays automatically: you review the cart and check out yourself."
+      },
       {
         question: "Does Claude place orders or charge my card automatically with ShopCart MCP?",
         answer:
@@ -899,12 +845,12 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       {
         question: "Which online stores are supported?",
         answer:
-          "ShopCart MCP works with thousands of public Shopify storefronts worldwide across USD, EUR, GBP, CHF, and other currencies. Password-protected stores and closed marketplaces such as Amazon are not supported."
+          "ShopCart MCP runs full live catalog, stock, and variant searches on thousands of public Shopify and WooCommerce storefronts worldwide across USD, EUR, GBP, CHF, and other currencies, and builds official multi-item cart permalinks across 10 Amazon marketplaces."
       },
       {
         question: "How much does ShopCart MCP cost?",
         answer:
-          "The hosted Free plan includes 20 tool calls per day permanently. The Pro plan offers 500 calls per day for €9 per month — and during the Black Friday launch promo through December 6, 2026, every signed-in account automatically receives 500 calls per day for free. The local open-source CLI is free and unlimited under the MIT License."
+          "The hosted Free plan includes 20 tool calls per day permanently. The Pro plan offers 500 calls per day for €9 per month. The local open-source CLI (npx -y shopcart-mcp) is free and unlimited under the MIT License."
       },
       {
         question: "Does ShopCart MCP store my Claude chats or payment details?",
@@ -918,67 +864,71 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       xDefault: "/en/guides/shop-with-claude"
     },
     publishedDate: PUBLISHED_ISO,
-    modifiedDate: PUBLISHED_ISO,
+    modifiedDate: UPDATED_ISO,
     keywords: [
+      "can claude build a shopping cart",
+      "can claude shop for you",
       "shop with claude",
-      "claude shopping",
-      "claude mcp shopify",
-      "shopify mcp server",
+      "claude mcp shopping",
       "ai shopping assistant"
     ]
   },
   {
     path: "/en/guides/chatgpt-shopify-cart",
     lang: "en",
-    category: "ChatGPT Black Friday Guide",
-    title: "Let ChatGPT Build Your Shopify Cart for Black Friday",
-    metaTitle: "Let ChatGPT Build Your Shopify Cart for Black Friday",
+    category: "ChatGPT Shopping Guide",
+    title: "Can ChatGPT Create a Shopping Cart? Yes — via Open MCP (2026 Guide)",
+    metaTitle: "Can ChatGPT Create a Shopping Cart? Yes — via MCP (2026)",
     metaDescription:
-      "Use ChatGPT Custom MCP Connectors with ShopCart MCP to check live Black Friday deals, verify in-stock sizes, and build ready-to-open Shopify cart links.",
+      "Yes: Connect ChatGPT to ShopCart MCP to verify live sizes, stock, and prices on public Shopify & WooCommerce stores and build a read-only cart.",
     cardSummary:
-      "Beat Black Friday sell-outs and tab overload: connect ChatGPT via Custom MCP Connector to check live markdowns, verify stock, and build one verified cart link.",
-    tldrLabel: "TL;DR:",
+      "Yes: Even after standalone Instant Checkout was scaled back, connecting ChatGPT via ShopCart MCP builds verified multi-item browser carts globally.",
+    tldrLabel: "Direct Answer:",
     tldrText:
-      "Connect ChatGPT to ShopCart MCP (https://shopcart.wals.pro/mcp) to search public Shopify stores for live Black Friday deals, verify real compare-at discounts and in-stock sizes, and get a ready-to-open browser cart link — strictly read-only.",
+      "Yes — ChatGPT can create a real, verified shopping cart in 2026 using the open Model Context Protocol (MCP). Even after OpenAI scaled back standalone Instant Checkout, connecting ShopCart MCP (https://shopcart.wals.pro/mcp) lets ChatGPT check live stock, sizes, and prices on public Shopify and WooCommerce stores — plus official Amazon multi-item cart links — and return a strictly read-only browser cart link.",
+    seasonalNote: {
+      label: "Seasonal Note (Black Friday Launch):",
+      text: "Through December 6, 2026, every signed-in hosted ShopCart MCP account automatically receives 500 free tool calls/day for holiday gift and sale shopping — no credit card required."
+    },
     intro:
-      "Black Friday and holiday gift shopping usually means juggling twenty tabs, chasing fake percentage banners, and hitting sold-out sizes at checkout. This guide shows how to connect ChatGPT via Custom MCP Connectors so your AI checks live Shopify stock and builds a verified cart link in seconds.",
+      "Most web results still claim ChatGPT can only draft text grocery lists or shop through one US-only delivery app. In 2026, ChatGPT supports custom OAuth 2.1 MCP connectors — letting your assistant check live inventory and hand you a ready-to-open shopping cart for any public Shopify or WooCommerce brand in seconds.",
     takeawaysHeading: "Key Takeaways",
     takeaways: [
       {
-        lead: "Verify genuine Black Friday markdowns live.",
-        text: "ShopCart MCP compares live selling prices against each store's actual compare_at_price — reporting discounts only when a real markdown exists."
+        lead: "Real, pre-filled carts — not outdated link lists.",
+        text: "ShopCart MCP verifies exact variant IDs, in-stock sizes, and genuine compare-at markdowns live before building one clickable browser cart permalink."
       },
       {
-        lead: "Filter out sold-out sizes before you click.",
-        text: "Every variant ID is checked live via get_product and re-verified during cart creation so you never land on an empty cart."
+        lead: "Works globally beyond US-only grocery integrations.",
+        text: "Shop public Shopify and WooCommerce storefronts across EUR, USD, GBP, CHF, and CAD, or assemble official Amazon multi-item cart permalinks across 10 marketplaces."
       },
       {
-        lead: "Combine holiday bundles in one link.",
-        text: "Bundle up to 20 line items across sizes and colors into a single Shopify cart permalink ready for browser review."
+        lead: "Strictly read-only — zero checkout risk.",
+        text: "ChatGPT never sees your payment cards, shipping address, or store passwords. You always review final totals and pay directly on the merchant's site."
       },
       {
-        lead: "Free 500 calls/day Black Friday promo.",
-        text: "All signed-in hosted accounts automatically get 500 tool calls per day for free through December 6, 2026 — no credit card required."
+        lead: "Free forever on hosted Free tier or MIT local CLI.",
+        text: "Get 20 hosted calls/day free permanently at https://shopcart.wals.pro/mcp (Pro €9/month for 500/day), or run npx -y shopcart-mcp locally with unlimited calls."
       }
     ],
     primaryAssistant: "chatgpt",
     starterPrompt:
-      "Connect to ShopCart MCP (https://shopcart.wals.pro/mcp) — if not set up yet, walk me through the 2-click custom connector setup. Then find in-stock Black Friday gift ideas under €80 on snocks.com or allbirds.eu, check real compare-at discounts and sizes, and generate one verified cart link.",
-    ctaHeading: "Launch Black Friday Cart Prompt in 1 Click",
+      "Connect to ShopCart MCP (https://shopcart.wals.pro/mcp) — if not set up yet, walk me through the 2-click custom connector setup. Then find in-stock gift ideas under €80 on snocks.com or allbirds.eu, check real compare-at discounts and sizes, and generate one verified cart link.",
+    ctaHeading: "Launch a Verified Cart Prompt in 1 Click",
     ctaSubtext:
-      "Opens a ready-to-use holiday shopping prompt in ChatGPT or Claude — complete with 2-click setup guidance if needed.",
+      "Opens a ready-to-use shopping prompt in ChatGPT or Claude — complete with 2-click OAuth setup guidance if needed.",
     sections: [
       {
-        heading: "Why ChatGPT shopping on Black Friday needs live Shopify MCP checks",
+        heading: "Why ChatGPT needs an open MCP server for real shopping carts",
         paragraphs: [
-          "During Black Week and holiday sales, catalog prices and stock levels change by the minute. Standard search indexes lag behind, which leads to expired deal snippets and sizes that sold out hours earlier.",
-          "By connecting ChatGPT to ShopCart MCP, your AI shopping assistant brings read-only agentic commerce straight to live Shopify storefront data — letting you filter by budget, availability, and exact sizes across your favorite independent brands."
+          "Out of the box, ChatGPT's web search reads cached snippets that often miss live size availability, currency nuances, and genuine markdowns. And because standalone in-chat Instant Checkout was scaled back in 2026, shoppers outside narrow US-only grocery pilots were left clicking through ten tabs by hand.",
+          "Connecting ShopCart MCP gives ChatGPT direct, strictly read-only access to structured public storefront data — turning a plain chat prompt into a verified multi-item shopping cart link you open directly in your own browser."
         ],
         takeaway:
-          "Takeaway: Live Shopify MCP queries turn ChatGPT shopping on Black Friday from guesswork into verified, in-stock carts."
+          "Takeaway: Open MCP bridges the gap between ChatGPT's research strengths and a real, pre-filled merchant shopping cart."
       },
       {
-        heading: "Step-by-step: connect ChatGPT and build your Black Friday cart",
+        heading: "Step-by-step: connect ChatGPT and build a verified shopping cart",
         paragraphs: [
           "Setting up ShopCart MCP in ChatGPT takes under a minute using standard OAuth 2.1 authentication."
         ],
@@ -988,8 +938,8 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
             text: "Open ChatGPT connector settings, enter https://shopcart.wals.pro/mcp, and complete the two-click OAuth 2.1 login."
           },
           {
-            lead: "Specify stores, gifts, sizes, and budget:",
-            text: "Ask ChatGPT to search one or more public Shopify stores with a clear price ceiling (for example, gifts under $50 or €80) and required sizes."
+            lead: "Specify stores, products, sizes, and budget:",
+            text: "Ask ChatGPT to search one or more public Shopify or WooCommerce stores with a clear price ceiling (for example, under $50 or €80) and required sizes."
           },
           {
             lead: "Review live discounts and stock:",
@@ -1004,75 +954,85 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
           "Takeaway: Once connected, ChatGPT handles store inspection, stock verification, and cart assembly automatically."
       },
       {
-        heading: "Manual Black Friday shopping vs. ChatGPT + ShopCart MCP",
+        heading: "Grocery apps vs. browser agents vs. ChatGPT + ShopCart MCP",
         paragraphs: [
-          "Compare the time and accuracy difference when putting together multi-item holiday orders."
+          "Compare how different AI shopping methods handle multi-item carts, regional coverage, and checkout safety."
         ],
         table: {
-          id: "chatgpt-bf-compare-table",
-          caption: "Comparison of manual Black Friday shopping versus ChatGPT with ShopCart MCP",
-          headers: ["Workflow Step", "Manual / Plain Web Search", "ChatGPT + ShopCart MCP"],
+          id: "chatgpt-en-compare-table",
+          caption: "Comparison of plain web search & regional grocery apps, browser agents, and ChatGPT with ShopCart MCP",
+          headers: [
+            "Dimension",
+            "Web Search & Regional Grocery Apps",
+            "Browser Automation Agents",
+            "ChatGPT + ShopCart MCP"
+          ],
           rows: [
             [
+              "Store & geographic reach",
+              "US-only groceries or stale product URLs",
+              "Breaks on CAPTCHAs, cookie walls & layout shifts",
+              "Global public Shopify & WooCommerce stores + 10 Amazon cart marketplaces"
+            ],
+            [
               "Checking size availability",
-              "Open every product page individually",
-              "Live variant check across all matching products"
+              "Rarely verified per variant",
+              "Slow clicking through every dropdown",
+              "Live variant ID & stock check across matching items"
             ],
             [
               "Spotting genuine deals",
-              "Easy to miss real vs. anchor pricing",
-              "Structured live price vs. compare_at_price verification"
-            ],
-            [
-              "Sticking to a gift budget",
-              "Manual mental math across tabs",
-              "Server-side min_price / max_price filtering in store currency"
+              "Vulnerable to stale banners",
+              "Screen-scraping heuristics",
+              "Structured live price vs. real compare_at_price check"
             ],
             [
               "Adding multiple items",
-              "Click add-to-cart for every single variant",
+              "Manual tab-by-tab clicks for non-partner stores",
+              "Fragile multi-minute automation",
               "One verified permalink loads up to 20 items at once"
             ],
             [
               "Payment & account safety",
-              "Browser checkout on store site",
+              "Browser checkout or partner wallet",
+              "Elevated risk when logged-in browser sessions are exposed",
               "Strictly read-only — checkout always stays in your browser"
             ]
           ]
         },
         takeaway:
-          "Takeaway: ChatGPT plus ShopCart MCP cuts multi-tab holiday shopping down to a single verified cart review."
+          "Takeaway: ChatGPT plus ShopCart MCP delivers global coverage, deterministic stock checks, and zero payment exposure."
       },
       {
-        heading: "High-converting prompt ideas for Black Friday and holiday gifts",
+        heading: "Prompt ideas that consistently produce clean carts",
         paragraphs: [
-          "For the cleanest results, include the brand's regional Shopify domain (such as an EU or US storefront), your maximum budget, and required sizes or colors. If you already have a valid store promo code, you can also tell ChatGPT to attach it to the cart link.",
-          "Great examples include: \"Find 3 in-stock holiday gift ideas under €50 on snocks.com and bundle them into one cart link\" or \"Compare available merino socks under €30 on allbirds.eu in size M and build a cart for 2 pairs.\""
+          "For the cleanest results, include the brand's regional domain (such as an EU or US storefront), your maximum budget, and required sizes or colors. If you already have a valid store promo code, you can also tell ChatGPT to attach it to the cart link.",
+          "Strong examples include: \"Find 3 in-stock gift ideas under €50 on snocks.com and bundle them into one cart link\" or \"Compare available merino socks under €30 on allbirds.eu in size M and build a cart for 2 pairs.\""
         ],
         takeaway:
           "Takeaway: Pairing a regional store URL with budget and size constraints gives ChatGPT everything needed for an instant cart."
       },
       {
-        heading: "Read-only architecture & Black Friday Launch Promo",
+        heading: "Read-only architecture, EU hosting, and transparent pricing",
         paragraphs: [
-          "ShopCart MCP never stores payment cards, shipping addresses, merchant logins, or chat transcripts. All four tools are read-only, sanitized against prompt injection, and protected by DNS-pinned SSRF guards on EU infrastructure (europe-west1).",
-          "During the Black Friday Launch Promo through December 6, 2026, every signed-in account gets 500 free tool calls per day automatically. Afterward, the hosted Free tier remains 20 calls/day permanently (Pro optional at €9/month, cancel anytime), and the open-source MIT CLI stays free and unlimited locally."
+          "ShopCart MCP never stores payment cards, shipping addresses, merchant logins, or chat transcripts. All four tools are read-only, sanitized against prompt injection, and protected by DNS-pinned SSRF guards on EU infrastructure (Google Cloud europe-west1).",
+          "The hosted Free tier includes 20 tool calls/day permanently with zero credit card required. Hosted Pro is €9/month (500 calls/day, cancel anytime), and the MIT open-source CLI (npx -y shopcart-mcp) is free and unlimited locally."
         ],
         takeaway:
-          "Takeaway: Fast Black Friday cart building with zero payment exposure and generous free daily limits."
+          "Takeaway: Transparent pricing and strict read-only engineering make AI shopping carts genuinely practical year-round."
       }
     ],
-    howToName: "How to let ChatGPT build a Black Friday Shopify cart",
+    howToName: "How to let ChatGPT create a verified shopping cart via MCP",
     howToDescription:
-      "Connect ShopCart MCP as a Custom MCP Connector in ChatGPT, filter real Black Friday deals, and open a verified browser cart link.",
+      "Connect ShopCart MCP as a Custom MCP Connector in ChatGPT, check live sizes and prices, and open a verified browser cart link.",
     howToSteps: [
       {
         name: "Connect ShopCart MCP in ChatGPT",
         text: "Add https://shopcart.wals.pro/mcp in ChatGPT's custom MCP connector settings and complete the two-click OAuth 2.1 sign-in."
       },
       {
-        name: "Ask ChatGPT for deals, gifts, and sizes within your budget",
-        text: "Name your preferred public Shopify store domain, target items or gift budget, and exact sizes or colors."
+        name: "Ask ChatGPT for products, sizes, and budget",
+        text: "Name your preferred public Shopify or WooCommerce store domain (or Amazon URLs/ASINs), target items or budget, and exact sizes or colors."
       },
       {
         name: "Review and check out on the merchant's website",
@@ -1080,37 +1040,42 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       }
     ],
     sourcesHeading: "Sources and Limitations",
-    sourcesIntro: "This guide is based on the following verified sources (all retrieved on 2026-11-25):",
+    sourcesIntro: "This guide is based on the following verified sources (all retrieved on 2026-11-26):",
     sources: SOURCES_EN,
     limitationsLabel: "Limitations:",
     limitationsText:
-      "ShopCart MCP works exclusively with public Shopify storefronts that do not require a login to browse. Closed marketplaces like Amazon, password-protected B2B stores, and non-Shopify platforms are not supported. Because Black Friday inventory and pricing change rapidly, always verify final totals and delivery estimates on the merchant's cart page before purchasing.",
+      "Full unauthenticated live catalog, stock, and variant verification applies to public Shopify and WooCommerce storefronts without login gates. On Amazon, automated checkout bots are restricted; ShopCart MCP supports official Amazon multi-item cart permalinks (/gp/aws/cart/add.html) across 10 marketplaces paired with web search or optional Keepa/PA-API keys. Password-protected B2B portals are not supported.",
     faqHeading: "Frequently Asked Questions",
     faqs: [
       {
-        question: "How do I connect ShopCart MCP to ChatGPT?",
+        question: "Does ChatGPT use MCP?",
         answer:
-          "Paste https://shopcart.wals.pro/mcp into ChatGPT's custom MCP connector settings and finish the two-click OAuth 2.1 login. ChatGPT immediately gains access to all four read-only shopping tools."
+          "Yes. ChatGPT supports custom remote MCP connectors over Streamable HTTP with OAuth 2.1. Paste https://shopcart.wals.pro/mcp into ChatGPT's connector settings and sign in to unlock all four read-only shopping tools."
       },
       {
-        question: "Can ChatGPT complete a Black Friday purchase automatically?",
+        question: "Is AI shopping cart building with ShopCart MCP free and legit?",
+        answer:
+          "Yes. ShopCart MCP is an open-source MIT project built and EU-hosted by Wals Professional Services GmbH (wals.pro, Vienna, Austria). The hosted Free tier provides 20 calls/day permanently at €0 (local CLI is unlimited), and all tools are strictly read-only — it never asks for payment cards or store passwords."
+      },
+      {
+        question: "Does ChatGPT place orders or charge my card automatically?",
         answer:
           "No. ShopCart MCP is strictly read-only and never submits orders or handles payment methods. You open the generated cart link in your own browser and complete checkout directly with the store."
       },
       {
-        question: "Can ChatGPT apply my Black Friday discount code to the cart link?",
+        question: "Can ChatGPT create an ecommerce website, or does this build a shopper cart?",
         answer:
-          "Yes, if you provide a real discount code in your prompt, ChatGPT can pass it to create_cart_link. ShopCart MCP never invents or guesses coupon codes."
+          "This guide is for shoppers who want ChatGPT to fill a real shopping cart on existing online stores — not for coding or launching a new storefront website."
       },
       {
-        question: "How does ShopCart MCP handle different currencies for international stores?",
+        question: "How do online shopping cart permalinks work?",
         answer:
-          "ShopCart MCP reads the storefront's native currency via inspect_store and normalizes prices across EUR, USD, GBP, CHF, and other ISO 4217 currencies automatically. For multi-region brands, specify your local storefront domain."
+          "Storefronts like Shopify (/cart/<variant_id>:<qty>?storefront=true), WooCommerce Store API carts, and Amazon (/gp/aws/cart/add.html) accept structured URL parameters that preload chosen products and quantities directly into your own browser session without needing third-party account access."
       },
       {
-        question: "How much does ShopCart MCP cost for Black Friday shopping?",
+        question: "Can ChatGPT apply my discount code to the cart link?",
         answer:
-          "Through December 6, 2026, every signed-in hosted account automatically gets 500 tool calls per day for free. After the promo, the hosted Free tier remains 20 calls/day permanently, Pro is €9/month (500 calls/day), and the MIT open-source CLI is always free locally."
+          "Yes, if you provide a real discount code in your prompt, ChatGPT can pass it to create_cart_link on supported storefronts. ShopCart MCP never invents or guesses coupon codes."
       }
     ],
     hreflang: {
@@ -1119,16 +1084,18 @@ export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
       xDefault: "/en/guides/chatgpt-shopify-cart"
     },
     publishedDate: PUBLISHED_ISO,
-    modifiedDate: PUBLISHED_ISO,
+    modifiedDate: UPDATED_ISO,
     keywords: [
+      "can chatgpt create a shopping cart",
+      "chatgpt shopping cart mcp",
       "chatgpt shopify cart",
       "chatgpt connectors",
-      "ai black friday deals",
-      "ai gift finder",
-      "chatgpt shopping assistant"
+      "ai shopping assistant"
     ]
   }
 ];
+
+export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [...CORE_GUIDES, ...ANSWER_PAGE_GUIDES];
 
 export const GUIDES_CSS = `:root {
   color-scheme: dark;
@@ -1434,6 +1401,21 @@ li {
 .article-tldr p {
   margin: 0;
   color: #f3f4f6;
+}
+
+.seasonal-note {
+  background: var(--walspro-bg-2);
+  border: 1px solid var(--walspro-border-strong);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin: 0 0 20px;
+  font-size: 14px;
+  color: var(--walspro-ink);
+}
+
+.seasonal-note p {
+  margin: 0;
+  font-size: 14px;
 }
 
 .cta-panel {
@@ -1849,6 +1831,32 @@ export function safeJsonLd(value: unknown): string {
     .replace(/\u2029/g, "\\u2029");
 }
 
+function formatGuideDate(isoDate: string, lang: Lang): string {
+  const parts = isoDate.split("-");
+  if (parts.length !== 3) return isoDate;
+  const [year, month, day] = parts;
+  if (lang === "de") {
+    return `${day}.${month}.${year}`;
+  }
+  const monthNames = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec"
+  ];
+  const monthIdx = Number.parseInt(month ?? "1", 10) - 1;
+  const label = monthNames[monthIdx] ?? month;
+  return `${label} ${Number.parseInt(day ?? "1", 10)}, ${year}`;
+}
+
 function renderPromoBar(config: AppConfig, lang: Lang): string {
   if (!isPromoFreeProActive(config)) return "";
   const de = lang === "de";
@@ -1909,8 +1917,8 @@ function renderFooter(config: AppConfig, lang: Lang): string {
     </div>
     <p class="disclaimer">${
       de
-        ? "für Shopify-Shops – unabhängiges Community-Tool, nicht verbunden mit Shopify Inc. Alle Markennamen gehören ihren jeweiligen Eigentümern."
-        : "for Shopify stores – independent community tool, not affiliated with Shopify Inc. All trademarks belong to their respective owners."
+        ? "für Shopify-, WooCommerce- und Amazon-Shops – unabhängiges Community-Tool, nicht verbunden mit Shopify Inc., Automattic Inc. (WooCommerce) oder Amazon.com, Inc. Alle Markennamen gehören ihren jeweiligen Eigentümern."
+        : "for Shopify, WooCommerce, and Amazon stores – independent community tool, not affiliated with Shopify Inc., Automattic Inc. (WooCommerce), or Amazon.com, Inc. All trademarks belong to their respective owners."
     }</p>
   </div>
 </footer>`;
@@ -1950,16 +1958,25 @@ function renderOneClickButtons(
 }
 
 function renderTable(table: GuideTable): string {
-  const [h0, h1, h2] = table.headers;
   const captionId = `${table.id}-caption`;
+  const headerCellsHtml = table.headers
+    .map((h) => `<th scope="col">${escapeHtml(h)}</th>`)
+    .join("\n          ");
+
   const rowsHtml = table.rows
-    .map(
-      ([c0, c1, c2]) => `<tr>
-        <th scope="row">${escapeHtml(c0)}</th>
-        <td data-label="${escapeHtml(h1)}">${escapeHtml(c1)}</td>
-        <td data-label="${escapeHtml(h2)}">${escapeHtml(c2)}</td>
-      </tr>`
-    )
+    .map((row) => {
+      const [rowHead = "", ...cells] = row;
+      const cellsHtml = cells
+        .map(
+          (cell, idx) =>
+            `<td data-label="${escapeHtml(table.headers[idx + 1] ?? "")}">${escapeHtml(cell)}</td>`
+        )
+        .join("\n        ");
+      return `<tr>
+        <th scope="row">${escapeHtml(rowHead)}</th>
+        ${cellsHtml}
+      </tr>`;
+    })
     .join("\n      ");
 
   return `<div tabindex="0" role="region" aria-labelledby="${escapeHtml(captionId)}" class="table-wrapper">
@@ -1967,9 +1984,7 @@ function renderTable(table: GuideTable): string {
       <caption id="${escapeHtml(captionId)}">${escapeHtml(table.caption)}</caption>
       <thead>
         <tr>
-          <th scope="col">${escapeHtml(h0)}</th>
-          <th scope="col">${escapeHtml(h1)}</th>
-          <th scope="col">${escapeHtml(h2)}</th>
+          ${headerCellsHtml}
         </tr>
       </thead>
       <tbody>
@@ -2098,7 +2113,16 @@ export function renderGuidePage(config: AppConfig, guide: GuideDefinition): stri
     )
     .join("\n    ");
 
-  const relatedGuides = GUIDE_DEFINITIONS.filter((g) => g.path !== guide.path);
+  const seasonalNoteHtml =
+    guide.seasonalNote && isPromoFreeProActive(config)
+      ? `<aside class="seasonal-note" aria-label="${escapeHtml(guide.seasonalNote.label)}">
+        <p><strong>${escapeHtml(guide.seasonalNote.label)}</strong> ${escapeHtml(guide.seasonalNote.text)}</p>
+      </aside>`
+      : "";
+
+  const sameLangGuides = GUIDE_DEFINITIONS.filter((g) => g.path !== guide.path && g.lang === guide.lang);
+  const altGuide = GUIDE_DEFINITIONS.find((g) => g.path === switchHref && g.path !== guide.path);
+  const relatedGuides = altGuide ? [...sameLangGuides, altGuide] : sameLangGuides;
   const relatedCardsHtml = relatedGuides
     .map(
       (g) => `<a class="guide-card" href="${escapeHtml(g.path)}">
@@ -2111,6 +2135,8 @@ export function renderGuidePage(config: AppConfig, guide: GuideDefinition): stri
       </a>`
     )
     .join("\n      ");
+
+  const formattedModified = formatGuideDate(guide.modifiedDate, guide.lang);
 
   return `<!doctype html>
 <html lang="${guide.lang}">
@@ -2139,7 +2165,7 @@ export function renderGuidePage(config: AppConfig, guide: GuideDefinition): stri
 <meta name="twitter:title" content="${escapeHtml(guide.metaTitle)}">
 <meta name="twitter:description" content="${escapeHtml(guide.metaDescription)}">
 <meta name="twitter:image" content="${escapeHtml(ogImage)}">
-<link rel="stylesheet" href="/assets/guides.css?v=0.1.0">
+<link rel="stylesheet" href="/assets/guides.css?v=0.2.0">
 <script type="application/ld+json">${safeJsonLd(articleLd)}</script>
 <script type="application/ld+json">${safeJsonLd(faqLd)}</script>
 <script type="application/ld+json">${safeJsonLd(howToLd)}</script>
@@ -2161,7 +2187,11 @@ ${renderHeader(config, guide.lang, switchHref, guide.path)}
     <article class="guide-article">
       <div class="kicker-row">
         <span class="kicker">${escapeHtml(guide.category)}</span>
-        <span class="meta-date">${de ? "Aktualisiert am 25.11.2026 · von wals.pro" : "Updated Nov 25, 2026 · by wals.pro"}</span>
+        <span class="meta-date">${
+          de
+            ? `Aktualisiert am ${escapeHtml(formattedModified)} · von wals.pro`
+            : `Updated ${escapeHtml(formattedModified)} · by wals.pro`
+        }</span>
       </div>
 
       <h1>${escapeHtml(guide.title)}</h1>
@@ -2169,6 +2199,8 @@ ${renderHeader(config, guide.lang, switchHref, guide.path)}
       <div class="article-tldr">
         <p><strong>${escapeHtml(guide.tldrLabel)}</strong> ${escapeHtml(guide.tldrText)}</p>
       </div>
+
+      ${seasonalNoteHtml}
 
       <p>${escapeHtml(guide.intro)}</p>
 
@@ -2205,8 +2237,8 @@ ${renderHeader(config, guide.lang, switchHref, guide.path)}
 
       <div class="disclaimer">${
         de
-          ? "Hinweis: ShopCart MCP ist ein Angebot für Shopify-Shops – unabhängiges Community-Tool, nicht verbunden mit Shopify Inc. Alle Markennamen gehören ihren jeweiligen Eigentümern."
-          : "Note: ShopCart MCP is built for Shopify stores – independent community tool, not affiliated with Shopify Inc. All trademarks belong to their respective owners."
+          ? "Hinweis: ShopCart MCP ist ein Angebot für Shopify-, WooCommerce- und Amazon-Shops – unabhängiges Community-Tool, nicht verbunden mit Shopify Inc., Automattic Inc. (WooCommerce) oder Amazon.com, Inc. Alle Markennamen gehören ihren jeweiligen Eigentümern."
+          : "Note: ShopCart MCP is built for Shopify, WooCommerce, and Amazon stores – independent community tool, not affiliated with Shopify Inc., Automattic Inc. (WooCommerce), or Amazon.com, Inc. All trademarks belong to their respective owners."
       }</div>
     </article>
 
@@ -2235,8 +2267,8 @@ export function renderGuidesOverviewPage(config: AppConfig, lang: Lang): string 
     ? "KI-Shopping-Guides für Claude & ChatGPT | ShopCart MCP"
     : "AI Shopping Guides for Claude & ChatGPT | ShopCart MCP";
   const metaDescription = de
-    ? "Praxis-Guides für Claude & ChatGPT: Shopify-Warenkorb automatisch bauen, Adventskalender & Black-Friday-Deals mit KI finden — read-only & sicher."
-    : "Step-by-step guides for Claude and ChatGPT: build verified Shopify shopping carts, compare Black Friday deals, and check live stock — strictly read-only.";
+    ? "Praxis-Guides für ChatGPT & Claude: Warenkörbe per offenem MCP bauen, Instant-Checkout-Alternative, Amazon-Cart-Links & Shopify-MCP-Vergleich."
+    : "Step-by-step AI shopping guides for ChatGPT & Claude: open MCP carts, Instant Checkout alternative, Amazon cart links, and Shopify MCP comparison.";
 
   const starterPrompt = de
     ? "Verbinde dich mit ShopCart MCP (https://shopcart.wals.pro/mcp). Falls der Connector noch nicht eingerichtet ist, zeige mir kurz die 2-Klick-Anleitung. Danach suche mir lieferbare Geschenkideen unter 60 € bei snocks.com und erstelle mir einen geprüften Warenkorb-Link."
@@ -2327,7 +2359,7 @@ export function renderGuidesOverviewPage(config: AppConfig, lang: Lang): string 
 <meta name="twitter:title" content="${escapeHtml(metaTitle)}">
 <meta name="twitter:description" content="${escapeHtml(metaDescription)}">
 <meta name="twitter:image" content="${escapeHtml(ogImage)}">
-<link rel="stylesheet" href="/assets/guides.css?v=0.1.0">
+<link rel="stylesheet" href="/assets/guides.css?v=0.2.0">
 <script type="application/ld+json">${safeJsonLd(collectionLd)}</script>
 </head>
 <body>
@@ -2339,7 +2371,11 @@ ${renderHeader(config, lang, `/guides?lang=${otherLang}`, "/guides")}
     <div class="guide-article">
       <div class="kicker-row">
         <span class="kicker">${de ? "DE & EN Ratgeber-Übersicht" : "EN & DE Guide Hub"}</span>
-        <span class="meta-date">${de ? "Read-only · Claude & ChatGPT · Shopify-Shops" : "Read-only · Claude & ChatGPT · Shopify Stores"}</span>
+        <span class="meta-date">${
+          de
+            ? "Read-only · ChatGPT & Claude · Shopify, WooCommerce & Amazon-Cart-Links"
+            : "Read-only · ChatGPT & Claude · Shopify, WooCommerce & Amazon Cart Links"
+        }</span>
       </div>
 
       <h1>${de ? "KI-Shopping-Guides für Claude & ChatGPT" : "AI Shopping Guides for Claude & ChatGPT"}</h1>
@@ -2347,8 +2383,8 @@ ${renderHeader(config, lang, `/guides?lang=${otherLang}`, "/guides")}
       <div class="article-tldr">
         <p><strong>${de ? "Kurz gesagt:" : "TL;DR:"}</strong> ${
           de
-            ? "Alle Schritt-für-Schritt-Anleitungen für ShopCart MCP auf einen Blick: Verbinde Claude oder ChatGPT mit öffentlichen Shopify-Shops, prüfe Größen und echte Rabatte live und öffne fertige Warenkorb-Links zum Selbstbezahlen."
-            : "Every step-by-step guide for ShopCart MCP in one place: connect Claude or ChatGPT to public Shopify stores, check live sizes and genuine discounts, and open ready-to-review cart links yourself."
+            ? "Alle Schritt-für-Schritt-Anleitungen für ShopCart MCP auf einen Blick: offene Warenkörbe in ChatGPT & Claude per MCP, Instant-Checkout-Alternative, ehrlicher Amazon-Cart-Permalink-Guide sowie technischer Shopify-MCP-Server-Vergleich — strikt read-only."
+            : "Every step-by-step guide for ShopCart MCP in one place: open MCP carts in ChatGPT & Claude, Instant Checkout alternative, honest Amazon multi-item cart permalink guide, and technical Shopify MCP server comparison — strictly read-only."
         }</p>
       </div>
 
@@ -2357,8 +2393,8 @@ ${renderHeader(config, lang, `/guides?lang=${otherLang}`, "/guides")}
         "claude",
         de ? "Direkt loslegen: 1-Klick-Start" : "Start Shopping in 1 Click",
         de
-          ? "Starte sofort mit einem fertigen Prompt in Claude oder ChatGPT — kostenlos im Free-Tarif (und 500 Calls/Tag gratis während des Black-Friday-Launch bis 06.12.2026)."
-          : "Launch a ready-to-use prompt directly in Claude or ChatGPT — free permanently on the Free tier (and 500 calls/day free during the Black Friday launch through Dec 6, 2026).",
+          ? "Starte sofort mit einem fertigen Prompt in Claude oder ChatGPT — kostenlos im Free-Tarif (20 Calls/Tag dauerhaft gratis) oder lokal via MIT-CLI."
+          : "Launch a ready-to-use prompt directly in Claude or ChatGPT — free permanently on the Free tier (20 calls/day) or locally via the MIT CLI.",
         starterPrompt
       )}
 
@@ -2366,8 +2402,8 @@ ${renderHeader(config, lang, `/guides?lang=${otherLang}`, "/guides")}
 
       <div class="disclaimer">${
         de
-          ? "für Shopify-Shops – unabhängiges Community-Tool, nicht verbunden mit Shopify Inc. Alle Markennamen gehören ihren jeweiligen Eigentümern."
-          : "for Shopify stores – independent community tool, not affiliated with Shopify Inc. All trademarks belong to their respective owners."
+          ? "für Shopify-, WooCommerce- und Amazon-Shops – unabhängiges Community-Tool, nicht verbunden mit Shopify Inc., Automattic Inc. (WooCommerce) oder Amazon.com, Inc. Alle Markennamen gehören ihren jeweiligen Eigentümern."
+          : "for Shopify, WooCommerce, and Amazon stores – independent community tool, not affiliated with Shopify Inc., Automattic Inc. (WooCommerce), or Amazon.com, Inc. All trademarks belong to their respective owners."
       }</div>
     </div>
   </div>
@@ -2376,73 +2412,6 @@ ${renderHeader(config, lang, `/guides?lang=${otherLang}`, "/guides")}
 ${renderFooter(config, lang)}
 </body>
 </html>`;
-}
-
-export function renderSitemapXml(config: AppConfig): string {
-  const origin = config.appOrigin;
-  const staticUrls: Array<{
-    loc: string;
-    priority: string;
-    changefreq: string;
-    alternates?: Array<{ hreflang: string; href: string }>;
-  }> = [
-    {
-      loc: `${origin}/`,
-      priority: "1.0",
-      changefreq: "weekly",
-      alternates: [
-        { hreflang: "de", href: `${origin}/?lang=de` },
-        { hreflang: "en", href: `${origin}/?lang=en` },
-        { hreflang: "x-default", href: `${origin}/` }
-      ]
-    },
-    {
-      loc: `${origin}/guides`,
-      priority: "0.9",
-      changefreq: "weekly",
-      alternates: [
-        { hreflang: "de", href: `${origin}/guides?lang=de` },
-        { hreflang: "en", href: `${origin}/guides?lang=en` },
-        { hreflang: "x-default", href: `${origin}/guides` }
-      ]
-    },
-    ...GUIDE_DEFINITIONS.map((g) => ({
-      loc: `${origin}${g.path}`,
-      priority: "0.8",
-      changefreq: "weekly",
-      alternates: [
-        { hreflang: "de", href: `${origin}${g.hreflang.de}` },
-        { hreflang: "en", href: `${origin}${g.hreflang.en}` },
-        { hreflang: "x-default", href: `${origin}${g.hreflang.xDefault}` }
-      ]
-    })),
-    { loc: `${origin}/privacy`, priority: "0.3", changefreq: "monthly" },
-    { loc: `${origin}/terms`, priority: "0.3", changefreq: "monthly" }
-  ];
-
-  const entries = staticUrls
-    .map((u) => {
-      const altXml = (u.alternates ?? [])
-        .map(
-          (a) =>
-            `    <xhtml:link rel="alternate" hreflang="${escapeHtml(a.hreflang)}" href="${escapeHtml(a.href)}"/>`
-        )
-        .join("\n");
-      return `  <url>
-    <loc>${escapeHtml(u.loc)}</loc>
-    <lastmod>${PUBLISHED_ISO}</lastmod>
-    <changefreq>${u.changefreq}</changefreq>
-    <priority>${u.priority}</priority>${altXml ? `\n${altXml}` : ""}
-  </url>`;
-    })
-    .join("\n");
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
-        xmlns:xhtml="http://www.w3.org/1999/xhtml">
-${entries}
-</urlset>
-`;
 }
 
 function sendGuideHtml(res: Response, html: string): void {
@@ -2462,13 +2431,6 @@ export function createGuidesRouter(config: AppConfig): Router {
     res.setHeader("Cache-Control", "public, max-age=300");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.status(200).send(GUIDES_CSS);
-  });
-
-  router.get("/sitemap.xml", (_req: Request, res: Response) => {
-    res.setHeader("Content-Type", "application/xml; charset=utf-8");
-    res.setHeader("Cache-Control", "public, max-age=3600");
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.status(200).send(renderSitemapXml(config));
   });
 
   router.get("/guides", (req: Request, res: Response) => {
