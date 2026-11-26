@@ -5,4 +5,9 @@ dist/
 !.env.example
 coverage/
 *.log
+*.tsbuildinfo
+*.pem
+*.key
+*.p12
+*service-account*.json
 .DS_Store

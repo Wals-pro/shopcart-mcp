@@ -1,9 +1,16 @@
 node_modules
 dist
 .git
+.github
 .env
 .env.*
 tests
 coverage
 *.log
+*.pem
+*.key
+*.p12
+*service-account*.json
+*credentials*.json
+SECURITY.md
 .DS_Store
