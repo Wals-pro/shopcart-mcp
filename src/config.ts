@@ -14,6 +14,7 @@ export interface AppConfig {
   stripeProPriceId: string | undefined;
   openaiAppsChallenge: string | undefined;
   mcpRegistryAuth: string | undefined;
+  indexNowKey: string | undefined;
   demoVideoUrl: string | undefined;
   demoVideoUrlDe: string | undefined;
   demoVideoUrlEn: string | undefined;
@@ -58,6 +59,14 @@ function parseOptionalVideoUrl(raw: string | undefined): string | undefined {
     return undefined;
   }
   return undefined;
+}
+
+const INDEXNOW_KEY_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{6,126}[A-Za-z0-9])$/;
+
+export function parseIndexNowKey(raw: string | undefined): string | undefined {
+  const val = raw?.trim();
+  if (!val) return undefined;
+  return INDEXNOW_KEY_RE.test(val) ? val : undefined;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -110,6 +119,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     stripeProPriceId: env.STRIPE_PRO_PRICE_ID?.trim() || undefined,
     openaiAppsChallenge: env.OPENAI_APPS_CHALLENGE?.trim() || undefined,
     mcpRegistryAuth: env.MCP_REGISTRY_AUTH?.trim() || undefined,
+    indexNowKey: parseIndexNowKey(env.INDEXNOW_KEY),
     demoVideoUrl: parseOptionalVideoUrl(env.DEMO_VIDEO_URL),
     demoVideoUrlDe: parseOptionalVideoUrl(env.DEMO_VIDEO_URL_DE),
     demoVideoUrlEn: parseOptionalVideoUrl(env.DEMO_VIDEO_URL_EN),

@@ -1,9 +1,15 @@
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
-import { loadConfig } from "../src/config.js";
+import { loadConfig, parseIndexNowKey } from "../src/config.js";
 import { MemoryStore } from "../src/store/memory.js";
 import { ALLOWED_CRAWLERS, SITEMAP_PATHS } from "../src/web/discovery.js";
+import { GUIDE_DEFINITIONS } from "../src/web/guides.js";
+import {
+  buildIndexNowPayload,
+  extractSitemapUrls,
+  isValidIndexNowKey
+} from "../scripts/ping-indexnow.mjs";
 
 function makeApp(extraEnv: Record<string, string> = {}) {
   const config = loadConfig({
@@ -16,8 +22,8 @@ function makeApp(extraEnv: Record<string, string> = {}) {
   return { config, app: createApp({ config, store: new MemoryStore() }) };
 }
 
-describe("Agent discovery (GEO/AEO): llms.txt, llms-full.txt, robots.txt, sitemap.xml, Link header", () => {
-  it("serves /llms.txt as text/plain with summary, MCP endpoint, tools, and the start-prompt contract", async () => {
+describe("Agent discovery (GEO/AEO): llms.txt, llms-full.txt, robots.txt, sitemap.xml, IndexNow & Link header", () => {
+  it("serves /llms.txt as text/plain with summary, MCP endpoint, tools, all guide links, and the start-prompt contract", async () => {
     const { app } = makeApp();
     const res = await request(app).get("/llms.txt").expect(200);
     expect(res.headers["content-type"]).toBe("text/plain; charset=utf-8");
@@ -29,14 +35,17 @@ describe("Agent discovery (GEO/AEO): llms.txt, llms-full.txt, robots.txt, sitema
     for (const tool of ["inspect_store", "search_products", "get_product", "create_cart_link"]) {
       expect(res.text).toContain(tool);
     }
+    for (const guide of GUIDE_DEFINITIONS) {
+      expect(res.text).toContain(`https://shopcart.wals.pro${guide.path}`);
+    }
     expect(res.text).toContain("Start Prompt");
     expect(res.text).toMatch(/never (places|place) orders|read-only/i);
     // Brand spelling & no internal keyword numbers in public text
     expect(res.text).not.toMatch(/Wals\.pro|WALS\.PRO/);
-    expect(res.text).not.toMatch(/search volume|Suchvolumen|DataForSEO/i);
+    expect(res.text).not.toMatch(/search volume|Suchvolumen|DataForSEO|54[.,]3\s*%|30[.,]4\s*%/i);
   });
 
-  it("serves /llms-full.txt as text/plain with full reference, DE + EN FAQ, and current limits", async () => {
+  it("serves /llms-full.txt as text/plain with full reference, all guides, DE + EN FAQ, and current limits", async () => {
     const { app, config } = makeApp();
     const res = await request(app).get("/llms-full.txt").expect(200);
     expect(res.headers["content-type"]).toBe("text/plain; charset=utf-8");
@@ -46,10 +55,13 @@ describe("Agent discovery (GEO/AEO): llms.txt, llms-full.txt, robots.txt, sitema
     expect(res.text).toContain("create_cart_link");
     expect(res.text).toContain(`${config.freeDailyLimit}`);
     expect(res.text).toContain(`${config.proDailyLimit}`);
+    for (const guide of GUIDE_DEFINITIONS) {
+      expect(res.text).toContain(`https://shopcart.wals.pro${guide.path}`);
+    }
     expect(res.text).toContain("Kauft die KI über ShopCart automatisch für mich ein?");
     expect(res.text).toContain("Does ShopCart place orders or charge my card automatically?");
     expect(res.text).not.toMatch(/Wals\.pro|WALS\.PRO/);
-    expect(res.text).not.toMatch(/search volume|Suchvolumen|DataForSEO/i);
+    expect(res.text).not.toMatch(/search volume|Suchvolumen|DataForSEO|54[.,]3\s*%|30[.,]4\s*%/i);
   });
 
   it("serves /robots.txt that explicitly allows AI & search crawlers and points at the sitemap", async () => {
@@ -75,23 +87,73 @@ describe("Agent discovery (GEO/AEO): llms.txt, llms-full.txt, robots.txt, sitema
     expect(res.text).not.toMatch(/^Disallow: \/$/m);
   });
 
-  it("serves /sitemap.xml as application/xml listing landing, language variants, billing, legal, and llms files", async () => {
+  it("serves a single canonical /sitemap.xml listing landing, language variants, all 11 guides, billing, legal, and llms files", async () => {
     const { app } = makeApp();
     const res = await request(app).get("/sitemap.xml").expect(200);
     expect(res.headers["content-type"]).toContain("application/xml");
     expect(res.text.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true);
     expect(res.text).toContain('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"');
-    for (const required of ["/", "/?lang=de", "/?lang=en", "/billing", "/privacy", "/terms", "/llms.txt", "/llms-full.txt"]) {
+    expect(res.text).toContain('xmlns:xhtml="http://www.w3.org/1999/xhtml"');
+    for (const required of ["/", "/?lang=de", "/?lang=en", "/guides", "/billing", "/privacy", "/terms", "/llms.txt", "/llms-full.txt"]) {
       expect(SITEMAP_PATHS).toContain(required);
     }
-    // Guide pages from the SEO wave stay listed (the landing sitemap route is registered first)
-    expect(SITEMAP_PATHS).toContain("/guides");
-    expect(SITEMAP_PATHS).toContain("/guides/mit-claude-online-einkaufen");
-    expect(SITEMAP_PATHS).toContain("/en/guides/shop-with-claude");
+    for (const guide of GUIDE_DEFINITIONS) {
+      expect(SITEMAP_PATHS).toContain(guide.path);
+    }
     for (const path of SITEMAP_PATHS) {
       expect(res.text).toContain(`<loc>https://shopcart.wals.pro${path}</loc>`);
     }
     expect(res.text.match(/<url>/g)).toHaveLength(SITEMAP_PATHS.length);
+  });
+
+  it("serves GET /<INDEXNOW_KEY>.txt as text/plain when INDEXNOW_KEY is valid and returns 404 otherwise", async () => {
+    const validKey = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
+
+    // Unset -> 404
+    const { app: unsetApp } = makeApp();
+    await request(unsetApp).get(`/${validKey}.txt`).expect(404);
+
+    // Invalid keys -> rejected by parseIndexNowKey and 404
+    expect(parseIndexNowKey("short")).toBeUndefined();
+    expect(parseIndexNowKey("bad/key/path")).toBeUndefined();
+    expect(parseIndexNowKey("a".repeat(129))).toBeUndefined();
+    const { app: invalidApp } = makeApp({ INDEXNOW_KEY: "too-sh" });
+    await request(invalidApp).get("/too-sh.txt").expect(404);
+
+    // Valid key -> 200 text/plain returning exact key
+    const { app: validApp } = makeApp({ INDEXNOW_KEY: validKey });
+    const res = await request(validApp).get(`/${validKey}.txt`).expect(200);
+    expect(res.headers["content-type"]).toBe("text/plain; charset=utf-8");
+    expect(res.headers["x-content-type-options"]).toBe("nosniff");
+    expect(res.text).toBe(validKey);
+    // Other .txt paths still 404
+    await request(validApp).get("/otherkey12345678.txt").expect(404);
+  });
+
+  it("extracts sitemap URLs and builds valid IndexNow payloads via scripts/ping-indexnow.mjs helpers", async () => {
+    const { app } = makeApp();
+    const sitemapRes = await request(app).get("/sitemap.xml").expect(200);
+
+    const urls = extractSitemapUrls(sitemapRes.text, "shopcart.wals.pro");
+    expect(urls).toHaveLength(SITEMAP_PATHS.length);
+    expect(urls).toContain("https://shopcart.wals.pro/en/guides/chatgpt-instant-checkout-alternative");
+    expect(urls).toContain("https://shopcart.wals.pro/guides/shopify-mcp-server-vergleich");
+
+    const key = "0123456789abcdef0123456789abcdef";
+    expect(isValidIndexNowKey(key)).toBe(true);
+    expect(isValidIndexNowKey("short")).toBe(false);
+
+    const payload = buildIndexNowPayload({
+      origin: "https://shopcart.wals.pro",
+      key,
+      urlList: urls
+    });
+    expect(payload).toEqual({
+      host: "shopcart.wals.pro",
+      key,
+      keyLocation: `https://shopcart.wals.pro/${key}.txt`,
+      urlList: urls
+    });
   });
 
   it("derives every discovery URL from APP_ORIGIN", async () => {
