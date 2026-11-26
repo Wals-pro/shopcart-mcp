@@ -8,10 +8,25 @@ export type StorePlatform =
   | "shopify"
   | "woocommerce"
   | "amazon"
+  | "secondhand"
   | "bigcommerce"
   | "shopware"
   | "magento"
   | "jsonld";
+
+export type ProductCondition =
+  | "new"
+  | "refurbished"
+  | "like_new"
+  | "used"
+  | "damaged"
+  | "unknown";
+
+export type HandoffTier =
+  | "cart_permalink"
+  | "item_cart_sequence"
+  | "direct_product_link"
+  | "search_handoff";
 
 export type ProductAvailability =
   | "InStock"
@@ -50,6 +65,10 @@ export interface StoreInfo {
     shopwareStoreApi?: boolean;
     shopwareStorefrontSuggest?: boolean;
     magentoGraphql?: boolean;
+    handoffTier?: HandoffTier;
+    singleItemLookup?: boolean;
+    liveApiConfigured?: boolean;
+    marketplaceId?: string;
   };
 }
 
@@ -60,6 +79,8 @@ export interface ProductSummary {
   vendor: string | null;
   product_type: string | null;
   available: boolean;
+  condition?: ProductCondition;
+  condition_raw?: string | null;
   price: Money;
   price_min: Money;
   price_max: Money;
@@ -79,6 +100,8 @@ export interface ProductVariant {
   mpn?: string | null;
   available: boolean;
   availability?: ProductAvailability;
+  condition?: ProductCondition;
+  condition_raw?: string | null;
   price: Money;
   compare_at_price: Money | null;
   discount_percent?: number | null;
@@ -100,6 +123,8 @@ export interface ProductDetail {
   mpn?: string | null;
   available: boolean;
   availability?: ProductAvailability;
+  condition?: ProductCondition;
+  condition_raw?: string | null;
   price_min?: Money;
   price_max?: Money;
   metadata_source?: "jsonld" | "jsonld+opengraph" | "opengraph";
@@ -119,6 +144,7 @@ export interface SearchProductsOptions {
   availableOnly?: boolean;
   minPrice?: number;
   maxPrice?: number;
+  condition?: ProductCondition;
   currencyHint?: string;
   concurrencyKey?: string;
 }
@@ -133,6 +159,8 @@ export interface SearchProductsResult {
   currency: string;
   collection?: string;
   sort_by?: ProductSortBy;
+  handoff_tier?: HandoffTier;
+  affiliate_disclosure?: boolean;
   products: ProductSummary[];
   notices: string[];
   agent_guidance?: string;
@@ -198,6 +226,10 @@ export interface GetProductResult {
   store_origin: string;
   currency: string;
   product: ProductDetail;
+  handoff_tier?: HandoffTier;
+  affiliate_disclosure?: boolean;
+  notices?: string[];
+  agent_guidance?: string;
 }
 
 export interface CartLinkItemInput {
@@ -260,13 +292,18 @@ export interface StoreDiscountsResult {
   notices?: string[];
 }
 
-export type CartMode = "cart_permalink" | "checkout_permalink" | "direct_product_link";
+export type CartMode =
+  | "cart_permalink"
+  | "checkout_permalink"
+  | "direct_product_link"
+  | "search_handoff";
 
 export interface CartLinkResult {
   store_origin: string;
   cart_url: string;
   mode: "cart" | "checkout";
   cart_mode?: CartMode;
+  handoff_tier?: HandoffTier;
   items: CartLinkItemResult[];
   additional_cart_links?: AdditionalCartLink[];
   applied_discount_code?: string;

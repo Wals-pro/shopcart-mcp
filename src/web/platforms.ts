@@ -14,10 +14,18 @@ import type { Lang } from "../auth/pages.js";
  * - Shopware 6 / Magento 2 / Universal JSON-LD: verified direct product links.
  */
 
-export type HandoffLevel = "cart" | "sequence" | "amazon" | "product";
+export type HandoffLevel = "cart" | "sequence" | "amazon" | "product" | "search";
 
 export interface PlatformRow {
-  id: "shopify" | "woocommerce" | "bigcommerce" | "amazon" | "shopware" | "magento" | "universal";
+  id:
+    | "shopify"
+    | "woocommerce"
+    | "bigcommerce"
+    | "amazon"
+    | "shopware"
+    | "magento"
+    | "secondhand"
+    | "universal";
   name: string;
   /** Short technical basis, shown small under the name. */
   basis: string;
@@ -111,6 +119,16 @@ export function getPlatformRows(lang: Lang): PlatformRow[] {
         handoff: "Direktlink zur geprüften Produktseite, in den Warenkorb legst du dort selbst."
       },
       {
+        id: "secondhand",
+        name: "Second-Hand & Refurbished",
+        basis: "16 Marktplätze (willhaben, Kleinanzeigen, Vinted, eBay, refurbed, Back Market, rebuy, medimops, ricardo.ch u. a.)",
+        search: "Ein Aufruf (search_secondhand_marketplaces) erstellt vorgefilterte Such-Links nach Region, Preis, PLZ und Zustand — komplett ohne Scraping",
+        live: "Einzelartikel-Links von willhaben.at, ricardo.ch, refurbed, rebuy und medimops prüft die KI live (Preis & Zustand per Schema.org/JSON-LD)",
+        handoffLevel: "search",
+        handoffLabel: "Gefilterte Marktplatz-Links",
+        handoff: "Deterministische Such-Deep-Links direkt zu den Marktplätzen plus JSON-LD-Einzelartikelprüfung auf unterstützten Plattformen."
+      },
+      {
         id: "universal",
         name: "Alle anderen Shops",
         basis: "Schema.org / JSON-LD der Produktseite",
@@ -184,6 +202,16 @@ export function getPlatformRows(lang: Lang): PlatformRow[] {
       handoffLevel: "product",
       handoffLabel: "Verified product link",
       handoff: "Direct link to the verified product page, where you add it to the cart yourself."
+    },
+    {
+      id: "secondhand",
+      name: "Second-Hand & Refurbished",
+      basis: "16 marketplaces (willhaben, Kleinanzeigen, Vinted, eBay, refurbed, Back Market, rebuy, medimops, ricardo.ch, Etsy, etc.)",
+      search: "One call (search_secondhand_marketplaces) builds pre-filtered search links by region, price, postal code, and condition — zero scraping",
+      live: "Shared item links from willhaben.at, ricardo.ch, refurbed, rebuy, and medimops are verified live (price & condition via Schema.org/JSON-LD)",
+      handoffLevel: "search",
+      handoffLabel: "Filtered marketplace links",
+      handoff: "Deterministic search deep-links straight to the marketplaces plus JSON-LD single-item lookup on supported sites."
     },
     {
       id: "universal",

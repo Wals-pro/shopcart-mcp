@@ -3,6 +3,7 @@ import { AmazonAdapter } from "./amazon/adapter.js";
 import { BigCommerceAdapter } from "./bigcommerce/adapter.js";
 import { UniversalJsonLdAdapter } from "./jsonld/adapter.js";
 import { MagentoAdapter } from "./magento/adapter.js";
+import { SecondhandMarketplaceAdapter } from "./secondhand/adapter.js";
 import { ShopifyAdapter } from "./shopify/adapter.js";
 import { ShopwareAdapter } from "./shopware/adapter.js";
 import { WooCommerceAdapter } from "./woocommerce/adapter.js";
@@ -24,14 +25,16 @@ export class AdapterRegistry {
   constructor(adapters?: StoreAdapter[]) {
     // Deterministic priority order:
     // 1. Amazon (0 ms synchronous hostname match)
-    // 2. Shopify (incl. Smart-Shopper & UCP /api/ucp/mcp)
-    // 3. WooCommerce (Store API v1)
-    // 4. BigCommerce (Stencil / BCData / /cart.php)
-    // 5. Shopware 6 (Store API / storefront markers)
-    // 6. Magento 2 / Adobe Commerce (read-only GraphQL)
-    // 7. Universal JSON-LD / Schema.org (STRICTLY LAST FALLBACK)
+    // 2. Second-Hand & Refurbished Marketplaces (0 ms synchronous hostname match)
+    // 3. Shopify (incl. Smart-Shopper & UCP /api/ucp/mcp)
+    // 4. WooCommerce (Store API v1)
+    // 5. BigCommerce (Stencil / BCData / /cart.php)
+    // 6. Shopware 6 (Store API / storefront markers)
+    // 7. Magento 2 / Adobe Commerce (read-only GraphQL)
+    // 8. Universal JSON-LD / Schema.org (STRICTLY LAST FALLBACK)
     this.adapters = adapters ?? [
       new AmazonAdapter(),
+      new SecondhandMarketplaceAdapter(),
       new ShopifyAdapter(),
       new WooCommerceAdapter(),
       new BigCommerceAdapter(),

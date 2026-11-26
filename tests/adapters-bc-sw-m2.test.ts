@@ -774,6 +774,7 @@ describe("AdapterRegistry & SSRF protection across all adapters", () => {
     const defaultRegistry = new AdapterRegistry();
     expect(defaultRegistry.listPlatforms()).toEqual([
       "amazon",
+      "secondhand",
       "shopify",
       "woocommerce",
       "bigcommerce",

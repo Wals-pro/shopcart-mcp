@@ -745,6 +745,7 @@ describe("UniversalJsonLdAdapter (get_product, search_products, create_cart_link
     const platforms = defaultRegistry.listPlatforms();
     expect(platforms).toEqual([
       "amazon",
+      "secondhand",
       "shopify",
       "woocommerce",
       "bigcommerce",

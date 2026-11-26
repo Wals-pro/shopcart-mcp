@@ -282,7 +282,7 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
         expect(heroStrip).toContain(`>${escapeHtml(name)}<`);
       }
 
-      // Matrix section: 7 rows, each with platform name, handoff badge and honest handoff text
+      // Matrix section: 8 rows, each with platform name, handoff badge and honest handoff text
       const shops = html.slice(html.indexOf('id="shops"'), html.indexOf('id="comfort"'));
       const rows = getPlatformRows(lang);
       expect(rows.map((row) => row.id)).toEqual([
@@ -292,9 +292,10 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
         "amazon",
         "shopware",
         "magento",
+        "secondhand",
         "universal"
       ]);
-      expect(shops.match(/class="matrix-row"/g) ?? []).toHaveLength(7);
+      expect(shops.match(/class="matrix-row"/g) ?? []).toHaveLength(8);
       for (const row of rows) {
         expect(shops).toContain(escapeHtml(row.name));
         expect(shops).toContain(escapeHtml(row.handoffLabel));
@@ -311,6 +312,9 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
         "shopware",
         "magento",
         "universal"
+      ]);
+      expect(rows.filter((row) => row.handoffLevel === "search").map((row) => row.id)).toEqual([
+        "secondhand"
       ]);
       expect(shops).toContain(AMAZON_MARKETPLACES);
       expect(AMAZON_MARKETPLACES.split(", ")).toHaveLength(10);
@@ -342,7 +346,7 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
     }
 
     const md = renderPlatformMatrixMarkdown("en");
-    expect(md.split("\n").filter((line) => line.startsWith("| ")).length).toBe(9); // header + separator + 7 platform rows
+    expect(md.split("\n").filter((line) => line.startsWith("| ")).length).toBe(10); // header + separator + 8 platform rows
   });
 
   it("embeds Schema.org JSON-LD (SoftwareApplication, FAQPage, HowTo) in sync with the visible FAQ and steps", async () => {

@@ -813,6 +813,7 @@ describe("AdapterRegistry auto-routing (Amazon, Shopify & WooCommerce)", () => {
     const defaultRegistry = new AdapterRegistry();
     expect(defaultRegistry.listPlatforms()).toEqual([
       "amazon",
+      "secondhand",
       "shopify",
       "woocommerce",
       "bigcommerce",
