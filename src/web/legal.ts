@@ -103,6 +103,9 @@ Support &amp; Datenschutzanfragen: <a href="mailto:support@wals.pro">support@wal
 <h2>5. Nutzerkontrolle &amp; DSGVO-Rechte (Art. 15–21 DSGVO)</h2>
 <p>Du kannst jede KI-Client-Verbindung jederzeit über deinen Client oder <code>/oauth/revoke</code> widerrufen. Auskunft, Berichtigung, Datenexport oder vollständige Kontolöschung erhältst du jederzeit formlos per E-Mail an <a href="mailto:support@wals.pro">support@wals.pro</a>.</p>
 
+<h2>6. UTM-Attribution &amp; Affiliate-/Partner-Links (Transparenzhinweis)</h2>
+<p>Von ShopCart erzeugte Produkt- und Warenkorb-Links enthalten im gehosteten Modus standardmäßig nicht-personenbezogene UTM-Parameter (<code>utm_source=shopcart.wals.pro</code>, <code>utm_medium=ai_mcp</code>, <code>utm_campaign=shopcart_mcp</code>), damit Händler KI-vermittelte Besuche in ihren Shop-Analysen zuordnen können (in der lokalen OSS-CLI optional abschaltbar via <code>SHOPCART_DISABLE_UTM=1</code>). Für teilnehmende Partner-Shops oder Produkt-Feeds (z. B. über Affiliate-Netzwerke wie Awin, Impact, Sovrn Commerce, Direktpartnerprogramme oder das Amazon-PartnerNet) können Links zusätzlich Partner- oder Affiliate-Parameter enthalten. Solche monetarisierten Links werden in jeder MCP-Antwort ausdrücklich mit <code>affiliate_disclosure: true</code> gekennzeichnet (§ 5a UWG, § 6 DDG, ECG, FTC 16 CFR Part 255). Beim Klick auf einen Affiliate-Link können das jeweilige Netzwerk oder der Händler eigene Zuordnungs-Cookies gemäß deren Datenschutzerklärung setzen; Wals Professional Services GmbH erhält keine persönlichen Bestell- oder Zahlungsdaten. <strong>Amazon-PartnerNet-Hinweis:</strong> Als Amazon-Partner verdient Wals Professional Services GmbH an qualifizierten Verkäufen — für dich entstehen dadurch keine Mehrkosten.</p>
+
 <div class="disclaimer">Unabhängiges Community-Tool für Shopify-Shops — nicht verbunden mit oder unterstützt von Shopify Inc. Alle Markennamen gehören ihren jeweiligen Eigentümern.</div>
 `
     : `
@@ -141,6 +144,9 @@ Support &amp; privacy requests: <a href="mailto:support@wals.pro">support@wals.p
 <h2>5. User Controls &amp; GDPR Rights (Articles 15–21)</h2>
 <p>You can revoke any connected AI client at any time in your AI client settings or via <code>/oauth/revoke</code>. To request access, correction, export, or permanent deletion of your account and all associated data, email <a href="mailto:support@wals.pro">support@wals.pro</a>.</p>
 
+<h2>6. UTM Attribution &amp; Affiliate / Partner Links Disclosure</h2>
+<p>Product and cart links generated in hosted mode include non-personal UTM attribution parameters by default (<code>utm_source=shopcart.wals.pro</code>, <code>utm_medium=ai_mcp</code>, <code>utm_campaign=shopcart_mcp</code>) so merchants can recognize AI-assisted referrals in storefront analytics (optional opt-out in the local OSS CLI via <code>SHOPCART_DISABLE_UTM=1</code>). For participating merchants or partner product feeds (such as Awin, Impact, Sovrn Commerce, direct merchant referral programs, or Amazon Associates / PartnerNet), links may include affiliate tracking tags or deeplinks. Whenever a monetized affiliate link is returned, MCP tool outputs explicitly set <code>affiliate_disclosure: true</code> in compliance with EU/DACH transparency laws and US FTC Endorsement Guides (16 CFR Part 255). Clicking an affiliate link may allow the respective affiliate network or merchant to set attribution cookies under its own privacy policy; Wals Professional Services GmbH never receives personal shopper checkout details. <strong>Amazon Associates Disclosure:</strong> As an Amazon Associate, Wals Professional Services GmbH earns from qualifying purchases at no additional cost to you.</p>
+
 <div class="disclaimer">Independent community tool for Shopify stores — not affiliated with or endorsed by Shopify Inc. All trademarks belong to their respective owners.</div>
 `;
 
@@ -170,7 +176,10 @@ export function renderTermsPage(config: AppConfig, lang: Lang): string {
 <h2>4. Verfügbarkeit &amp; Haftung</h2>
 <p>Katalogdaten, Preise und Verfügbarkeiten stammen direkt von dritten Online-Shops und können sich jederzeit ändern. Wir übernehmen keine Gewähr für Preis- oder Bestandsangaben von Drittanbietern. Im Übrigen haftet die Wals Professional Services GmbH nach Maßgabe des österreichischen Rechts (Vorsatz und grobe Fahrlässigkeit unbeschränkt).</p>
 
-<h2>5. Kontakt</h2>
+<h2>5. Affiliate- &amp; Werbehinweis (EU/DACH &amp; FTC)</h2>
+<p>Ausgehende Produkt- und Warenkorb-Links können reine UTM-Herkunftsparameter (<code>utm_source=shopcart.wals.pro</code>) sowie — bei teilnehmenden Partnern oder Produkt-Feeds (z. B. Awin, Impact, Sovrn Commerce, Direktpartner, Amazon PartnerNet) — gekennzeichnete Affiliate-Links (<code>affiliate_disclosure: true</code>) enthalten. Durch qualifizierte Käufe über solche Partner-Links kann Wals Professional Services GmbH eine Provision erhalten; der Kaufpreis für dich bleibt unverändert. Als Amazon-Partner verdient Wals Professional Services GmbH an qualifizierten Verkäufen.</p>
+
+<h2>6. Kontakt</h2>
 <p>Support: <a href="mailto:support@wals.pro">support@wals.pro</a> · <a href="/privacy?lang=de">Datenschutzerklärung</a> · <a href="https://wals.pro/policies/legal-notice" target="_blank" rel="noopener">Impressum</a>.</p>
 
 <div class="disclaimer">Unabhängiges Community-Tool für Shopify-Shops — nicht verbunden mit oder unterstützt von Shopify Inc.</div>
@@ -195,7 +204,10 @@ export function renderTermsPage(config: AppConfig, lang: Lang): string {
 <h2>4. Third-Party Data &amp; Liability</h2>
 <p>Product titles, prices, discounts, and stock availability come live from third-party public storefronts and may change at any time. Always verify final prices and items on the merchant's cart page before purchasing. Liability is governed by Austrian law.</p>
 
-<h2>5. Contact</h2>
+<h2>5. Affiliate &amp; Partner Link Disclosure (EU/DACH &amp; FTC)</h2>
+<p>Outbound product and cart links may carry non-monetized UTM attribution parameters (<code>utm_source=shopcart.wals.pro</code>) and, for participating merchants or partner product feeds (e.g., Awin, Impact, Sovrn Commerce, direct merchant programs, or Amazon Associates), clearly disclosed affiliate links (<code>affiliate_disclosure: true</code>). Qualifying purchases via partner links may earn Wals Professional Services GmbH a commission at no extra cost to you. As an Amazon Associate, Wals Professional Services GmbH earns from qualifying purchases.</p>
+
+<h2>6. Contact</h2>
 <p>Support: <a href="mailto:support@wals.pro">support@wals.pro</a> · <a href="/privacy?lang=en">Privacy Policy</a> · <a href="https://wals.pro/policies/legal-notice" target="_blank" rel="noopener">Legal Notice</a>.</p>
 
 <div class="disclaimer">Independent community tool for Shopify stores — not affiliated with or endorsed by Shopify Inc.</div>

@@ -3,6 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import {
+  createAffiliateFeedProvider,
+  type AffiliateFeedProvider
+} from "./adapters/affiliate-feed/index.js";
 import { AdapterRegistry } from "./adapters/registry.js";
 import { createBearerAuthMiddleware } from "./auth/bearer.js";
 import { CimdResolver } from "./auth/cimd.js";
@@ -28,6 +32,7 @@ export interface CreateAppDeps {
   config: AppConfig;
   store: StorageBackend;
   registry?: AdapterRegistry;
+  affiliateFeed?: AffiliateFeedProvider;
   cimdResolver?: CimdResolver;
   emailSender?: EmailSender;
   otpService?: EmailOtpService;
@@ -90,6 +95,7 @@ function corsMiddleware(req: Request, res: Response, next: NextFunction): void {
 export function createApp(deps: CreateAppDeps): Express {
   const { config, store } = deps;
   const registry = deps.registry ?? new AdapterRegistry();
+  const affiliateFeed = deps.affiliateFeed ?? createAffiliateFeedProvider(config.affiliateFeed);
   const cimdResolver = deps.cimdResolver ?? new CimdResolver();
   const otpService =
     deps.otpService ??
@@ -268,6 +274,8 @@ export function createApp(deps: CreateAppDeps): Express {
     const server = createShopcartMcpServer({
       version: config.version,
       registry,
+      attribution: config.attribution,
+      affiliateFeed,
       concurrencyKey: `user:${auth.userId}`,
       consumeQuota: () => consumeUserToolQuota(auth.user, config, store)
     });
