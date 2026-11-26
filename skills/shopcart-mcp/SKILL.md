@@ -41,7 +41,8 @@ WooCommerce (Automattic), Amazon, BigCommerce, Shopware, or Adobe (Magento)).
 graceful notice elsewhere.
 
 If the ShopCart MCP tools are not connected yet, instruct the user to either:
-- **Hosted (Claude.ai, ChatGPT, Perplexity, Poke, Manus, Mistral, Notion):** Connect Remote MCP URL `https://shopcart.wals.pro/mcp` (OAuth 2.1).
+- **Hosted (Claude.ai, ChatGPT, Google Gemini, Perplexity, Poke, Manus, Mistral, Notion):** Connect Remote MCP URL `https://shopcart.wals.pro/mcp` (OAuth 2.1).
+- **Gemini CLI & Antigravity:** Install the official extension in one command: `gemini extensions install https://github.com/Wals-pro/shopcart-mcp` (or add `"httpUrl": "https://shopcart.wals.pro/mcp"` with `"authProviderType": "dynamic_discovery"` in `~/.gemini/settings.json`).
 - **Local OSS (OpenClaw, Claude Desktop/Code, Cursor, Raycast, Goose, Hermes):** Run `npx -y shopcart-mcp` over `stdio` (free, unlimited, no login).
 
 ## Tool Sequence (Follow This Order)

@@ -4,7 +4,7 @@
 
 **Agentic shopping & cart MCP server for Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2, and any store with Schema.org product data** — built by [wals.pro](https://wals.pro).
 
-Connect **Claude.ai**, **ChatGPT**, **Cursor**, **Claude Code**, or **VS Code** to public online stores: search products, verify live variants, prices, and stock, check shipping and return policies, and hand the shopper a ready-made cart or verified product link. Strictly read-only, with built-in SSRF protection and prompt-injection sanitization. Checkout and payment always happen in the store itself.
+Connect **Claude.ai**, **ChatGPT**, **Google Gemini**, **Cursor**, **Claude Code**, **Gemini CLI**, or **VS Code** to public online stores: search products, verify live variants, prices, and stock, check shipping and return policies, and hand the shopper a ready-made cart or verified product link. Strictly read-only, with built-in SSRF protection and prompt-injection sanitization. Checkout and payment always happen in the store itself.
 
 > **Independent open-source tool by wals.pro**, not affiliated with or endorsed by Shopify, WooCommerce (Automattic), Amazon, BigCommerce, Shopware, or Adobe (Magento). All trademarks belong to their respective owners.
 
@@ -19,7 +19,7 @@ Website & hosted server: <https://shopcart.wals.pro> · Guides: <https://shopcar
 | Mode | Auth | Limits | Best For |
 |---|---|---|---|
 | **Local `stdio` (`npx shopcart-mcp`)** | None (zero telemetry) | Unlimited | Claude Desktop, Cursor, Claude Code, local agents |
-| **Hosted MCP (`https://shopcart.wals.pro/mcp`)** | OAuth 2.1 (CIMD + DCR + PKCE S256) | Free: 20 calls/day · Pro (€9/mo): 500 calls/day *(Free Pro launch promo through Dec 6, 2026)* | Claude.ai Web/Mobile, ChatGPT Custom Connectors |
+| **Hosted MCP (`https://shopcart.wals.pro/mcp`)** | OAuth 2.1 (CIMD + DCR + PKCE S256) | Free: 20 calls/day · Pro (€9/mo): 500 calls/day *(Free Pro launch promo through Dec 6, 2026)* | Claude.ai Web/Mobile, ChatGPT Custom Connectors, Google Gemini (Web, CLI, Enterprise) |
 
 ### Supported Platforms & Capability Matrix
 
@@ -40,7 +40,7 @@ What the shopper gets differs by platform, and ShopCart MCP says so honestly in 
 - **Shipping & returns before checkout:** `get_store_policies` answers policy questions from the store's own policy pages (Shopify stores).
 - **Deal hunting with real numbers:** `list_collections` finds Sale, Black Friday, and Bestseller collections; `search_products` sorts by price or discount and returns `discount_percent` and `savings` computed from the store's compare-at prices (Shopify stores).
 - **1-click Claude Desktop extension:** download [`shopcart-mcp.mcpb`](https://shopcart.wals.pro/downloads/shopcart-mcp.mcpb) and open it. No terminal, no config file.
-- **2-step connect for ChatGPT & Claude.ai:** copy the server URL `https://shopcart.wals.pro/mcp` with one click, paste it as a custom connector, and start with a ready-made start prompt.
+- **2-step connect for Claude.ai, ChatGPT & Google Gemini:** copy the server URL `https://shopcart.wals.pro/mcp` with one click, paste it as a custom connector/app, or install the Gemini CLI extension in one command.
 - **Passwordless login:** 6-digit email code or 1-click magic link. No password to remember.
 - **Read-only & EU-hosted:** the server never places orders, never sees payment data, and runs on Google Cloud Run in `europe-west1`.
 
@@ -56,6 +56,69 @@ All 6 tools are read-only (`readOnlyHint: true, destructiveHint: false, idempote
 6. **`create_cart_link`** — Generates the deterministic handoff: Shopify cart permalinks (`/cart/<vid>:<qty>` or checkout mode), Amazon multi-item cart links, per-item add-to-cart links on WooCommerce and BigCommerce, or verified direct product links, with optional live variant verification via `verify_handles`.
 
 Self-hosted only: an optional seventh tool, `search_affiliate_deals`, appears when you configure your own Awin product feed. It is not enabled on the hosted server.
+
+### Google Gemini Setup (Web, CLI, Enterprise & SDK)
+
+All ShopCart MCP tool schemas are automatically sanitized for strict Google Gemini `functionDeclarations` compatibility (zero `$schema`, `additionalProperties`, `oneOf`, or unsupported JSON Schema keywords), and the hosted server supports Google's OAuth 2.1 CIMD, loopback, and Vertex AI Search flows.
+
+#### 1. Gemini CLI & Antigravity (1-Command Extension)
+
+```bash
+gemini extensions install https://github.com/Wals-pro/shopcart-mcp
+```
+
+Or add the remote Streamable HTTP server directly:
+
+```bash
+gemini mcp add --transport http --scope user shopcart https://shopcart.wals.pro/mcp
+```
+
+Or configure `~/.gemini/settings.json` (or `.gemini/settings.json`) manually — **important: use `"httpUrl"`, NOT `"url"`** (Gemini CLI treats `"url"` as legacy SSE and will fail to connect):
+
+```json
+{
+  "mcpServers": {
+    "shopcart": {
+      "httpUrl": "https://shopcart.wals.pro/mcp",
+      "authProviderType": "dynamic_discovery"
+    }
+  }
+}
+```
+
+#### 2. Gemini Web (`gemini.google.com`)
+
+1. Open [gemini.google.com](https://gemini.google.com/) → **Settings → Connected Apps** (*Verbundene Apps*) → **Custom apps → Add a custom app** (or test via [gemini.google.com/devmode](https://gemini.google.com/devmode)).
+2. Paste `https://shopcart.wals.pro/mcp` and complete the OAuth 2.1 sign-in (CIMD via `accountlinking.google.com`).
+
+> **Prerequisites (Google rollout):** Custom MCP apps in Gemini Web require a personal Google account (**Keep Activity** enabled) and depend on Google's regional/account rollout. Google Workspace accounts may show *"Service not allowed"* unless enabled by a Workspace Admin — teams on Google Workspace should use **Gemini Enterprise** below.
+
+#### 3. Gemini Enterprise / Google Workspace (Cloud Console)
+
+1. In Google Cloud Console, create a **Custom MCP Server Data Store** using Streamable HTTP (`https://shopcart.wals.pro/mcp`; legacy SSE is not supported).
+2. Configure OAuth 2.0 with Redirect URI `https://vertexaisearch.cloud.google.com/oauth-redirect` and scope `mcp:read`.
+
+#### 4. Google AI Studio / Gemini SDK (`@google/genai`)
+
+```ts
+import { GoogleGenAI, mcpToTool } from "@google/genai";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+const mcpClient = new Client({ name: "gemini-shopper", version: "1.0.0" });
+await mcpClient.connect(
+  new StreamableHTTPClientTransport(new URL("https://shopcart.wals.pro/mcp"), {
+    requestInit: { headers: { Authorization: `Bearer ${process.env.SHOPCART_ACCESS_TOKEN}` } }
+  })
+);
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const response = await ai.models.generateContent({
+  model: "gemini-2.5-flash",
+  contents: "Find in-stock sneaker socks in size 43-46 on snocks.com and build a cart link.",
+  config: { tools: [mcpToTool(mcpClient)] }
+});
+```
 
 ### Quick Start (Local `stdio`)
 
@@ -91,7 +154,7 @@ Claude Desktop / Cursor MCP config:
 
 - **SSRF Guard (`src/security/ssrf.ts`):** HTTPS-only, rejects IP literals and private/reserved IPv4 & IPv6 ranges (including Cloud Run metadata `169.254.169.254` and IPv4-mapped IPv6), DNS-pinned `undici` Agent, manual redirect loop (max 3 hops; 0 for CIMD), 6 s timeout, 1 MB / 8 KB caps.
 - **Prompt-Injection Guard (`src/security/sanitize.ts`):** Strips HTML/script/style/iframe, control chars, zero-width/BiDi overrides, Unicode tag blocks (`U+E0000–U+E007F`), enforces hard field length caps, and attaches untrusted catalog data notices.
-- **OAuth 2.1 (`src/auth/`):** RFC 9728 Protected Resource Metadata, RFC 8414 AS Metadata (no trailing slash on `issuer`, no `private_key_jwt`), CIMD resolver (Claude.ai, Claude Code, ChatGPT SEP-3149, VS Code), DCR (`/oauth/register` with `cursor://` filtering), RFC 8252 §7.3 loopback any-port matching, PKCE S256, RFC 9207 `iss`, RFC 8707 `resource` binding, RFC 6750 §3.1 split `WWW-Authenticate`, refresh token rotation with replay family revocation, and RFC 7009 `/oauth/revoke`.
+- **OAuth 2.1 (`src/auth/`):** RFC 9728 Protected Resource Metadata, RFC 8414 AS Metadata (no trailing slash on `issuer`, no `private_key_jwt`), CIMD resolver (Claude.ai, Claude Code, ChatGPT SEP-3149, Google Gemini `accountlinking.google.com`, VS Code), DCR (`/oauth/register` with `cursor://` filtering and Vertex AI Search redirect support), RFC 8252 §7.3 loopback any-port matching (Gemini CLI, Cursor, Claude Code), PKCE S256, RFC 9207 `iss`, RFC 8707 `resource` binding, RFC 6750 §3.1 split `WWW-Authenticate`, refresh token rotation with replay family revocation, and RFC 7009 `/oauth/revoke`.
 
 ---
 
@@ -99,7 +162,7 @@ Claude Desktop / Cursor MCP config:
 
 ### Überblick
 
-`shopcart-mcp` verbindet **Claude**, **ChatGPT**, **Cursor** und andere MCP-Clients direkt mit öffentlichen Onlineshops. Deine KI sucht Produkte, prüft Varianten, Preise und Bestand live im Shop und übergibt dir einen fertigen Warenkorb- oder Produktlink. Bezahlt wird immer im Shop selbst, der Server arbeitet ausschließlich lesend.
+`shopcart-mcp` verbindet **Claude**, **ChatGPT**, **Google Gemini**, **Cursor** und andere MCP-Clients direkt mit öffentlichen Onlineshops. Deine KI sucht Produkte, prüft Varianten, Preise und Bestand live im Shop und übergibt dir einen fertigen Warenkorb- oder Produktlink. Bezahlt wird immer im Shop selbst, der Server arbeitet ausschließlich lesend.
 
 | Shop-System | Produkte finden | Live geprüft | Übergabe an den Shop |
 |---|---|---|---|
@@ -116,7 +179,7 @@ Claude Desktop / Cursor MCP config:
 So nutzt du den Server:
 
 - **Lokal (`stdio`)**: Kostenlos, unbegrenzt, ohne Login und ohne Telemetrie unter MIT-Lizenz.
-- **Gehostet (OAuth 2.1)**: Sofort verbindbar in Claude.ai und ChatGPT Custom Connectors.
+- **Gehostet (OAuth 2.1)**: Sofort verbindbar in Claude.ai, ChatGPT Custom Connectors sowie Google Gemini (Web, Gemini CLI Extension `gemini extensions install https://github.com/Wals-pro/shopcart-mcp` und Gemini Enterprise).
   - **Free:** 20 Tool-Calls / Tag
   - **Pro (9 €/Monat):** 500 Tool-Calls / Tag
   - **Black-Friday-Launch-Aktion:** Bis einschließlich **06.12.2026** erhalten alle angemeldeten Konten automatisch 500 Calls/Tag kostenlos.

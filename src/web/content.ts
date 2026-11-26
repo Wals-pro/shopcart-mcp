@@ -151,10 +151,11 @@ export function buildStartPrompt(config: AppConfig, lang: Lang, tail?: string): 
   return `${startPromptHead(config, lang)} ${tail ?? defaultPromptTail(lang)}`;
 }
 
-/** Where "Mit Claude/ChatGPT verbinden" sends people after copying the connector URL. */
+/** Where "Mit Claude/ChatGPT/Gemini verbinden" sends people after copying the connector URL. */
 export const CONNECT_SETTINGS_URLS = {
   claude: "https://claude.ai/settings/connectors",
-  chatgpt: "https://chatgpt.com/#settings/Connectors"
+  chatgpt: "https://chatgpt.com/#settings/Connectors",
+  gemini: "https://gemini.google.com/"
 } as const;
 
 /** Native 1-click install deeplinks for apps that support them today (developer section). */
@@ -267,17 +268,17 @@ export function getUseCases(lang: Lang): UseCase[] {
 export function getHowTo(lang: Lang): HowToContent {
   if (lang === "de") {
     return {
-      name: "In 30 Sekunden mit Claude oder ChatGPT einkaufen",
+      name: "In 30 Sekunden mit Claude, ChatGPT oder Gemini einkaufen",
       description:
-        "So lässt du Claude, ChatGPT oder eine andere KI deinen Warenkorb in einem Online-Shop zusammenstellen. Du prüfst und bezahlst selbst.",
+        "So lässt du Claude, ChatGPT, Google Gemini oder eine andere KI deinen Warenkorb in einem Online-Shop zusammenstellen. Du prüfst und bezahlst selbst.",
       steps: [
         {
           name: "Einmal verbinden",
-          text: "Tippe auf „Mit Claude verbinden“ oder „Mit ChatGPT verbinden“. Dein ShopCart-Link wird kopiert und die Connector-Einstellungen öffnen sich: einfügen, kostenlos anmelden, fertig."
+          text: "Tippe auf „Mit Claude verbinden“, „Mit ChatGPT verbinden“ oder „Mit Gemini verbinden“. Dein ShopCart-Link wird kopiert und die Einstellungen deiner KI öffnen sich: einfügen, kostenlos anmelden, fertig."
         },
         {
           name: "Chat starten",
-          text: "Tippe auf „In Claude starten“ oder „In ChatGPT starten“. Dein Startprompt ist schon eingetragen."
+          text: "Tippe auf „In Claude starten“ oder „In ChatGPT starten“ – oder kopiere den Startprompt direkt für Google Gemini und jede andere KI."
         },
         {
           name: "Wunsch sagen",
@@ -291,17 +292,17 @@ export function getHowTo(lang: Lang): HowToContent {
     };
   }
   return {
-    name: "Shop with Claude or ChatGPT in 30 seconds",
+    name: "Shop with Claude, ChatGPT, or Gemini in 30 seconds",
     description:
-      "How to let Claude, ChatGPT, or another AI assistant fill your cart in an online store. You review and pay yourself.",
+      "How to let Claude, ChatGPT, Google Gemini, or another AI assistant fill your cart in an online store. You review and pay yourself.",
     steps: [
       {
         name: "Connect once",
-        text: "Tap “Connect to Claude” or “Connect to ChatGPT”. Your ShopCart link is copied and the connector settings open: paste it, sign in for free, done."
+        text: "Tap “Connect to Claude”, “Connect to ChatGPT”, or “Connect to Gemini”. Your ShopCart link is copied and your AI's settings open: paste it, sign in for free, done."
       },
       {
         name: "Start a chat",
-        text: "Tap “Start in Claude” or “Start in ChatGPT”. Your start prompt is already filled in."
+        text: "Tap “Start in Claude” or “Start in ChatGPT” — or copy the start prompt for Google Gemini and any other AI."
       },
       {
         name: "Say what you want",
@@ -335,6 +336,10 @@ export function getFaq(config: AppConfig, lang: Lang): FaqItem[] {
       {
         q: "Wie richte ich ShopCart in Claude oder ChatGPT ein?",
         a: `Tippe auf „Mit Claude verbinden“ oder „Mit ChatGPT verbinden“: Dein ShopCart-Link ${mcpUrl} wird kopiert und die Connector-Einstellungen deiner KI öffnen sich. Dort fügst du den Link als eigenen Connector ein und meldest dich einmalig kostenlos an. Aus Sicherheitsgründen lässt sich ein Connector nicht vollautomatisch von einer Website installieren, deshalb sind es zwei Klicks statt einem. Danach tippst du auf „In Claude starten“ oder „In ChatGPT starten“ und lässt dir sofort deinen ersten Warenkorb mit Claude oder ChatGPT bauen.`
+      },
+      {
+        q: "Funktioniert ShopCart MCP mit Google Gemini?",
+        a: `Ja. Du verbindest ShopCart MCP auf drei Wegen mit Google Gemini: In Gemini Web (gemini.google.com) unter Einstellungen → Verbundene Apps → Eigene Apps → App hinzufügen mit ${mcpUrl} (Voraussetzung: persönliches Google-Konto, Aktivitäten speichern aktiv und Google-Rollout; für Google-Workspace-Konten über den Workspace-Admin oder Gemini Enterprise). In der Gemini CLI und Antigravity installierst du die offizielle Erweiterung mit einem Befehl (gemini extensions install https://github.com/Wals-pro/shopcart-mcp) oder trägst "httpUrl": "${mcpUrl}" in ~/.gemini/settings.json ein. Unternehmen binden den Server über Gemini Enterprise in der Google Cloud Console (Redirect-URI https://vertexaisearch.cloud.google.com/oauth-redirect) oder im @google/genai SDK per mcpToTool an. Alles bleibt strikt read-only.`
       },
       {
         q: "In welchen Online-Shops funktioniert ShopCart?",
@@ -375,6 +380,10 @@ export function getFaq(config: AppConfig, lang: Lang): FaqItem[] {
     {
       q: "How do I connect ShopCart to Claude or ChatGPT?",
       a: `Tap “Connect to Claude” or “Connect to ChatGPT”: your ShopCart link ${mcpUrl} is copied and your AI's connector settings open. Paste the link there as a custom connector and sign in once for free. For security reasons, a website cannot install a connector fully automatically, so it takes two clicks instead of one. After that, tap “Start in Claude” or “Start in ChatGPT” and your Claude shopping cart or ChatGPT shopping session is one sentence away.`
+    },
+    {
+      q: "Does ShopCart MCP work with Google Gemini?",
+      a: `Yes. You can connect ShopCart MCP to Google Gemini in three ways: in Gemini Web (gemini.google.com) via Settings → Connected Apps → Custom apps → Add a custom app with ${mcpUrl} (requires a personal Google account, Keep Activity enabled, and Google's regional/account rollout; Google Workspace accounts need Workspace Admin enablement or Gemini Enterprise). In Gemini CLI and Antigravity, install the official extension in one command (gemini extensions install https://github.com/Wals-pro/shopcart-mcp) or set "httpUrl": "${mcpUrl}" in ~/.gemini/settings.json. Teams can connect via Gemini Enterprise in Google Cloud Console (redirect URI https://vertexaisearch.cloud.google.com/oauth-redirect) or the @google/genai SDK using mcpToTool. Every mode stays strictly read-only.`
     },
     {
       q: "Which online stores work with ShopCart?",
@@ -448,8 +457,8 @@ export function buildJsonLd(config: AppConfig, lang: Lang): Record<string, unkno
         applicationSubCategory: de ? "KI Shopping Assistent" : "AI shopping assistant",
         operatingSystem: "Web, iOS, Android, macOS, Windows, Linux",
         description: de
-          ? "ShopCart ist ein KI Shopping Assistent für Claude, ChatGPT und andere KI-Tools: Er findet echte Produkte, Größen und Preise in Online-Shops auf Shopify, WooCommerce, BigCommerce, Shopware 6 und Magento 2, erstellt Amazon-Warenkorb-Links und liefert einen fertigen Warenkorb- oder Produktlink. Rein lesend, du prüfst und bezahlst selbst."
-          : "ShopCart is an AI shopping assistant for Claude, ChatGPT, and other AI tools: it finds real products, sizes, and prices in online stores on Shopify, WooCommerce, BigCommerce, Shopware 6, and Magento 2, creates Amazon cart links, and returns a ready-to-review cart or product link. Strictly read-only, you review and pay yourself.",
+          ? "ShopCart ist ein KI Shopping Assistent für Claude, ChatGPT, Google Gemini und andere KI-Tools: Er findet echte Produkte, Größen und Preise in Online-Shops auf Shopify, WooCommerce, BigCommerce, Shopware 6 und Magento 2, erstellt Amazon-Warenkorb-Links und liefert einen fertigen Warenkorb- oder Produktlink. Rein lesend, du prüfst und bezahlst selbst."
+          : "ShopCart is an AI shopping assistant for Claude, ChatGPT, Google Gemini, and other AI tools: it finds real products, sizes, and prices in online stores on Shopify, WooCommerce, BigCommerce, Shopware 6, and Magento 2, creates Amazon cart links, and returns a ready-to-review cart or product link. Strictly read-only, you review and pay yourself.",
         featureList: [
           ...getPlatformRows(lang).map((row) => `${row.name}: ${row.handoffLabel}`),
           ...getComfortFeatures(lang).map((feature) => feature.title)

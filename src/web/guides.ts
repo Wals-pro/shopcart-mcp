@@ -3,6 +3,7 @@ import type { AppConfig } from "../config.js";
 import { detectLang, escapeHtml, type Lang } from "../auth/pages.js";
 import { isPromoFreeProActive } from "../billing/quota.js";
 import { ANSWER_PAGE_GUIDES } from "./guides-answer-pages.js";
+import { GEMINI_GUIDES } from "./guides-gemini.js";
 import {
   getComfortFeatures,
   getHandoffSentence,
@@ -1104,7 +1105,11 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
   }
 ];
 
-export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [...CORE_GUIDES, ...ANSWER_PAGE_GUIDES];
+export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
+  ...CORE_GUIDES,
+  ...ANSWER_PAGE_GUIDES,
+  ...GEMINI_GUIDES
+];
 
 export const GUIDES_CSS = `:root {
   color-scheme: dark;
@@ -1935,7 +1940,7 @@ function renderFooter(config: AppConfig, lang: Lang): string {
 
 function renderOneClickButtons(
   lang: Lang,
-  primaryAssistant: "claude" | "chatgpt",
+  primaryAssistant: "claude" | "chatgpt" | "gemini",
   heading: string,
   subtext: string,
   prompt: string
@@ -1944,6 +1949,12 @@ function renderOneClickButtons(
   const claudeUrl = buildClaudeDeeplink(prompt);
   const chatGptUrl = buildChatGptDeeplink(prompt);
 
+  const geminiBtn = `<a class="btn-primary" href="https://gemini.google.com/" target="_blank" rel="noopener noreferrer">${
+    de ? "In Google Gemini öffnen ↗" : "Open Google Gemini ↗"
+  }</a>`;
+  const geminiSetupBtn = `<a class="btn-secondary" href="/?lang=${lang}#setup">${
+    de ? "Gemini-Setup (Web &amp; CLI) →" : "Gemini setup (Web &amp; CLI) →"
+  }</a>`;
   const claudeBtn = `<a class="${primaryAssistant === "claude" ? "btn-primary" : "btn-secondary"}" href="${escapeHtml(claudeUrl)}" target="_blank" rel="noopener noreferrer">${
     de ? "In Claude öffnen ↗" : "Open in Claude ↗"
   }</a>`;
@@ -1952,7 +1963,11 @@ function renderOneClickButtons(
   }</a>`;
 
   const orderedButtons =
-    primaryAssistant === "chatgpt" ? `${chatGptBtn}\n      ${claudeBtn}` : `${claudeBtn}\n      ${chatGptBtn}`;
+    primaryAssistant === "gemini"
+      ? `${geminiBtn}\n      ${geminiSetupBtn}\n      ${claudeBtn}\n      ${chatGptBtn}`
+      : primaryAssistant === "chatgpt"
+        ? `${chatGptBtn}\n      ${claudeBtn}`
+        : `${claudeBtn}\n      ${chatGptBtn}`;
 
   return `<section class="cta-panel" aria-label="${escapeHtml(heading)}">
     <h2>${escapeHtml(heading)}</h2>
@@ -2309,11 +2324,11 @@ export function renderGuidesOverviewPage(config: AppConfig, lang: Lang): string 
   const ogImage = `${origin}/icon-512.png`;
 
   const metaTitle = de
-    ? "KI-Shopping-Guides für Claude & ChatGPT | ShopCart MCP"
-    : "AI Shopping Guides for Claude & ChatGPT | ShopCart MCP";
+    ? "KI-Shopping-Guides: Claude, ChatGPT & Gemini | ShopCart MCP"
+    : "AI Shopping Guides: Claude, ChatGPT & Gemini | ShopCart MCP";
   const metaDescription = de
-    ? "Praxis-Guides für ChatGPT & Claude: Warenkörbe per offenem MCP bauen, Instant-Checkout-Alternative, Amazon-Cart-Links & Shopify-MCP-Vergleich."
-    : "Step-by-step AI shopping guides for ChatGPT & Claude: open MCP carts, Instant Checkout alternative, Amazon cart links, and Shopify MCP comparison.";
+    ? "Praxis-Guides für Claude, ChatGPT & Google Gemini: Warenkörbe per offenem MCP bauen, Gemini CLI Setup, Amazon-Cart-Links & Shopify-MCP-Vergleich."
+    : "Step-by-step AI shopping guides for Claude, ChatGPT & Google Gemini: open MCP carts, Gemini CLI setup, Amazon cart links, and Shopify MCP comparison.";
 
   const starterPrompt = de
     ? "Verbinde dich mit ShopCart MCP (https://shopcart.wals.pro/mcp). Falls der Connector noch nicht eingerichtet ist, zeige mir kurz die 2-Klick-Anleitung. Danach suche mir lieferbare Geschenkideen unter 60 € bei snocks.com und erstelle mir einen geprüften Warenkorb-Link."
@@ -2418,18 +2433,18 @@ ${renderHeader(config, lang, `/guides?lang=${otherLang}`, "/guides")}
         <span class="kicker">${de ? "DE & EN Ratgeber-Übersicht" : "EN & DE Guide Hub"}</span>
         <span class="meta-date">${
           de
-            ? "Read-only · ChatGPT & Claude · Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2 & mehr"
-            : "Read-only · ChatGPT & Claude · Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2 & more"
+            ? "Read-only · Claude, ChatGPT &amp; Google Gemini · Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2 &amp; mehr"
+            : "Read-only · Claude, ChatGPT &amp; Google Gemini · Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2 &amp; more"
         }</span>
       </div>
 
-      <h1>${de ? "KI-Shopping-Guides für Claude & ChatGPT" : "AI Shopping Guides for Claude & ChatGPT"}</h1>
+      <h1>${de ? "KI-Shopping-Guides für Claude, ChatGPT &amp; Google Gemini" : "AI Shopping Guides for Claude, ChatGPT &amp; Google Gemini"}</h1>
 
       <div class="article-tldr">
         <p><strong>${de ? "Kurz gesagt:" : "TL;DR:"}</strong> ${
           de
-            ? "Alle Schritt-für-Schritt-Anleitungen für ShopCart MCP auf einen Blick: offene Warenkörbe in ChatGPT & Claude per MCP, Instant-Checkout-Alternative, ehrlicher Amazon-Cart-Permalink-Guide sowie technischer Shopify-MCP-Server-Vergleich — strikt read-only. Unten findest du die Übersicht aller unterstützten Shop-Systeme: Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2 und jeder andere Shop per Produktlink."
-            : "Every step-by-step guide for ShopCart MCP in one place: open MCP carts in ChatGPT & Claude, Instant Checkout alternative, honest Amazon multi-item cart permalink guide, and technical Shopify MCP server comparison — strictly read-only. Below you will find the overview of all supported store platforms: Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2, and any other store via product link."
+            ? "Alle Schritt-für-Schritt-Anleitungen für ShopCart MCP auf einen Blick: offene Warenkörbe in Claude, ChatGPT &amp; Google Gemini (Web, CLI &amp; Enterprise) per MCP, Instant-Checkout-Alternative, ehrlicher Amazon-Cart-Permalink-Guide sowie technischer Shopify-MCP-Server-Vergleich — strikt read-only. Unten findest du die Übersicht aller unterstützten Shop-Systeme: Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2 und jeder andere Shop per Produktlink."
+            : "Every step-by-step guide for ShopCart MCP in one place: open MCP carts in Claude, ChatGPT &amp; Google Gemini (Web, CLI &amp; Enterprise), Instant Checkout alternative, honest Amazon multi-item cart permalink guide, and technical Shopify MCP server comparison — strictly read-only. Below you will find the overview of all supported store platforms: Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2, and any other store via product link."
         }</p>
       </div>
 

@@ -21,6 +21,8 @@
     "ai-agent",
     "claude",
     "chatgpt",
+    "gemini",
+    "google-gemini",
     "oauth2"
   ],
   "bin": {

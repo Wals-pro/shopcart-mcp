@@ -29,7 +29,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
     takeawaysHeading: "Key Takeaways",
     takeaways: [
       {
-        lead: "Works across ChatGPT, Claude, Perplexity, and Cursor.",
+        lead: "Works across ChatGPT, Claude, Google Gemini, Perplexity, and Cursor.",
         text: "Because ShopCart MCP uses the open MCP standard and OAuth 2.1, you are never tied to one AI vendor or one checkout wallet."
       },
       {
@@ -80,7 +80,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
               "Supported AI assistants",
               "Single AI client only",
               "Tied to one proprietary assistant",
-              "ChatGPT, Claude, Perplexity, Cursor, Claude Code & more"
+              "ChatGPT, Claude, Google Gemini, Perplexity, Cursor, Claude Code & more"
             ],
             [
               "Geographic & currency coverage",
@@ -231,7 +231,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
     takeawaysHeading: "Das Wichtigste in Kürze",
     takeaways: [
       {
-        lead: "Ein offener Standard für ChatGPT, Claude, Perplexity und Cursor.",
+        lead: "Ein offener Standard für ChatGPT, Claude, Google Gemini, Perplexity und Cursor.",
         text: "Du richtest ShopCart MCP einmal per OAuth 2.1 oder lokal als MIT-Open-Source-CLI ein — ganz ohne Bindung an ein einzelnes KI-Ökosystem."
       },
       {
@@ -282,7 +282,7 @@ export const ANSWER_PAGE_GUIDES: readonly GuideDefinition[] = [
               "Unterstützte KI-Assistenten",
               "Jeder Chat (nur Textlinks)",
               "Fest an einen Anbieter gebunden",
-              "ChatGPT, Claude, Perplexity, Cursor & Claude Code"
+              "ChatGPT, Claude, Google Gemini, Perplexity, Cursor & Claude Code"
             ],
             [
               "DACH- & EU-Verfügbarkeit",

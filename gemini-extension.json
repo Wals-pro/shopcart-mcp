@@ -1,0 +1,12 @@
+{
+  "name": "shopcart-mcp",
+  "version": "0.5.1",
+  "description": "Read-only agentic shopping & cart MCP server for Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2, and any store with Schema.org JSON-LD product data.",
+  "contextFileName": "GEMINI.md",
+  "mcpServers": {
+    "shopcart": {
+      "httpUrl": "https://shopcart.wals.pro/mcp",
+      "authProviderType": "dynamic_discovery"
+    }
+  }
+}

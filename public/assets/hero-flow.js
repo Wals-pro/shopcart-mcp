@@ -679,6 +679,9 @@
         if (shouldFocus) {
           selectedTab.focus();
         }
+        if (typeof selectedTab.scrollIntoView === "function") {
+          selectedTab.scrollIntoView({ block: "nearest", inline: "nearest" });
+        }
       };
 
       tabs.forEach((tab, idx) => {

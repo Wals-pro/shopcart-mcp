@@ -53,6 +53,15 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
     expect(de.text).toContain("BLACKFRIDAY");
     expect(de.text).toContain("Claude.ai");
     expect(de.text).toContain("ChatGPT");
+    expect(de.text).toContain("Google Gemini");
+    expect(de.text).toContain('id="tab-gemini"');
+    expect(de.text).toContain('id="setup"');
+    expect(de.text).toContain("gemini extensions install https://github.com/Wals-pro/shopcart-mcp");
+    expect(de.text).toContain("gemini mcp add --transport http --scope user shopcart https://shopcart.wals.pro/mcp");
+    expect(de.text).toContain("httpUrl");
+    expect(de.text).toContain("vertexaisearch.cloud.google.com/oauth-redirect");
+    expect(de.text).toContain("mcpToTool");
+    expect(de.text).toContain("/guides/gemini-warenkorb-erstellen");
     expect(de.text).toContain("Claude Code");
     expect(de.text).toContain("Cursor");
     expect(de.text).toContain("OpenClaw / Local npx");
@@ -100,12 +109,12 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
 
     const de = await request(app).get("/?lang=de").expect(200);
     expect(de.headers["content-language"]).toBe("de");
-    expect(de.text).toContain("Lass Claude &amp; ChatGPT");
+    expect(de.text).toContain("Lass Claude, ChatGPT &amp; Gemini");
     expect(de.text).toContain("deinen Warenkorb füllen.");
     expect(de.text).toContain(
       "Sag deiner KI einfach, was du suchst – sie findet die passenden Produkte &amp; Größen in echten Online-Shops und gibt dir einen fertigen Warenkorb-Link. Du prüfst und bezahlst selbst."
     );
-    expect(de.text).toContain("In 30 Sekunden mit Claude oder ChatGPT einkaufen");
+    expect(de.text).toContain("In 30 Sekunden mit Claude, ChatGPT oder Gemini einkaufen");
     expect(de.text).toContain("KI Shopping Assistent");
     expect(de.text).toContain("Black Friday");
     expect(de.text).toContain("Adventskalender");
@@ -136,13 +145,14 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
 
     const en = await request(app).get("/?lang=en").expect(200);
     expect(en.headers["content-language"]).toBe("en");
-    expect(en.text).toContain("Let Claude &amp; ChatGPT");
+    expect(en.text).toContain("Let Claude, ChatGPT &amp; Gemini");
     expect(en.text).toContain("fill your shopping cart.");
     expect(en.text).toContain(
       "Tell your AI what you&#39;re looking for — it finds real products, sizes, and prices in online stores and hands you a ready-to-review cart link. You stay in full control of checkout."
         .replace("&#39;", "'")
     );
-    expect(en.text).toContain("Shop with Claude or ChatGPT in 30 seconds");
+    expect(en.text).toContain("Shop with Claude, ChatGPT, or Gemini in 30 seconds");
+    expect(en.text).toContain("/guides/gemini-shopping-cart");
     expect(en.text).toContain("AI shopping assistant");
     expect(en.text).toContain("For developers &amp; self-hosting");
     expect(en.text).not.toMatch(/Wals\.pro|WALS\.PRO/);
@@ -161,6 +171,7 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
     for (const label of [
       "Mit Claude verbinden",
       "Mit ChatGPT verbinden",
+      "Mit Gemini verbinden",
       "In Claude starten",
       "In ChatGPT starten",
       "In Perplexity starten",
@@ -215,7 +226,13 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
     expect(en.text).toContain(`href="https://claude.ai/new?q=${encodePrompt(expectedEn)}"`);
     expect(en.text).toContain(`href="https://chatgpt.com/?q=${encodePrompt(expectedEn)}"`);
     expect(en.text.match(/Let my AI set this up for me/g)?.length).toBeGreaterThanOrEqual(2);
-    for (const label of ["Connect to Claude", "Connect to ChatGPT", "Start in Claude", "Start in ChatGPT"]) {
+    for (const label of [
+      "Connect to Claude",
+      "Connect to ChatGPT",
+      "Connect to Gemini",
+      "Start in Claude",
+      "Start in ChatGPT"
+    ]) {
       expect(en.text.match(new RegExp(`<span>${label}</span>`, "g"))).toHaveLength(2);
     }
     expect(en.text).toContain("Link copied ✓ – just paste it into Claude and connect.");
@@ -343,8 +360,15 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
 
       const faqPage = byType("FAQPage")!;
       const faq = getFaq(config, lang);
-      expect(faq).toHaveLength(8);
-      expect(faqPage.mainEntity).toHaveLength(8);
+      expect(faq).toHaveLength(9);
+      expect(faqPage.mainEntity).toHaveLength(9);
+      expect(
+        faq.some((item) =>
+          lang === "de"
+            ? item.q === "Funktioniert ShopCart MCP mit Google Gemini?"
+            : item.q === "Does ShopCart MCP work with Google Gemini?"
+        )
+      ).toBe(true);
       // SoftwareApplication lists every connected platform and the comfort features
       for (const row of getPlatformRows(lang)) {
         expect(app_.featureList.some((f: string) => f.startsWith(`${row.name}:`))).toBe(true);
@@ -375,7 +399,7 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
     }
 
     const de = await request(app).get("/?lang=de").expect(200);
-    expect(de.text).toContain('"name":"In 30 Sekunden mit Claude oder ChatGPT einkaufen"');
+    expect(de.text).toContain('"name":"In 30 Sekunden mit Claude, ChatGPT oder Gemini einkaufen"');
   });
 
   it("falls back to a consumer live-shopping simulation that only uses live-verified example carts instead of developer JSON", async () => {

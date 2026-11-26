@@ -81,9 +81,9 @@ function corsMiddleware(req: Request, res: Response, next: NextFunction): void {
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "Authorization, Content-Type, Accept, MCP-Protocol-Version, Mcp-Session-Id"
+    "Authorization, Content-Type, Accept, MCP-Protocol-Version, Mcp-Session-Id, Last-Event-ID"
   );
-  res.setHeader("Access-Control-Expose-Headers", "WWW-Authenticate, Mcp-Session-Id");
+  res.setHeader("Access-Control-Expose-Headers", "WWW-Authenticate, Mcp-Session-Id, MCP-Protocol-Version");
 
   if (req.method === "OPTIONS") {
     res.status(204).end();
