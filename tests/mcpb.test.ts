@@ -20,7 +20,10 @@ const EXPECTED_TOOLS = [
   "get_product",
   "get_store_policies",
   "find_store_discounts",
-  "create_cart_link"
+  "create_cart_link",
+  "compare_prices",
+  "find_hot_deals",
+  "match_visual_product"
 ];
 
 /**
