@@ -40,6 +40,13 @@ export interface CreateAppDeps {
 }
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
+const SKILL_MD_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "skills",
+  "shopcart-mcp",
+  "SKILL.md"
+);
 
 const STATIC_ICONS: Array<{ route: string; file: string; contentType: string }> = [
   { route: "/favicon.ico", file: "favicon.ico", contentType: "image/x-icon" },
@@ -370,6 +377,20 @@ export function createApp(deps: CreateAppDeps): Express {
   app.get("/llms-full.txt", (_req, res) => {
     sendDiscoveryText(res, renderLlmsFullTxt(config));
   });
+
+  const cachedSkillMd = fs.existsSync(SKILL_MD_PATH) ? fs.readFileSync(SKILL_MD_PATH, "utf8") : null;
+  const sendSkillMd = (_req: Request, res: Response): void => {
+    if (!cachedSkillMd) {
+      res.status(404).end();
+      return;
+    }
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.status(200).setHeader("Content-Type", "text/markdown; charset=utf-8").send(cachedSkillMd);
+  };
+  app.get("/SKILL.md", sendSkillMd);
+  app.get("/skill.md", sendSkillMd);
 
   app.get("/robots.txt", (_req, res) => {
     sendDiscoveryText(res, renderRobotsTxt(config));

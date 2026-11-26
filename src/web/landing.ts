@@ -577,6 +577,19 @@ export function renderLandingPage(config: AppConfig, lang: Lang): string {
     2
   );
   const geminiGuidePath = de ? "/guides/gemini-warenkorb-erstellen" : "/guides/gemini-shopping-cart";
+  const skillUrl = `${origin}/SKILL.md`;
+  const instinctGuidePath = de
+    ? "/guides/instinct-warenkorb-erstellen"
+    : "/guides/instinct-shopping-cart";
+  const instinctCliSnippet = [
+    "npx -y shopcart-mcp inspect 'snocks.com'",
+    "npx -y shopcart-mcp search 'snocks.com' 'socken' --limit 3 --available",
+    "npx -y shopcart-mcp product 'snocks.com' '<handle>'",
+    "npx -y shopcart-mcp cart 'snocks.com' '<variantId>:1'"
+  ].join("\n");
+  const instinctPromptSnippet = de
+    ? `Lies ${skillUrl} und nutze die ShopCart One-Shot CLI (npx -y shopcart-mcp). Suche mir bei snocks.com 2x weiße Sneaker-Socken in Gr. 43-46 und schick mir den fertigen /cart/-Link — nicht selbst bestellen.`
+    : `Read ${skillUrl} and use the ShopCart One-Shot CLI (npx -y shopcart-mcp). Search snocks.com for 2x white sneaker socks in size 43-46 and text me back the verified /cart/ link — do not place an order.`;
   const installLinks = buildInstallLinks(config);
   const copyLabel = de ? "Kopieren" : "Copy";
   const copiedLabel = de ? "Kopiert ✓" : "Copied ✓";
@@ -1164,6 +1177,9 @@ ${
           <button type="button" role="tab" id="tab-local" class="tab-btn" aria-selected="false" tabindex="-1">
             <span>OpenClaw / Local npx</span><span class="tab-tag">MIT · stdio</span>
           </button>
+          <button type="button" role="tab" id="tab-instinct" class="tab-btn" aria-selected="false" tabindex="-1">
+            <span>Instinct / CLI</span><span class="tab-tag">One-Shot</span>
+          </button>
         </div>
 
         <div class="tab-panels">
@@ -1385,6 +1401,47 @@ ${
               </div>
             </div>
           </div>
+
+          <div role="tabpanel" aria-labelledby="tab-instinct" hidden="until-found">
+            <div class="tab-panel-inner">
+              <div>
+                <h3>${de ? "Instinct &amp; autonome Agenten (CLI / Gateways)" : "Instinct &amp; autonomous agents (CLI / gateways)"}</h3>
+                <ol class="setup-steps">
+                  <li><span class="step-badge">1</span><span>${
+                    de
+                      ? `<strong>Pfad A — One-Shot CLI (Instinct Cloud-Computer, OpenClaw, Claude Code, Codex, Manus, Devin):</strong> Läuft ohne OAuth-Popup und ohne Browser-CAPTCHAs direkt in der Shell mit deterministischem JSON auf <code>stdout</code>. Schick Instinct per WhatsApp/iMessage einfach <code>${escapeHtml(skillUrl)}</code>.`
+                      : `<strong>Path A — One-Shot CLI (Instinct cloud computer, OpenClaw, Claude Code, Codex, Manus, Devin):</strong> Runs directly in the shell with zero OAuth popup and zero browser CAPTCHAs, returning deterministic JSON on <code>stdout</code>. Just text Instinct <code>${escapeHtml(skillUrl)}</code> via WhatsApp or iMessage.`
+                  }</span></li>
+                  <li><span class="step-badge">2</span><span>${
+                    de
+                      ? `<strong>Pfad B — Streamable HTTP MCP (Open Instinct, MewCP, Agensi):</strong> Für MCP-Gateways mit OAuth 2.1 + PKCE den gehosteten Endpoint <code>${escapeHtml(mcpUrl)}</code> verbinden.`
+                      : `<strong>Path B — Streamable HTTP MCP (Open Instinct, MewCP, Agensi):</strong> Connect the hosted endpoint <code>${escapeHtml(mcpUrl)}</code> in MCP gateways supporting Streamable HTTP + OAuth 2.1 + PKCE.`
+                  }</span></li>
+                  <li><span class="step-badge">3</span><span>${
+                    de
+                      ? `<strong>Sicher &amp; read-only:</strong> Keine Shop-Logins, keine Kreditkarte, kein automatischer Kauf — dein Agent sendet dir einen geprüften <code>/cart/...</code>-Link zum 1-Klick-Prüfen und Bezahlen. <a class="instinct-guide-link" href="${instinctGuidePath}">Instinct-Anleitung lesen →</a>`
+                      : `<strong>Safe &amp; read-only:</strong> No store logins, no credit cards, no automated purchases — your agent texts back a verified <code>/cart/...</code> link for 1-click review and checkout. <a class="instinct-guide-link" href="${instinctGuidePath}">Read the Instinct guide →</a>`
+                  }</span></li>
+                </ol>
+              </div>
+              <div class="instinct-code-stack">
+                <div class="code-card">
+                  <div class="code-head">
+                    <span>One-Shot CLI (JSON · zero OAuth)</span>
+                    <button type="button" class="copy-mini" data-copy-target="code-instinct-cli" data-copied-label="${copiedLabel}">${copyLabel}</button>
+                  </div>
+                  <pre class="code-wrap"><code id="code-instinct-cli">${escapeHtml(instinctCliSnippet)}</code></pre>
+                </div>
+                <div class="code-card">
+                  <div class="code-head">
+                    <span>${de ? "WhatsApp / iMessage Prompt für Instinct" : "WhatsApp / iMessage prompt for Instinct"}</span>
+                    <button type="button" class="copy-mini" data-copy-target="code-instinct-prompt" data-copied-label="${copiedLabel}">${copyLabel}</button>
+                  </div>
+                  <pre class="code-wrap"><code id="code-instinct-prompt">${escapeHtml(instinctPromptSnippet)}</code></pre>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1460,6 +1517,7 @@ ${
         <a class="btn-secondary" href="/.well-known/mcp.json">mcp.json</a>
         <a class="btn-secondary" href="/llms.txt">llms.txt</a>
         <a class="btn-secondary" href="/llms-full.txt">llms-full.txt</a>
+        <a class="btn-secondary" href="/SKILL.md">SKILL.md</a>
       </div>
     </div>
   </section>

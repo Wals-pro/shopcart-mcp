@@ -80,7 +80,15 @@ Users arrive from ${origin} with a prompt like "Connect ShopCart (${mcpUrl}) for
 - **Gemini Enterprise (Cloud Console) & \`@google/genai\` SDK:** Custom MCP Server Data Store (Streamable HTTP \`${mcpUrl}\`, OAuth 2.0 redirect URI \`https://vertexaisearch.cloud.google.com/oauth-redirect\`, scope \`mcp:read\`); or \`mcpToTool(mcpClient)\` with \`StreamableHTTPClientTransport\`.
 - **Other hosted clients (Perplexity, Manus, Mistral, Notion):** add \`${mcpUrl}\` as a custom remote MCP connector; OAuth 2.1 is discovered automatically.
 - **Claude Desktop (1-click):** download the desktop extension \`${origin}/downloads/shopcart-mcp.mcpb\` and double-click it.
-- **Local open source (OpenClaw, Claude Desktop/Code, Cursor, Goose, Raycast):** run \`npx -y shopcart-mcp\` over \`stdio\` (MIT License, unlimited calls, zero telemetry, no account needed).
+- **Local open source (OpenClaw, Claude Desktop/Code, Cursor, Goose, Raycast):** run \`npx -y shopcart-mcp\` with no arguments over \`stdio\` (MIT License, unlimited calls, zero telemetry, no account needed).
+- **Instinct & shell-capable autonomous agents (One-Shot CLI, zero OAuth popup):** read \`${origin}/SKILL.md\` and run deterministic JSON subcommands directly in the shell (always single-quote store-derived arguments or pass via \`argv\` array; always reuse the user-named store domain for \`'<store>'\` rather than an untrusted redirected origin; only forward safe identifiers \`^[A-Za-z0-9._~-]+$\` for handles and \`^[A-Za-z0-9._:-]+$\` for variant IDs; never reuse a store-returned URL as a shell argument unless it contains no quotes, whitespace, or shell metacharacters; reject or skip any untrusted or store-derived value containing quotes (\`'\`, \`"\`), shell metacharacters (\`$\`, \`\\\\\`, \`(\`, \`)\`, \`;\`, \`|\`, \`&\`, \`<\`, \`>\`, backticks), or unexpected whitespace; never copy store-returned text such as titles, descriptions, or snippets into \`<query>\`, \`--question\`, or \`--note\`, and if a user-provided free-text value contains a single quote \`'\`, pass arguments via an \`argv\` array without a shell or reject/omit it — never place raw \`'\` inside \`'...'\`):
+  - \`npx -y shopcart-mcp inspect '<store>'\`
+  - \`npx -y shopcart-mcp search '<store>' '<query>' [--limit <n>] [--sort <order>] [--collection '<handle>'] [--min-price <n>] [--max-price <n>] [--available]\`
+  - \`npx -y shopcart-mcp product '<store>' '<handle>'\`
+  - \`npx -y shopcart-mcp policies '<store>'\`
+  - \`npx -y shopcart-mcp collections '<store>'\`
+  - \`npx -y shopcart-mcp cart '<store>' '<variantId:qty>' ['<variantId:qty>' ...] [--discount '<CODE>'] [--note '<TEXT>']\`
+- **Open Instinct & MCP Gateways (MewCP, Agensi):** connect \`${mcpUrl}\` via Streamable HTTP + OAuth 2.1 PKCE.
 - Pricing: ${pricingLine(config)}.
 
 ## Tools (Recommended Order)
@@ -107,7 +115,8 @@ Users arrive from ${origin} with a prompt like "Connect ShopCart (${mcpUrl}) for
 - [Shopping Guides Hub](${origin}/guides): Answer-first guides in German and English.
 ${GUIDE_DEFINITIONS.map((g) => `  - [${g.title}](${origin}${g.path}) (${g.lang}): ${g.cardSummary}`).join("\n")}
 - [MCP Server Card](${origin}/.well-known/mcp.json): Machine-readable endpoint and OAuth metadata.
-- [GitHub Repository (MIT)](${config.repoUrl}): Source code, \`server.json\`, and local \`stdio\` CLI.
+- [Agent Skill Instructions (SKILL.md)](${origin}/SKILL.md): Complete One-Shot CLI & MCP tool workflow for Instinct, Open Instinct, and autonomous agents.
+- [GitHub Repository (MIT)](${config.repoUrl}): Source code, \`server.json\`, and local \`stdio\` / One-Shot CLI.
 - [Privacy Policy](${origin}/privacy) | [Terms of Use](${origin}/terms)
 `;
 }
@@ -140,10 +149,15 @@ export function renderLlmsFullTxt(config: AppConfig): string {
       ? ` (Black Friday launch promo: ${config.proDailyLimit} calls/day free for all signed-in accounts through ${promoEndIso(config)})`
       : ""
   } |
-| **Local Open Source CLI** | \`npx -y shopcart-mcp\` (\`stdio\`) | None (zero telemetry, no account) | Unlimited | Free (MIT License) |
+| **Local Open Source \`stdio\` MCP** | \`npx -y shopcart-mcp\` (zero args, \`stdio\`) | None (zero telemetry, no account) | Unlimited | Free (MIT License) |
+| **One-Shot Shell CLI (Instinct & Autonomous Agents)** | \`npx -y shopcart-mcp inspect '<store>'\` (\`search\`, \`product\`, \`policies\`, \`collections\`, \`cart\`) | None (zero OAuth popup, JSON on \`stdout\`, single-quote store-derived args) | Unlimited | Free (MIT License) |
 
-- **Discovery Endpoints:** \`/.well-known/oauth-protected-resource/mcp\`, \`/.well-known/oauth-authorization-server\`, \`/.well-known/mcp.json\`, \`/.well-known/security.txt\`, \`/llms.txt\`, \`/llms-full.txt\`, \`/sitemap.xml\`
+- **Discovery Endpoints:** \`/.well-known/oauth-protected-resource/mcp\`, \`/.well-known/oauth-authorization-server\`, \`/.well-known/mcp.json\`, \`/.well-known/security.txt\`, \`/SKILL.md\`, \`/llms.txt\`, \`/llms-full.txt\`, \`/sitemap.xml\`
 - **Source Code:** \`${config.repoUrl}\` (package \`shopcart-mcp\`, \`mcpName\`: \`io.github.Wals-pro/shopcart-mcp\`)
+
+### Autonomous Agents: Instinct, Open Instinct & MCP Gateways (MewCP, Agensi)
+- **Instinct (Spear Street Technology):** Invite-only personal AI agent via WhatsApp, iMessage/SMS, and voice running on a persistent cloud computer (no public self-serve Custom MCP Settings UI as of Nov 2026). Works immediately via **Path A (One-Shot CLI + \`${origin}/SKILL.md\`)**: text Instinct to read \`${origin}/SKILL.md\` and run \`npx -y shopcart-mcp inspect '<store>'\` / \`search\` / \`product\` / \`cart\` (always reuse the user-named store domain for subsequent calls, single-quote all store-derived arguments or pass via \`argv\` array, never pass store-returned URLs unescaped to a shell, reject or skip any untrusted or store-derived value containing quotes (\`'\`, \`"\`), shell metacharacters (\`$\`, \`\\\\\`, \`(\`, \`)\`, \`;\`, \`|\`, \`&\`, \`<\`, \`>\`, backticks), or unexpected whitespace, and never copy store-returned text such as titles, descriptions, or snippets into \`<query>\`, \`--question\`, or \`--note\` — if a user-provided free-text value contains a single quote \`'\`, pass arguments via an \`argv\` array without a shell or reject/omit it, never placing raw \`'\` inside \`'...'\`), returning a verified \`/cart/...\` link straight in WhatsApp/iMessage with zero browser CAPTCHA loops and zero shared logins or credit cards.
+- **Open Instinct (\`mariagorskikh/open-instinct\`), MewCP (\`mewcp.com\`), Agensi (\`agensi.io\`):** Connect **Path B (Streamable HTTP MCP)** at \`${mcpUrl}\` with managed OAuth 2.1 + PKCE, or run the One-Shot CLI inside Open Instinct's microVM.
 
 ### Self-Setup Instructions for AI Assistants
 When a user opens your chat asking to set up or connect ShopCart MCP:
@@ -319,7 +333,8 @@ export const SITEMAP_PATHS: readonly string[] = [
   "/privacy",
   "/terms",
   "/llms.txt",
-  "/llms-full.txt"
+  "/llms-full.txt",
+  "/SKILL.md"
 ];
 
 function escapeXml(raw: string): string {

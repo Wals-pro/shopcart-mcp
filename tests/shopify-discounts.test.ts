@@ -1504,7 +1504,8 @@ describe("MCP Integration — find_store_discounts & create_cart_link auto-apply
       discount_code: "PARTNERA"
     });
     expect(cart.isError).toBe(false);
-    expect(cart.payload.store_origin).toBe("https://woo-b.example");
+    // Same-site canonicalOrigin guard prevents cross-site redirect (woo-b.example) from taking over store_origin
+    expect(cart.payload.store_origin).toBe("https://woo-a.example");
     expect((cart.payload.warnings as string[]).some((w) => w.includes("PARTNERA"))).toBe(true);
     expect(cart.payload.affiliate_disclosure).toBe(true);
     expect(cart.payload.disclosure_note).toBe(AFFILIATE_DISCLOSURE_NOTE);
@@ -1520,8 +1521,19 @@ describe("MCP Integration — find_store_discounts & create_cart_link auto-apply
     expect(wwwCart.payload.affiliate_disclosure).toBe(true);
     expect(wwwCart.payload.disclosure_note).toBe(AFFILIATE_DISCLOSURE_NOTE);
 
-    const otherCart = await callTool(74, "create_cart_link", {
+    // Opting out of auto_apply_discount on woo-a.example (no discount_code) or using a non-partner host does not monetize
+    const optOutCart = await callTool(74, "create_cart_link", {
       store_url: "woo-a.example",
+      items: [{ variant_id: "101", quantity: 1 }],
+      mode: "cart",
+      auto_apply_discount: false
+    });
+    expect(optOutCart.isError).toBe(false);
+    expect(optOutCart.payload.affiliate_disclosure).toBe(false);
+    expect(optOutCart.payload.disclosure_note).toBeUndefined();
+
+    const otherCart = await callTool(75, "create_cart_link", {
+      store_url: "woo-b.example",
       items: [{ variant_id: "101", quantity: 1 }],
       mode: "cart",
       discount_code: "OTHER10"

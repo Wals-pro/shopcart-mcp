@@ -5,6 +5,7 @@ import { isPromoFreeProActive } from "../billing/quota.js";
 import { renderFaviconHeadLinks, renderShopCartWordmark, renderSparkCartSvg } from "./brand.js";
 import { ANSWER_PAGE_GUIDES } from "./guides-answer-pages.js";
 import { GEMINI_GUIDES } from "./guides-gemini.js";
+import { INSTINCT_GUIDES } from "./guides-instinct.js";
 import {
   getComfortFeatures,
   getHandoffSentence,
@@ -1109,7 +1110,8 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
 export const GUIDE_DEFINITIONS: readonly GuideDefinition[] = [
   ...CORE_GUIDES,
   ...ANSWER_PAGE_GUIDES,
-  ...GEMINI_GUIDES
+  ...GEMINI_GUIDES,
+  ...INSTINCT_GUIDES
 ];
 
 export const GUIDES_CSS = `:root {

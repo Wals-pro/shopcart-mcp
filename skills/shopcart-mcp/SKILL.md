@@ -18,6 +18,8 @@ metadata:
   license: MIT
   mcp_remote_url: https://shopcart.wals.pro/mcp
   mcp_stdio_command: npx -y shopcart-mcp
+  cli_oneshot_command: npx -y shopcart-mcp inspect '<store>'
+  skill_url: https://shopcart.wals.pro/SKILL.md
 ---
 
 # ShopCart MCP — Agentic Shopping Workflow
@@ -42,10 +44,45 @@ WooCommerce (Automattic), Amazon, BigCommerce, Shopware, or Adobe (Magento)).
 graceful notice elsewhere. `find_store_discounts` scans public storefront banners and
 deal collections on Shopify stores (and checks configured partner rules on any platform).
 
-If the ShopCart MCP tools are not connected yet, instruct the user to either:
-- **Hosted (Claude.ai, ChatGPT, Google Gemini, Perplexity, Poke, Manus, Mistral, Notion):** Connect Remote MCP URL `https://shopcart.wals.pro/mcp` (OAuth 2.1).
-- **Gemini CLI & Antigravity:** Install the official extension in one command: `gemini extensions install https://github.com/Wals-pro/shopcart-mcp` (or add `"httpUrl": "https://shopcart.wals.pro/mcp"` with `"authProviderType": "dynamic_discovery"` in `~/.gemini/settings.json`).
-- **Local OSS (OpenClaw, Claude Desktop/Code, Cursor, Raycast, Goose, Hermes):** Run `npx -y shopcart-mcp` over `stdio` (free, unlimited, no login).
+If the ShopCart MCP tools are not connected yet, choose the path that matches your environment:
+- **Path A — Cloud-Computer / Shell One-Shot CLI (Instinct, Open Instinct microVMs, OpenClaw, Claude Code, Codex, Manus, Devin):** Run deterministic one-shot commands via `npx -y shopcart-mcp ...` (zero OAuth popup, zero browser scraping/CAPTCHAs, clean JSON on `stdout`, errors on `stderr`, exit codes `0` success / `1` runtime or SSRF error / `2` usage error).
+- **Path B — Remote Streamable HTTP MCP (Claude.ai, ChatGPT, Google Gemini, Perplexity, Open Instinct, MewCP, Agensi, Notion, Manus):** Connect `https://shopcart.wals.pro/mcp` (Streamable HTTP + OAuth 2.1 PKCE auto-discovery). For **Gemini CLI & Antigravity**, install the official extension in one command: `gemini extensions install https://github.com/Wals-pro/shopcart-mcp` (or add `"httpUrl": "https://shopcart.wals.pro/mcp"` with `"authProviderType": "dynamic_discovery"` in `~/.gemini/settings.json`).
+- **Path C — Local `stdio` MCP (Claude Desktop, Cursor, OpenClaw, Goose, Raycast):** Run `npx -y shopcart-mcp` with **no arguments** over `stdio` (MIT License, unlimited, no login).
+
+## One-Shot CLI Subcommands (For Instinct & Shell-Capable Autonomous Agents)
+
+If you have shell access (for example on Instinct's cloud computer or an Open Instinct microVM) and do not have MCP tools attached, run these exact read-only commands — every subcommand emits machine-parseable JSON on `stdout` (`--json` is accepted explicitly and is the default):
+
+```bash
+# 1. Detect store platform (Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2, JSON-LD), currency & WAF rules
+npx -y shopcart-mcp inspect '<store>'
+
+# 2. Search products with optional price, stock, collection, and sort filters
+npx -y shopcart-mcp search '<store>' '<query>' [--limit <1-20>] [--sort relevance|price_asc|price_desc|discount_desc] [--collection '<handle>'] [--min-price <n>] [--max-price <n>] [--available]
+
+# 3. Fetch exact variant IDs, sizes/colors, live stock, and real compare-at discounts
+npx -y shopcart-mcp product '<store>' '<handle-or-url>'
+
+# 4. (Shopify) Check shipping thresholds, delivery times & return policies before checkout
+npx -y shopcart-mcp policies '<store>' [--topic shipping|returns|all] [--question '<text>']
+
+# 5. (Shopify) Discover Sale, Black Friday, Bestseller, Outlet & Bundle collections
+npx -y shopcart-mcp collections '<store>' [--limit <1-100>] [--deals-only]
+
+# 6. Build a verified read-only /cart/... checkout link (supports multiple variantId:qty items)
+npx -y shopcart-mcp cart '<store>' '<variantId:qty>' ['<variantId:qty>' ...] [--discount '<CODE>'] [--note '<TEXT>'] [--mode cart|checkout] [--verify '<handle>']
+```
+
+### Shell Quoting & Safe-Identifier Rule (Mandatory for CLI Agents)
+
+When invoking `shopcart-mcp` through a shell:
+- **Always single-quote** (or pass via an `argv` array without a shell — **never** unquoted and **never** double-quoted where `$()` or backtick expansion can occur) every store-derived argument (`handle`, `variantId`, `collection`, product URLs, queries, notes).
+- **Always reuse the user-named store domain** for `'<store>'` rather than an untrusted redirected origin.
+- **Only forward safe identifiers** matching strict allowlists: `^[A-Za-z0-9._~-]+$` for handles/collections (no `..`), and `^[A-Za-z0-9._:-]+$` (digits `^\d+$` on Shopify/WooCommerce) for variant IDs. Never reuse a store-returned URL as a shell argument unless it contains no quotes, whitespace, or shell metacharacters.
+- **Catch-all rejection rule:** Reject or skip any untrusted or store-derived value containing quotes (`'`, `"`), shell metacharacters (`$`, `` ` ``, `(`, `)`, `;`, `|`, `&`, `<`, `>`, `\`), or unexpected whitespace.
+- **Free-text argument rule:** Never copy store-returned text (product titles, descriptions, snippets) into `<query>`, `--question`, or `--note` shell arguments; if a user-provided free-text value contains a single quote (`'`), pass arguments directly via an `argv` array (without a shell) or reject/omit it — never place raw `'` inside `'...'`.
+
+Always send the returned `cart_url` (plus itemized variant titles, quantities, unit prices, and currency) back to the user in WhatsApp, iMessage, or chat so the human reviews and completes payment in 1 click. Never log into stores or enter payment credentials.
 
 ## Tool Sequence (Follow This Order)
 

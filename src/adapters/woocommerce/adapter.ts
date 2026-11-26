@@ -1,3 +1,7 @@
+import {
+  sanitizeNumericVariantId,
+  sanitizeSafeHandle
+} from "../../security/identifiers.js";
 import { isSameStoreSite, sanitizeSafeUrl } from "../../security/sanitize.js";
 import {
   safeFetch,
@@ -271,10 +275,13 @@ export class WooCommerceAdapter implements StoreAdapter {
       };
     }
 
-    const redirectedOrigin =
+    const candidateRedirected =
       (firstProduct ? extractCanonicalOriginFromUrl(productsProbe.url) : null) ??
-      (validCart ? extractCanonicalOriginFromUrl(cartProbe.url) : null) ??
-      origin;
+      (validCart ? extractCanonicalOriginFromUrl(cartProbe.url) : null);
+    const redirectedOrigin =
+      candidateRedirected && isSameStoreSite(origin, candidateRedirected)
+        ? candidateRedirected
+        : origin;
 
     const currency = normalizeWooCurrency(
       firstProduct?.prices?.currency_code ?? validCart?.totals?.currency_code,
@@ -362,10 +369,10 @@ export class WooCommerceAdapter implements StoreAdapter {
     raw: WooProductRaw
   ): ProductSummary | null {
     const title = sanitizeWooText(raw.name, 200);
-    const id = raw.id !== undefined ? String(raw.id) : "";
+    const id = sanitizeNumericVariantId(raw.id);
     if (!title || !id) return null;
 
-    const handle = sanitizeWooText(raw.slug, 200) || id;
+    const handle = sanitizeSafeHandle(sanitizeWooText(raw.slug, 200)) ?? id;
     const { price, priceMin, priceMax, compareAtPrice } = extractWooProductPrices(
       raw,
       fallbackCurrency,
@@ -581,8 +588,9 @@ export class WooCommerceAdapter implements StoreAdapter {
     raw: WooProductRaw,
     concurrencyKey?: string
   ): Promise<ProductDetail> {
-    const id = String(raw.id ?? "");
-    const handle = sanitizeWooText(raw.slug, 200) || id;
+    const numericId = sanitizeNumericVariantId(raw.id);
+    const id = numericId ?? "";
+    const handle = sanitizeSafeHandle(sanitizeWooText(raw.slug, 200)) ?? id;
     const title = sanitizeWooText(raw.name, 200);
     const parentPrices = extractWooProductPrices(raw, currency, minorUnit);
     const attrLookup = buildAttributeLookup(raw.attributes);
@@ -610,8 +618,8 @@ export class WooCommerceAdapter implements StoreAdapter {
 
       variants = boundedStubs
         .map((stub): ProductVariant | null => {
-          const varId = stub.id !== undefined ? String(stub.id) : "";
-          if (!/^\d{1,20}$/.test(varId)) return null;
+          const varId = sanitizeNumericVariantId(stub.id);
+          if (!varId) return null;
           const detail = variationDetails.get(varId);
           const optionValues = resolveVariationOptionValues(stub, detail, attrLookup);
           const variantPrices = detail
@@ -633,11 +641,11 @@ export class WooCommerceAdapter implements StoreAdapter {
           };
         })
         .filter((v): v is ProductVariant => v !== null);
-    } else {
+    } else if (numericId) {
       const optionValues = parseVariationStringOptions(raw.variation);
       variants = [
         {
-          id,
+          id: numericId,
           title: optionValues.join(" / ") || sanitizeWooText(raw.variation, 120) || "Default",
           sku: sanitizeWooOptionalText(raw.sku, 80),
           available: isWooProductAvailable(raw),
@@ -646,6 +654,8 @@ export class WooCommerceAdapter implements StoreAdapter {
           option_values: optionValues
         }
       ];
+    } else {
+      variants = [];
     }
 
     const images = (raw.images ?? [])

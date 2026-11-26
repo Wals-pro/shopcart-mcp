@@ -284,7 +284,7 @@ export class ShopwareClient {
 
     if (homeRes) {
       const redirected = extractCanonicalOrigin(homeRes.url);
-      if (redirected) {
+      if (redirected && isSameStoreSite(origin, redirected)) {
         canonicalOrigin = redirected;
         apiOrigin = redirected;
       }

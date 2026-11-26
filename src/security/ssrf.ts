@@ -2,6 +2,7 @@ import type { LookupAddress, LookupOptions } from "node:dns";
 import dns from "node:dns/promises";
 import net from "node:net";
 import { Agent, fetch as undiciFetch, type Dispatcher, type RequestInit as UndiciRequestInit } from "undici";
+import { isValidLdhHostname } from "./identifiers.js";
 
 export type SsrfErrorCode =
   | "INVALID_URL"
@@ -218,6 +219,9 @@ export function validateExternalUrl(rawUrl: string): URL {
   }
   if (!host.includes(".")) {
     throw new SsrfError("BLOCKED_HOST", `Single-label hostname not allowed: ${host}`);
+  }
+  if (!isValidLdhHostname(host)) {
+    throw new SsrfError("BLOCKED_HOST", `Invalid hostname characters: ${host}`);
   }
 
   return parsed;

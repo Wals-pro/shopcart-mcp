@@ -1,4 +1,8 @@
 import {
+  sanitizeGenericVariantId,
+  sanitizeSafeHandle
+} from "../../security/identifiers.js";
+import {
   sanitizeOptionalText,
   sanitizeSafeUrl,
   sanitizeText,
@@ -432,11 +436,13 @@ export class MagentoAdapter implements StoreAdapter {
     defaultSuffix: string,
     raw: MagentoProductRaw
   ): ProductSummary | null {
-    const sku = sanitizeText(raw.sku, 80);
+    const sku = sanitizeGenericVariantId(sanitizeText(raw.sku, 80));
     const title = sanitizeText(raw.name, 200);
     if (!sku || !title) return null;
 
-    const urlKey = sanitizeText(raw.url_key, 200) || sku;
+    const urlKey =
+      sanitizeSafeHandle(sanitizeText(raw.url_key, 200)) ?? sanitizeSafeHandle(sku);
+    if (!urlKey) return null;
     const minTier = parsePriceTier(raw.price_range?.minimum_price, defaultCurrency);
     const maxTier = raw.price_range?.maximum_price
       ? parsePriceTier(raw.price_range.maximum_price, minTier.currency)
@@ -471,12 +477,15 @@ export class MagentoAdapter implements StoreAdapter {
     raw: MagentoProductRaw
   ): { currency: string; product: ProductDetail } {
     const sku =
-      sanitizeText(raw.sku, 80) ||
-      sanitizeText(raw.id !== undefined && raw.id !== null ? String(raw.id) : "", 80) ||
-      "product";
-    const title = sanitizeText(raw.name, 200) || sku;
-    const urlKey = sanitizeText(raw.url_key, 200) || sku;
-    const url = buildMagentoProductUrl(origin, urlKey, raw.url_suffix, defaultSuffix);
+      sanitizeGenericVariantId(sanitizeText(raw.sku, 80)) ??
+      sanitizeGenericVariantId(
+        raw.id !== undefined && raw.id !== null ? sanitizeText(String(raw.id), 80) : ""
+      ) ??
+      "";
+    const title = sanitizeText(raw.name, 200) || sku || "product";
+    const urlKey =
+      sanitizeSafeHandle(sanitizeText(raw.url_key, 200)) ?? sanitizeSafeHandle(sku) ?? "";
+    const url = buildMagentoProductUrl(origin, urlKey || "product", raw.url_suffix, defaultSuffix);
     const baseTier = parsePriceTier(raw.price_range?.minimum_price, defaultCurrency);
 
     const options = (raw.configurable_options ?? [])
@@ -495,10 +504,11 @@ export class MagentoAdapter implements StoreAdapter {
       for (const v of raw.variants.slice(0, 100)) {
         if (!v.product) continue;
         const vSku =
-          sanitizeText(v.product.sku, 80) ||
-          sanitizeText(
-            v.product.id !== undefined && v.product.id !== null ? String(v.product.id) : "",
-            80
+          sanitizeGenericVariantId(sanitizeText(v.product.sku, 80)) ??
+          sanitizeGenericVariantId(
+            v.product.id !== undefined && v.product.id !== null
+              ? sanitizeText(String(v.product.id), 80)
+              : ""
           );
         if (!vSku) continue;
         const vTier = parsePriceTier(
@@ -521,7 +531,7 @@ export class MagentoAdapter implements StoreAdapter {
       }
     }
 
-    if (variants.length === 0) {
+    if (variants.length === 0 && sku) {
       variants.push({
         id: sku,
         title: "Default",

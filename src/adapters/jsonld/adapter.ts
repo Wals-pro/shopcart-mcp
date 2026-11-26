@@ -1,3 +1,4 @@
+import { enforceShellSafeHttpsUrl } from "../../security/identifiers.js";
 import { isSameStoreSite } from "../../security/sanitize.js";
 import {
   safeFetch,
@@ -140,6 +141,11 @@ function buildSearchUrlFromTemplate(
 }
 
 const MAX_CACHED_ORIGINS = 1000;
+const MAX_VARIANT_CACHE_BUCKETS = 1000;
+
+function formatSafeErrorUrl(rawUrl: string): string {
+  return enforceShellSafeHttpsUrl(rawUrl) ?? "[redacted-url]";
+}
 
 export class UniversalJsonLdAdapter implements StoreAdapter {
   readonly platform = "jsonld";
@@ -177,16 +183,42 @@ export class UniversalJsonLdAdapter implements StoreAdapter {
     this.siteCache.set(key, entry);
   }
 
-  private getOrCreateVariantMap(originKey: string): Map<string, CachedVariantPointer> {
-    const existing = this.variantCache.get(originKey);
-    if (existing) return existing;
-    while (this.variantCache.size >= MAX_CACHED_ORIGINS) {
-      const oldest = this.variantCache.keys().next().value;
-      if (oldest === undefined) break;
-      this.variantCache.delete(oldest);
+  private makeVariantCacheKey(origin: string, concurrencyKey?: string): string {
+    const scope = concurrencyKey?.trim() || "default";
+    return `${scope}::${origin}`;
+  }
+
+  private getOrCreateVariantMap(cacheKey: string, now: number): Map<string, CachedVariantPointer> {
+    const existing = this.variantCache.get(cacheKey);
+    if (existing) {
+      // Refresh LRU insertion order
+      this.variantCache.delete(cacheKey);
+      this.variantCache.set(cacheKey, existing);
+      return existing;
+    }
+    if (this.variantCache.size >= MAX_VARIANT_CACHE_BUCKETS) {
+      // Prune fully expired buckets first before evicting oldest LRU buckets
+      for (const [bucketKey, map] of this.variantCache) {
+        let hasLive = false;
+        for (const [k, v] of map) {
+          if (v.expiresAt <= now) {
+            map.delete(k);
+          } else {
+            hasLive = true;
+          }
+        }
+        if (!hasLive) {
+          this.variantCache.delete(bucketKey);
+        }
+      }
+      while (this.variantCache.size >= MAX_VARIANT_CACHE_BUCKETS) {
+        const oldest = this.variantCache.keys().next().value;
+        if (oldest === undefined) break;
+        this.variantCache.delete(oldest);
+      }
     }
     const created = new Map<string, CachedVariantPointer>();
-    this.variantCache.set(originKey, created);
+    this.variantCache.set(cacheKey, created);
     return created;
   }
 
@@ -211,7 +243,7 @@ export class UniversalJsonLdAdapter implements StoreAdapter {
       resolved = targetParsed.toString();
     } else {
       if (trimmed.includes("..") || trimmed.includes("\\")) {
-        throw new Error(`Invalid product path: ${trimmed}`);
+        throw new Error("Invalid product path: path traversal or backslash is not allowed");
       }
       const path = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
       const targetParsed = validateExternalUrl(`${originParsed.origin}${path}`);
@@ -349,12 +381,17 @@ export class UniversalJsonLdAdapter implements StoreAdapter {
     return hints;
   }
 
-  private rememberProductVariants(origin: string, result: GetProductResult): void {
+  private rememberProductVariants(
+    origin: string,
+    result: GetProductResult,
+    concurrencyKey?: string
+  ): void {
     const now = Date.now();
     const canonicalProductUrl = result.product.url;
 
     const writeToOriginMap = (originKey: string): void => {
-      const map = this.getOrCreateVariantMap(originKey);
+      const cacheKey = this.makeVariantCacheKey(originKey, concurrencyKey);
+      const map = this.getOrCreateVariantMap(cacheKey, now);
       for (const v of result.product.variants) {
         const pointer: CachedVariantPointer = {
           productUrl: canonicalProductUrl,
@@ -372,6 +409,7 @@ export class UniversalJsonLdAdapter implements StoreAdapter {
           (k): k is string => Boolean(k)
         );
         for (const key of keys) {
+          map.delete(key);
           map.set(key, pointer);
         }
       }
@@ -385,21 +423,32 @@ export class UniversalJsonLdAdapter implements StoreAdapter {
     };
 
     writeToOriginMap(origin);
-    // Never share the same Map reference across origins; only mirror into a separate map if apex <-> www same site
+    // Never share the same Map reference across origins or users; only mirror into a separate user-scoped map if apex <-> www same site
     if (result.store_origin !== origin && isSameStoreSite(origin, result.store_origin)) {
       writeToOriginMap(result.store_origin);
     }
   }
 
-  private lookupRememberedVariant(origin: string, variantId: string): CachedVariantPointer | null {
-    const map = this.variantCache.get(origin);
+  private lookupRememberedVariant(
+    origin: string,
+    variantId: string,
+    concurrencyKey?: string
+  ): CachedVariantPointer | null {
+    const cacheKey = this.makeVariantCacheKey(origin, concurrencyKey);
+    const map = this.variantCache.get(cacheKey);
     if (!map) return null;
     const entry = map.get(variantId);
     if (!entry) return null;
     if (entry.expiresAt <= Date.now()) {
       map.delete(variantId);
+      if (map.size === 0) {
+        this.variantCache.delete(cacheKey);
+      }
       return null;
     }
+    // Refresh LRU order on hit
+    this.variantCache.delete(cacheKey);
+    this.variantCache.set(cacheKey, map);
     return entry;
   }
 
@@ -510,15 +559,15 @@ export class UniversalJsonLdAdapter implements StoreAdapter {
 
     if (res.status === 403 || res.status === 401 || res.status === 429 || res.status === 503) {
       throw new Error(
-        `Store WAF/bot protection blocked automated access to ${targetUrl} (HTTP ${res.status}). Never guess or fabricate prices — ask the user to open the product URL directly in their browser.`
+        `Store WAF/bot protection blocked automated access to ${formatSafeErrorUrl(targetUrl)} (HTTP ${res.status}). Never guess or fabricate prices — ask the user to open the product URL directly in their browser.`
       );
     }
     if (res.status === 404 || res.status === 410) {
-      throw new Error(`Product page not found at ${targetUrl} (HTTP ${res.status}).`);
+      throw new Error(`Product page not found at ${formatSafeErrorUrl(targetUrl)} (HTTP ${res.status}).`);
     }
     if (res.status < 200 || res.status >= 300) {
       throw new Error(
-        `Failed to fetch product page ${targetUrl} (upstream returned HTTP ${res.status}).`
+        `Failed to fetch product page ${formatSafeErrorUrl(targetUrl)} (upstream returned HTTP ${res.status}).`
       );
     }
 
@@ -527,7 +576,7 @@ export class UniversalJsonLdAdapter implements StoreAdapter {
     const finalParsed = validateExternalUrl(finalUrl);
     if (!isSameStoreHost(finalParsed.hostname, parsedOrigin.hostname)) {
       throw new Error(
-        `Product page redirected to unrelated host '${finalParsed.hostname}' (expected '${parsedOrigin.hostname}').`
+        `Product page redirected to unrelated host ${finalParsed.hostname} (expected ${parsedOrigin.hostname}).`
       );
     }
 
@@ -536,13 +585,14 @@ export class UniversalJsonLdAdapter implements StoreAdapter {
     });
 
     if (!parsed) {
+      const safeFinalUrl = formatSafeErrorUrl(finalUrl);
       if (looksLikeBotChallengeHtml(res.bodyText, finalUrl)) {
         throw new Error(
-          `Store WAF/bot challenge page blocked automated extraction on ${finalUrl}. Never guess or fabricate prices — ask the user to open the URL directly in their browser.`
+          `Store WAF/bot challenge page blocked automated extraction on ${safeFinalUrl}. Never guess or fabricate prices — ask the user to open the URL directly in their browser.`
         );
       }
       throw new Error(
-        `No verified Schema.org Product JSON-LD or OpenGraph product price metadata found on ${finalUrl}. Ensure handle_or_url points to a specific product detail page.`
+        `No verified Schema.org Product JSON-LD or OpenGraph product price metadata found on ${safeFinalUrl}. Ensure handle_or_url points to a specific product detail page.`
       );
     }
 
@@ -562,7 +612,7 @@ export class UniversalJsonLdAdapter implements StoreAdapter {
       product: parsed.product
     };
 
-    this.rememberProductVariants(parsedOrigin.origin, result);
+    this.rememberProductVariants(parsedOrigin.origin, result, opts.concurrencyKey);
     return result;
   }
 
@@ -607,7 +657,7 @@ export class UniversalJsonLdAdapter implements StoreAdapter {
         candidateUrls.add(vid);
         itemUrlHint.set(vid, vid);
       } else {
-        const remembered = this.lookupRememberedVariant(normalizedOrigin, vid);
+        const remembered = this.lookupRememberedVariant(normalizedOrigin, vid, opts.concurrencyKey);
         if (remembered) {
           candidateUrls.add(remembered.productUrl);
           itemUrlHint.set(vid, remembered.variantUrl);

@@ -1,4 +1,9 @@
 import {
+  extractSafeHandleFromUrl,
+  sanitizeGenericVariantId,
+  sanitizeSafeHandle
+} from "../../security/identifiers.js";
+import {
   sanitizeOptionalText,
   sanitizeSafeUrl,
   sanitizeText,
@@ -97,12 +102,11 @@ interface ShopwareProductDetailResponseRaw {
 const SHOPWARE_UUID_RE = /^[0-9a-f]{32}$/i;
 
 function handleFromUrl(url: string): string {
-  try {
-    const parsed = new URL(url);
-    return sanitizeText(parsed.pathname.replace(/^\/+|\/+$/g, ""), 200) || "product";
-  } catch {
-    return sanitizeText(url.replace(/^\/+|\/+$/g, ""), 200) || "product";
-  }
+  return (
+    extractSafeHandleFromUrl(url) ??
+    sanitizeSafeHandle(url.replace(/^\/+|\/+$/g, "")) ??
+    ""
+  );
 }
 
 function buildShopwareProductUrl(
@@ -191,7 +195,7 @@ export class ShopwareAdapter implements StoreAdapter {
     currency: string,
     raw: ShopwareProductRaw
   ): ProductSummary | null {
-    const id = sanitizeText(raw.id, 80);
+    const id = sanitizeGenericVariantId(sanitizeText(raw.id, 80));
     const title = sanitizeText(raw.translated?.name ?? raw.name, 200);
     if (!id || !title) return null;
 
@@ -220,7 +224,8 @@ export class ShopwareAdapter implements StoreAdapter {
         : null;
 
     const url = buildShopwareProductUrl(origin, raw);
-    const handle = handleFromUrl(url);
+    const handle = handleFromUrl(url) || sanitizeSafeHandle(id) || "";
+    if (!handle) return null;
     const allowedMediaHosts = [new URL(apiOrigin).hostname];
     const imageUrl = sanitizeSafeUrl(raw.cover?.media?.url, origin, {
       allowStoreSubdomains: true,
@@ -261,10 +266,11 @@ export class ShopwareAdapter implements StoreAdapter {
     raw: ShopwareProductRaw,
     configurator?: ShopwareProductDetailResponseRaw["configurator"]
   ): ProductDetail {
-    const id = sanitizeText(raw.id, 80) || "product";
-    const title = sanitizeText(raw.translated?.name ?? raw.name, 200) || id;
+    const safeId = sanitizeGenericVariantId(sanitizeText(raw.id, 80));
+    const id = safeId ?? "";
+    const title = sanitizeText(raw.translated?.name ?? raw.name, 200) || id || "product";
     const url = buildShopwareProductUrl(origin, raw);
-    const handle = handleFromUrl(url);
+    const handle = handleFromUrl(url) || sanitizeSafeHandle(id) || "";
     const calc = raw.calculatedPrice ?? raw.calculatedCheapestPrice;
     const unitPrice = typeof calc?.unitPrice === "number" && Number.isFinite(calc.unitPrice)
       ? calc.unitPrice
@@ -320,16 +326,20 @@ export class ShopwareAdapter implements StoreAdapter {
 
     const sku = sanitizeOptionalText(raw.productNumber, 80);
 
-    const variant: ProductVariant = {
-      id,
-      title: optValues.length > 0 ? optValues.join(" / ") : "Default",
-      sku,
-      available,
-      price: priceMoney,
-      compare_at_price: compareMoney,
-      discount_percent: discountPct,
-      option_values: optValues
-    };
+    const variants: ProductVariant[] = safeId
+      ? [
+          {
+            id: safeId,
+            title: optValues.length > 0 ? optValues.join(" / ") : "Default",
+            sku,
+            available,
+            price: priceMoney,
+            compare_at_price: compareMoney,
+            discount_percent: discountPct,
+            option_values: optValues
+          }
+        ]
+      : [];
 
     return {
       id,
@@ -345,7 +355,7 @@ export class ShopwareAdapter implements StoreAdapter {
       url,
       options,
       images: Array.from(imageUrls).slice(0, 10),
-      variants: [variant]
+      variants
     };
   }
 
@@ -407,6 +417,7 @@ export class ShopwareAdapter implements StoreAdapter {
       });
 
       const handle = handleFromUrl(safeUrl);
+      if (!handle) continue;
       seen.add(safeUrl);
       products.push({
         id: handle,
@@ -493,9 +504,10 @@ export class ShopwareAdapter implements StoreAdapter {
       });
 
       const handle = handleFromUrl(safeUrl);
+      if (!handle) continue;
       seen.add(safeUrl);
       products.push({
-        id: sanitizeOptionalText(info?.id ?? info?.sku, 80) ?? handle,
+        id: sanitizeGenericVariantId(sanitizeOptionalText(info?.id ?? info?.sku, 80)) ?? handle,
         handle,
         title,
         vendor: sanitizeOptionalText(info?.brand, 100),
@@ -824,17 +836,25 @@ export class ShopwareAdapter implements StoreAdapter {
       }
     }
 
-    const id = sanitizeOptionalText(infoAttr?.id, 80) ?? sku ?? handle;
-    const variant: ProductVariant = {
-      id,
-      title: "Default",
-      sku,
-      available,
-      price: priceMoney,
-      compare_at_price: compareMoney,
-      discount_percent: computeDiscountPercent(priceMoney.amount, compareMoney?.amount),
-      option_values: []
-    };
+    const safeId =
+      sanitizeGenericVariantId(sanitizeOptionalText(infoAttr?.id, 80)) ??
+      sanitizeGenericVariantId(sku) ??
+      sanitizeGenericVariantId(handle);
+    const id = safeId ?? "";
+    const variants: ProductVariant[] = safeId
+      ? [
+          {
+            id: safeId,
+            title: "Default",
+            sku,
+            available,
+            price: priceMoney,
+            compare_at_price: compareMoney,
+            discount_percent: computeDiscountPercent(priceMoney.amount, compareMoney?.amount),
+            option_values: []
+          }
+        ]
+      : [];
 
     const product: ProductDetail = {
       id,
@@ -850,7 +870,7 @@ export class ShopwareAdapter implements StoreAdapter {
       url: canonicalUrl,
       options,
       images,
-      variants: [variant]
+      variants
     };
 
     return {
