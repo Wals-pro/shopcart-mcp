@@ -13,7 +13,7 @@ import {
   getHowTo,
   getWishes
 } from "../src/web/content.js";
-import { getSimScenarios, resolveDemoMedia } from "../src/web/landing.js";
+import { getSimScenarios, HERO_VIDEO_ASSETS, resolveDemoMedia } from "../src/web/landing.js";
 import {
   AMAZON_MARKETPLACES,
   PLATFORM_NAMES,
@@ -468,5 +468,79 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
       DEMO_VIDEO_URL: "javascript:alert(1)"
     });
     expect(resolveDemoMedia(badCfg, "de")).toEqual({ kind: "simulation" });
+  });
+
+  it("upgrades hosted GCS hero videos to versioned v2 MP4s with poster attributes and supports explicit DEMO_VIDEO_POSTER overrides", async () => {
+    // Legacy v1 GCS URLs (current Cloud Run env) automatically resolve to v2 MP4 + poster + dimensions
+    const { config: legacyCfg, app: legacyApp } = makeLandingApp({
+      DEMO_VIDEO_URL_DE: HERO_VIDEO_ASSETS.de.legacySrc,
+      DEMO_VIDEO_URL_EN: HERO_VIDEO_ASSETS.en.legacySrc
+    });
+
+    expect(resolveDemoMedia(legacyCfg, "de")).toEqual({
+      kind: "video",
+      src: HERO_VIDEO_ASSETS.de.src,
+      poster: HERO_VIDEO_ASSETS.de.poster,
+      width: 1920,
+      height: 1080,
+      mimeType: "video/mp4",
+      defaultAspect: "16:9"
+    });
+    expect(resolveDemoMedia(legacyCfg, "en")).toEqual({
+      kind: "video",
+      src: HERO_VIDEO_ASSETS.en.src,
+      poster: HERO_VIDEO_ASSETS.en.poster,
+      width: 1920,
+      height: 1080,
+      mimeType: "video/mp4",
+      defaultAspect: "16:9"
+    });
+
+    const deHtml = await request(legacyApp).get("/?lang=de").expect(200);
+    expect(deHtml.text).toContain(
+      `<video controls playsinline autoplay muted loop preload="metadata" width="1920" height="1080" poster="${HERO_VIDEO_ASSETS.de.poster}">`
+    );
+    expect(deHtml.text).toContain(
+      `<source src="${HERO_VIDEO_ASSETS.de.src}" type="video/mp4">`
+    );
+
+    const enHtml = await request(legacyApp).get("/?lang=en").expect(200);
+    expect(enHtml.text).toContain(
+      `<video controls playsinline autoplay muted loop preload="metadata" width="1920" height="1080" poster="${HERO_VIDEO_ASSETS.en.poster}">`
+    );
+    expect(enHtml.text).toContain(
+      `<source src="${HERO_VIDEO_ASSETS.en.src}" type="video/mp4">`
+    );
+
+    // Direct v2 GCS URLs also get their canonical poster automatically
+    const { config: v2Cfg } = makeLandingApp({
+      DEMO_VIDEO_URL_DE: HERO_VIDEO_ASSETS.de.src,
+      DEMO_VIDEO_URL_EN: HERO_VIDEO_ASSETS.en.src
+    });
+    expect(resolveDemoMedia(v2Cfg, "de")).toMatchObject({
+      kind: "video",
+      src: HERO_VIDEO_ASSETS.de.src,
+      poster: HERO_VIDEO_ASSETS.de.poster
+    });
+    expect(resolveDemoMedia(v2Cfg, "en")).toMatchObject({
+      kind: "video",
+      src: HERO_VIDEO_ASSETS.en.src,
+      poster: HERO_VIDEO_ASSETS.en.poster
+    });
+
+    // Explicit DEMO_VIDEO_POSTER overrides work and reject unsafe schemes
+    const { app: customApp } = makeLandingApp({
+      DEMO_VIDEO_URL_DE: "https://cdn.wals.pro/demos/custom-de.mp4",
+      DEMO_VIDEO_POSTER_DE: "https://cdn.wals.pro/demos/custom-de-poster.jpg",
+      DEMO_VIDEO_URL_EN: "https://cdn.wals.pro/demos/custom-en.mp4",
+      DEMO_VIDEO_POSTER_EN: "javascript:alert(1)"
+    });
+    const customDe = await request(customApp).get("/?lang=de").expect(200);
+    expect(customDe.text).toContain('poster="https://cdn.wals.pro/demos/custom-de-poster.jpg"');
+    expect(customDe.text).toContain('<source src="https://cdn.wals.pro/demos/custom-de.mp4" type="video/mp4">');
+
+    const customEn = await request(customApp).get("/?lang=en").expect(200);
+    expect(customEn.text).not.toContain("javascript:");
+    expect(customEn.text).not.toContain('poster="');
   });
 });
