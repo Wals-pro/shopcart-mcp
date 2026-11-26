@@ -160,7 +160,7 @@ export function normalizeCheckedUrl(
   }
 
   let candidate = trimmed;
-  const schemeMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):(.*)$/);
+  const schemeMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9+.-]{0,31}):/);
   if (schemeMatch) {
     const scheme = schemeMatch[1]!.toLowerCase();
     if (scheme !== "https" && scheme !== "http") {
@@ -482,13 +482,21 @@ export class StoreCheckRateLimiter {
   }
 }
 
+function stripTrailingSlashes(input: string): string {
+  let end = input.length;
+  while (end > 0 && input.charCodeAt(end - 1) === 47) {
+    end--;
+  }
+  return end === input.length ? input : input.slice(0, end);
+}
+
 /**
  * Strict same-origin check for browser POST requests to /api/store-check.
  * Rejects any cross-site or same-site (subdomain) Sec-Fetch-Site header,
  * any mismatching Origin header, and any mismatching Referer origin.
  */
 export function isAllowedStoreCheckOrigin(req: Request, appOrigin: string): boolean {
-  const expected = appOrigin.trim().replace(/\/+$/, "").toLowerCase();
+  const expected = stripTrailingSlashes(appOrigin.trim()).toLowerCase();
 
   const rawSecFetchSite = req.headers["sec-fetch-site"];
   const secFetchSite = (Array.isArray(rawSecFetchSite) ? rawSecFetchSite[0] : rawSecFetchSite)
@@ -501,7 +509,7 @@ export function isAllowedStoreCheckOrigin(req: Request, appOrigin: string): bool
   const rawOrigin = req.headers.origin;
   const originHeader = (Array.isArray(rawOrigin) ? rawOrigin[0] : rawOrigin)?.trim();
   if (originHeader) {
-    const normalizedOrigin = originHeader.replace(/\/+$/, "").toLowerCase();
+    const normalizedOrigin = stripTrailingSlashes(originHeader).toLowerCase();
     if (normalizedOrigin === "null") {
       return secFetchSite === "same-origin";
     }
