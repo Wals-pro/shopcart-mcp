@@ -340,6 +340,7 @@ export function createOAuthRouter(
       expiresAt: new Date(now.getTime() + WEB_SESSION_TTL_MS)
     });
 
+    params.res.setHeader("Cache-Control", "no-store");
     params.res.setHeader("Set-Cookie", [
       formatCookie(CSRF_COOKIE, "", { maxAge: 0, secure: isHttps }),
       formatCookie(OTP_BIND_COOKIE, "", { maxAge: 0, secure: isHttps }),

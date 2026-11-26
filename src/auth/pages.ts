@@ -555,6 +555,9 @@ ${analyticsHead}
       : `<strong>${escapeHtml(p.clientName)}</strong> wants to access your ShopCart MCP shopping tools.`
   }</p>
 
+  ${p.error ? `<div class="banner err" role="alert">${escapeHtml(p.error)}</div>` : ""}
+  ${p.info ? `<div class="banner ok" role="status">${escapeHtml(p.info)}</div>` : ""}
+
   <div class="consent-box">
     <div class="consent-row"><span>Client</span><span>${escapeHtml(p.clientName)}</span></div>
     <div class="consent-row"><span>Redirect</span><span>${escapeHtml(p.redirectHost)}</span></div>
@@ -570,9 +573,6 @@ ${analyticsHead}
         }</div>`
       : ""
   }
-
-  ${p.error ? `<div class="banner err" role="alert">${escapeHtml(p.error)}</div>` : ""}
-  ${p.info ? `<div class="banner ok" role="status">${escapeHtml(p.info)}</div>` : ""}
 
   ${stepSection}
 

@@ -4,10 +4,11 @@ import { createApp } from "../src/app.js";
 import { CimdResolver, parseAndProjectCimdDocument } from "../src/auth/cimd.js";
 import { sha256Base64Url } from "../src/auth/crypto.js";
 import { MemoryEmailSender } from "../src/auth/email-otp.js";
-import { matchRedirectUri } from "../src/auth/validation.js";
+import { isValidRedirectUri, matchRedirectUri } from "../src/auth/validation.js";
 import { loadConfig } from "../src/config.js";
 import { MemoryStore } from "../src/store/memory.js";
 import type { SafeFetchResponse } from "../src/security/ssrf.js";
+import { buildOAuthCsp, normalizeFormActionOrigin } from "../src/web/analytics.js";
 
 function makeTestApp(cimdMap: Record<string, { status?: number; body: unknown; cacheControl?: string }> = {}) {
   const config = loadConfig({
@@ -622,5 +623,271 @@ describe("OAuth 2.1 compliance & MCP auth", () => {
         email: "stateless-billing@example.com"
       })
       .expect(200);
+  });
+
+  it("completes OpenAI/ChatGPT CIMD popup flow with ~750-char relay state, allows cross-origin HTTPS redirect hops in CSP form-action, and renders visible errors on invalid/reused OTP", async () => {
+    const openaiClientId = "https://chatgpt.com/oauth/client.json";
+    const openaiRedirectUri = "https://chatgpt.com/connector_platform_oauth_redirect";
+    const syntheticRelayPayload = {
+      oauth_id: "oauth_s_00000000000000000000000000000001",
+      app_id: "asdk_app_00000000000000000000000000000001",
+      version_id: "asdk_app_v_00000000000000000000000000000001",
+      org_id: "org-exampleOrgId0000000000000001",
+      target_uri:
+        "https://platform.openai.com/plugins/manage/plugin_asdk_app_00000000000000000000000000000001" +
+        "?tab=mcp&version=appsub_00000000000000000000000000000001" +
+        "&mcp_connection_app_id=asdk_app_00000000000000000000000000000001" +
+        "&mcp_connection_version_id=asdk_app_v_00000000000000000000000000000001",
+      purpose: "draft"
+    };
+    const openaiRelayState = `openai_platform_oauth_relay__${Buffer.from(
+      JSON.stringify(syntheticRelayPayload),
+      "utf8"
+    ).toString("base64")}`;
+    expect(openaiRelayState.length).toBeGreaterThan(700);
+
+    const { app, emailSender } = makeTestApp({
+      [openaiClientId]: {
+        body: {
+          client_id: openaiClientId,
+          client_uri: "https://chatgpt.com/",
+          redirect_uris: [openaiRedirectUri],
+          token_endpoint_auth_method: "private_key_jwt",
+          token_endpoint_auth_methods_supported: ["none", "private_key_jwt"],
+          grant_types: [
+            "authorization_code",
+            "refresh_token",
+            "urn:ietf:params:oauth:grant-type:jwt-bearer"
+          ],
+          response_types: ["code"],
+          client_name: "ChatGPT"
+        }
+      }
+    });
+
+    const verifier = "openai_pkce_verifier_0123456789_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789";
+    const challenge = sha256Base64Url(verifier);
+
+    // 1. GET /oauth/authorize with OpenAI's CIMD client_id, redirect_uri, resource & ~750-char state
+    const authGet = await request(app)
+      .get("/oauth/authorize")
+      .query({
+        response_type: "code",
+        client_id: openaiClientId,
+        redirect_uri: openaiRedirectUri,
+        scope: "mcp:read",
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+        resource: "https://shopcart.wals.pro/mcp",
+        state: openaiRelayState,
+        lang: "de"
+      })
+      .expect(200);
+
+    // CSP form-action MUST permit downstream https: hops (e.g. chatgpt.com -> platform.openai.com)
+    const getCsp = String(authGet.headers["content-security-policy"] ?? "");
+    expect(getCsp).toContain("form-action 'self' https://chatgpt.com https:");
+    expect(getCsp).not.toMatch(/form-action[^;]*\bhttp:/);
+    expect(authGet.text).toContain(`name="state" value="${openaiRelayState}"`);
+
+    const csrf1 = authGet.text.match(/name="_csrf" value="([^"]+)"/)![1]!;
+
+    // 2. POST /oauth/authorize (step=email) without cookies (popup context) -> 200 OTP form
+    const step1 = await request(app)
+      .post("/oauth/authorize")
+      .set("Origin", "https://shopcart.wals.pro")
+      .type("form")
+      .send({
+        _csrf: csrf1,
+        step: "email",
+        lang: "de",
+        client_id: openaiClientId,
+        redirect_uri: openaiRedirectUri,
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+        resource: "https://shopcart.wals.pro/mcp",
+        scope: "mcp:read",
+        state: openaiRelayState,
+        email: "alice@example.com"
+      })
+      .expect(200);
+
+    // CSP on the OTP verify page (the document submitting the form that receives the 303!)
+    // MUST also allow downstream https: hops so Chromium/Safari follow chatgpt.com -> platform.openai.com.
+    const step1Csp = String(step1.headers["content-security-policy"] ?? "");
+    expect(step1Csp).toContain("form-action 'self' https://chatgpt.com https:");
+    expect(step1.text).toContain(`name="state" value="${openaiRelayState}"`);
+
+    const mail = emailSender.lastFor("alice@example.com")!;
+    expect(mail).toBeDefined();
+    const csrf2 = step1.text.match(/name="_csrf" value="([^"]+)"/)![1]!;
+    const challengeId = step1.text.match(/name="challenge_id" value="([^"]+)"/)![1]!;
+
+    // 3a. Invalid OTP format -> 400 staying on verify step with visible role="alert" banner above consent box
+    const badFormat = await request(app)
+      .post("/oauth/authorize")
+      .set("Origin", "https://shopcart.wals.pro")
+      .type("form")
+      .send({
+        _csrf: csrf2,
+        step: "verify",
+        challenge_id: challengeId,
+        lang: "de",
+        client_id: openaiClientId,
+        redirect_uri: openaiRedirectUri,
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+        resource: "https://shopcart.wals.pro/mcp",
+        scope: "mcp:read",
+        state: openaiRelayState,
+        email: "alice@example.com",
+        code: "abc"
+      })
+      .expect(400);
+
+    expect(badFormat.text).toContain('class="banner err" role="alert"');
+    expect(badFormat.text).toContain("6-stelligen Zahlencode");
+    expect(badFormat.text).toContain(`name="challenge_id" value="${challengeId}"`);
+    expect(badFormat.text.indexOf('class="banner err"')).toBeLessThan(
+      badFormat.text.indexOf('class="consent-box"')
+    );
+    const csrf3 = badFormat.text.match(/name="_csrf" value="([^"]+)"/)![1]!;
+
+    // 3b. Valid 6-digit OTP -> 303 redirect to chatgpt.com with exact code, ~750-char state & RFC 9207 iss
+    const verifyOk = await request(app)
+      .post("/oauth/authorize")
+      .set("Origin", "https://shopcart.wals.pro")
+      .type("form")
+      .send({
+        _csrf: csrf3,
+        step: "verify",
+        challenge_id: challengeId,
+        lang: "de",
+        client_id: openaiClientId,
+        redirect_uri: openaiRedirectUri,
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+        resource: "https://shopcart.wals.pro/mcp",
+        scope: "mcp:read",
+        state: openaiRelayState,
+        email: "alice@example.com",
+        code: mail.formattedCode
+      })
+      .expect(303);
+
+    expect(verifyOk.headers["cache-control"]).toBe("no-store");
+    const callback = new URL(verifyOk.headers.location!);
+    expect(callback.origin + callback.pathname).toBe(openaiRedirectUri);
+    expect(callback.searchParams.get("state")).toBe(openaiRelayState);
+    expect(callback.searchParams.get("iss")).toBe("https://shopcart.wals.pro");
+    const authCode = callback.searchParams.get("code")!;
+    expect(authCode).toMatch(/^sc_code_/);
+
+    // 3c. Replaying the already-used OTP -> 400 with visible error banner (never silent reset)
+    const replayUsed = await request(app)
+      .post("/oauth/authorize")
+      .set("Origin", "https://shopcart.wals.pro")
+      .type("form")
+      .send({
+        _csrf: csrf3,
+        step: "verify",
+        challenge_id: challengeId,
+        lang: "de",
+        client_id: openaiClientId,
+        redirect_uri: openaiRedirectUri,
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+        resource: "https://shopcart.wals.pro/mcp",
+        scope: "mcp:read",
+        state: openaiRelayState,
+        email: "alice@example.com",
+        code: mail.code
+      })
+      .expect(400);
+
+    expect(replayUsed.text).toContain('class="banner err" role="alert"');
+    expect(replayUsed.text).toContain("bereits verwendet");
+    expect(replayUsed.text.indexOf('class="banner err"')).toBeLessThan(
+      replayUsed.text.indexOf('class="consent-box"')
+    );
+
+    // 4. Token exchange at POST /oauth/token with ChatGPT CIMD client_id (auth method negotiated to "none")
+    const tokenRes = await request(app)
+      .post("/oauth/token")
+      .type("form")
+      .send({
+        grant_type: "authorization_code",
+        client_id: openaiClientId,
+        code: authCode,
+        redirect_uri: openaiRedirectUri,
+        code_verifier: verifier,
+        resource: "https://shopcart.wals.pro/mcp"
+      })
+      .expect(200);
+
+    expect(tokenRes.body.access_token).toMatch(/^sc_at_/);
+    expect(tokenRes.body.refresh_token).toMatch(/^sc_rt_/);
+
+    // 5. Access token works on /mcp tools/list
+    await request(app)
+      .post("/mcp")
+      .set("Authorization", `Bearer ${tokenRes.body.access_token}`)
+      .set("Accept", "application/json, text/event-stream")
+      .send({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+      .expect(200);
+
+    // 6. Verify /auth/magic keeps strict form-action 'self' (without https:)
+    const magicErr = await request(app).get("/auth/magic?token=invalid").expect(400);
+    expect(String(magicErr.headers["content-security-policy"] ?? "")).toContain("form-action 'self';");
+
+    // 7. Verify first-party pin fallback for https://chatgpt.com/oauth/client.json when live fetch fails
+    const { app: offlineApp } = makeTestApp({});
+    await request(offlineApp)
+      .get("/oauth/authorize")
+      .query({
+        response_type: "code",
+        client_id: openaiClientId,
+        redirect_uri: openaiRedirectUri,
+        scope: "mcp:read",
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+        resource: "https://shopcart.wals.pro/mcp",
+        state: openaiRelayState
+      })
+      .expect(200);
+  });
+
+  it("rejects CSP-delimiter/non-LDH redirect_uri hostnames in isValidRedirectUri and normalizeFormActionOrigin/buildOAuthCsp", () => {
+    const maliciousRedirects = [
+      "https://a.b;frame-ancestors/cb",
+      "https://a.b;script-src/cb",
+      "https://evil.example,https://other.example/cb",
+      "https://-bad.example/cb",
+      "https://bad-.example/cb",
+      "https://a..b.example/cb",
+      "https://bad_host.example/cb",
+      "http://evil.example/cb"
+    ];
+
+    for (const uri of maliciousRedirects) {
+      expect(isValidRedirectUri(uri), `isValidRedirectUri(${uri})`).toBe(false);
+      expect(normalizeFormActionOrigin(uri), `normalizeFormActionOrigin(${uri})`).toBeNull();
+      const csp = buildOAuthCsp(undefined, uri);
+      expect(csp).toContain("form-action 'self';");
+      expect(csp).not.toContain("a.b;frame-ancestors");
+    }
+
+    // Valid HTTPS LDH & loopback origins still pass cleanly
+    expect(isValidRedirectUri("https://chatgpt.com/connector_platform_oauth_redirect")).toBe(true);
+    expect(isValidRedirectUri("http://127.0.0.1:45678/callback")).toBe(true);
+    expect(isValidRedirectUri("http://localhost:8080/callback")).toBe(true);
+    expect(isValidRedirectUri("http://[::1]:8080/callback")).toBe(true);
+    expect(normalizeFormActionOrigin("https://chatgpt.com/connector_platform_oauth_redirect")).toBe(
+      "https://chatgpt.com"
+    );
+    expect(normalizeFormActionOrigin("http://127.0.0.1:45678/callback")).toBe(
+      "http://127.0.0.1:45678"
+    );
+    expect(normalizeFormActionOrigin("http://[::1]:8080/callback")).toBe("http://[::1]:8080");
   });
 });
