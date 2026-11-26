@@ -60,6 +60,10 @@ export class AdapterRegistry {
     return this.adapters[this.adapters.length - 1]!;
   }
 
+  getAdapter(platform: string): StoreAdapter | undefined {
+    return this.adapters.find((a) => a.platform === platform);
+  }
+
   listPlatforms(): string[] {
     return this.adapters.map((a) => a.platform);
   }

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { BigCommerceAdapter } from "../src/adapters/bigcommerce/adapter.js";
 import { BigCommerceClient } from "../src/adapters/bigcommerce/client.js";
 import { UniversalJsonLdAdapter } from "../src/adapters/jsonld/adapter.js";
-import { AdapterRegistry } from "../src/adapters/registry.js";
+import { AdapterRegistry, createIsolatedStoreCheckRegistry } from "../src/adapters/registry.js";
 import { ShopifyAdapter } from "../src/adapters/shopify/adapter.js";
 import { ShopifyClient } from "../src/adapters/shopify/client.js";
 import { ShopwareAdapter } from "../src/adapters/shopware/adapter.js";
@@ -1122,6 +1122,16 @@ describe("UniversalUcpAdapter Catalog, JSON-LD Fallback & Zero-Liability Checkou
 });
 
 describe("AdapterRegistry Priority, Native UCP Enrichment, MCP inspect_store & Gemini Schema", () => {
+  it("shares a single UniversalJsonLdAdapter instance between AdapterRegistry and UniversalUcpAdapter (no duplicate variant cache)", () => {
+    for (const registry of [new AdapterRegistry(), createIsolatedStoreCheckRegistry()]) {
+      const ucpAdapter = registry.getAdapter("ucp");
+      const jsonLdAdapter = registry.getFallback();
+      expect(ucpAdapter).toBeInstanceOf(UniversalUcpAdapter);
+      expect(jsonLdAdapter).toBeInstanceOf(UniversalJsonLdAdapter);
+      expect((ucpAdapter as UniversalUcpAdapter).getJsonLdFallback()).toBe(jsonLdAdapter);
+    }
+  });
+
   it("preserves native adapters as primary while enriching inspect_store with /.well-known/ucp metadata, routes Wix UCP to UniversalUcpAdapter, and falls back to JSON-LD", async () => {
     const fetcher = makeFixtureFetcher({
       // 1. Shopify store WITH /.well-known/ucp

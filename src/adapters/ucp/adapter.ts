@@ -63,6 +63,10 @@ export class UniversalUcpAdapter implements StoreAdapter {
     this.jsonLdFallback = opts.jsonLdFallback ?? new UniversalJsonLdAdapter({ fetcher });
   }
 
+  getJsonLdFallback(): UniversalJsonLdAdapter {
+    return this.jsonLdFallback;
+  }
+
   clearCache(): void {
     this.discovery.clearCache();
     this.jsonLdFallback.clearCache();
