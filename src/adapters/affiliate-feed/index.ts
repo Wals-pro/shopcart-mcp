@@ -7,6 +7,16 @@ import {
   validateAwinFeedUrl,
   type AffiliateFetcherFn
 } from "./awin.js";
+import {
+  AwinPromotionsClient,
+  createAwinPromotionsProvider,
+  mapRegionToAwinCode,
+  validateAwinPromotionsUrl,
+  type AwinPromotionItem,
+  type AwinPromotionsProvider,
+  type AwinPromotionsSearchOptions,
+  type AwinPromotionsSearchResult
+} from "./awin-promotions.js";
 import type {
   AffiliateFeedConfig,
   AffiliateFeedProduct,
@@ -17,11 +27,15 @@ import type {
 
 export {
   AwinFeedClient,
+  AwinPromotionsClient,
+  createAwinPromotionsProvider,
   isCrossStoreAlias,
   loadAffiliateFeedConfig,
+  mapRegionToAwinCode,
   normalizeEan,
   parseCsvRecords,
-  validateAwinFeedUrl
+  validateAwinFeedUrl,
+  validateAwinPromotionsUrl
 };
 
 export type {
@@ -30,7 +44,11 @@ export type {
   AffiliateFeedProvider,
   AffiliateFeedSearchOptions,
   AffiliateFeedSearchResult,
-  AffiliateFetcherFn
+  AffiliateFetcherFn,
+  AwinPromotionItem,
+  AwinPromotionsProvider,
+  AwinPromotionsSearchOptions,
+  AwinPromotionsSearchResult
 };
 
 export function createAffiliateFeedProvider(

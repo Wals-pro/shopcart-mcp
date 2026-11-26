@@ -1,8 +1,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
+  createAwinPromotionsProvider,
   isCrossStoreAlias,
-  type AffiliateFeedProvider
+  type AffiliateFeedProvider,
+  type AwinPromotionsProvider
 } from "../adapters/affiliate-feed/index.js";
 import { AdapterRegistry } from "../adapters/registry.js";
 import {
@@ -21,7 +23,15 @@ import {
   type AttributionConfig
 } from "../attribution/links.js";
 import {
+  buildComparisonLinks,
+  buildDealSearchLinks,
+  loadComparisonConfig,
+  normalizeEan,
+  type ComparisonConfig
+} from "../comparison/deep-links.js";
+import {
   isSameStoreSite,
+  sanitizeText,
   SOURCE_NOTICE_CATALOG,
   SOURCE_NOTICE_PRODUCT
 } from "../security/sanitize.js";
@@ -44,6 +54,8 @@ export interface ToolRuntimeContext {
   registry: AdapterRegistry;
   attribution?: AttributionConfig;
   affiliateFeed?: AffiliateFeedProvider;
+  awinPromotions?: AwinPromotionsProvider;
+  comparison?: ComparisonConfig;
   concurrencyKey?: string;
   consumeQuota?: (toolName: string) => Promise<QuotaCheckResult>;
 }
@@ -130,6 +142,8 @@ async function runGuardedTool<T>(
 export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext): void {
   const attribution = ctx.attribution ?? loadAttributionConfig();
   const affiliateFeed = ctx.affiliateFeed;
+  const awinPromotions = ctx.awinPromotions ?? createAwinPromotionsProvider();
+  const comparisonConfig = ctx.comparison ?? loadComparisonConfig();
 
   server.registerTool(
     "inspect_store",
@@ -808,6 +822,288 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           ...(anyAffiliate
             ? { disclosure_note: disclosureNote ?? AFFILIATE_DISCLOSURE_NOTE }
             : {})
+        };
+      })
+  );
+
+  server.registerTool(
+    "compare_prices",
+    {
+      title: "Compare Prices Across Stores",
+      description:
+        "Compare product prices across merchants by keyword or 8-14 digit EAN/GTIN barcode. Combines live partner product feed offers (when configured) with instant 1-click regional price comparison links (Geizhals, idealo, billiger.de, Toppreise.ch, Google Shopping) across DE, AT, CH, UK, FR, and US. Strictly read-only with zero scraping.",
+      inputSchema: {
+        query: z
+          .string()
+          .trim()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe(
+            "Product name, brand, or model to compare across merchants (e.g. 'Sony WH-1000XM5'). At least one of query or ean is required."
+          ),
+        ean: z
+          .string()
+          .trim()
+          .min(8)
+          .max(20)
+          .optional()
+          .describe(
+            "Optional 8-14 digit EAN/GTIN barcode (from get_product or packaging) for exact cross-merchant price matching."
+          ),
+        country: z
+          .enum(["DE", "AT", "CH", "UK", "FR", "US"])
+          .optional()
+          .default("DE")
+          .describe("Target country for comparison portals: DE (default), AT, CH, UK, FR, or US."),
+        min_price: z
+          .number()
+          .min(0)
+          .max(1000000)
+          .optional()
+          .describe("Optional minimum price filter in major currency units."),
+        max_price: z
+          .number()
+          .min(0)
+          .max(1000000)
+          .optional()
+          .describe("Optional maximum price filter in major currency units."),
+        sort_by: z
+          .enum(["price_asc", "relevance"])
+          .optional()
+          .default("price_asc")
+          .describe("Sort order for offers and comparison links: 'price_asc' (default) or 'relevance'."),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(25)
+          .optional()
+          .default(10)
+          .describe("Maximum number of live offers to return (1-25, default 10).")
+      },
+      annotations: makeAnnotations("Compare Prices Across Stores")
+    },
+    async ({ query, ean, country, min_price, max_price, sort_by, limit }) =>
+      runGuardedTool(ctx, "compare_prices", async () => {
+        const cleanQuery = query ? sanitizeText(query, 200) : "";
+        const normalizedEan = ean !== undefined ? normalizeEan(ean) : null;
+
+        if (!cleanQuery && ean === undefined) {
+          throw new Error("At least one of 'query' or 'ean' must be provided.");
+        }
+        if (ean !== undefined && !normalizedEan) {
+          throw new Error(
+            "Invalid 'ean': must contain 8 to 14 digits (spaces and hyphens are ignored)."
+          );
+        }
+        if (
+          min_price !== undefined &&
+          max_price !== undefined &&
+          min_price > max_price
+        ) {
+          throw new Error("'min_price' must be less than or equal to 'max_price'.");
+        }
+
+        const effectiveCountry = country ?? "DE";
+        const effectiveSortBy = sort_by ?? "price_asc";
+        const effectiveLimit = limit ?? 10;
+
+        const comparisonLinks = buildComparisonLinks({
+          query: cleanQuery || undefined,
+          ean: normalizedEan ?? undefined,
+          country: effectiveCountry,
+          minPrice: min_price,
+          maxPrice: max_price,
+          sortBy: effectiveSortBy,
+          attribution,
+          comparisonConfig
+        });
+
+        const notices: string[] = [];
+        let liveOffers: Awaited<ReturnType<AffiliateFeedProvider["search"]>>["products"] = [];
+        let liveOffersAffiliate = false;
+        let liveDisclosureNote: string | undefined;
+
+        if (affiliateFeed?.isConfigured()) {
+          const feedResult = await affiliateFeed.search({
+            query: comparisonLinks.ean ? undefined : cleanQuery || undefined,
+            ean: comparisonLinks.ean ?? undefined,
+            limit: effectiveLimit,
+            minPrice: min_price,
+            maxPrice: max_price,
+            concurrencyKey: ctx.concurrencyKey
+          });
+          liveOffers = [...feedResult.products];
+          if (effectiveSortBy === "price_asc") {
+            liveOffers.sort((a, b) => {
+              if (a.available !== b.available) return a.available ? -1 : 1;
+              return a.price.amount - b.price.amount;
+            });
+          }
+          notices.push(...feedResult.notices);
+          if (liveOffers.length > 0 && feedResult.affiliate_disclosure) {
+            liveOffersAffiliate = true;
+            liveDisclosureNote = feedResult.disclosure_note;
+          }
+        } else {
+          notices.push(
+            "Live partner product feeds are not configured on this instance; returning deterministic 1-click Tier-B price comparison links."
+          );
+        }
+
+        const anyAffiliate = liveOffersAffiliate || comparisonLinks.affiliate_disclosure;
+        const disclosureNote = anyAffiliate
+          ? (liveDisclosureNote ?? comparisonLinks.disclosure_note ?? AFFILIATE_DISCLOSURE_NOTE)
+          : undefined;
+
+        return {
+          query: cleanQuery || null,
+          ean: comparisonLinks.ean,
+          country: effectiveCountry,
+          match_mode: comparisonLinks.match_mode,
+          ...(liveOffers.length > 0 ? { source_notice: SOURCE_NOTICE_CATALOG } : {}),
+          live_offers: liveOffers,
+          comparison_links: comparisonLinks.links,
+          providers: {
+            tier_a_live: {
+              awin_product_feeds: affiliateFeed?.isConfigured() ? "active" : "not_configured",
+              kelkoo: comparisonConfig.kelkooApiToken ? "configured" : "not_configured"
+            },
+            tier_b_deeplinks: comparisonLinks.links.map((link) => link.provider),
+            monetization_hooks: {
+              affiliate_rules:
+                attribution.affiliateRules.length > 0 ? "configured" : "not_configured",
+              sovrn_commerce: comparisonConfig.sovrnDeeplinkTemplate
+                ? "configured"
+                : "not_configured"
+            }
+          },
+          affiliate_disclosure: anyAffiliate,
+          ...(disclosureNote ? { disclosure_note: disclosureNote } : {}),
+          notices,
+          agent_guidance:
+            "EAN bridge: if you already inspected a product via get_product, pass its EAN/GTIN to compare_prices for exact cross-merchant matching (match_mode='ean_exact'). Present any live_offers alongside the 1-click comparison_links so the user can compare live prices across regional portals. Once the user picks a merchant store, call inspect_store -> find_store_discounts -> get_product -> create_cart_link to verify live stock, attach verified public promo codes, and build a ready-to-buy cart link."
+        };
+      })
+  );
+
+  server.registerTool(
+    "find_hot_deals",
+    {
+      title: "Find Hot Deals & Vouchers",
+      description:
+        "Discover active partner promotions and verified voucher codes via the official Awin Publisher Promotions API (when configured) alongside instant 1-click regional deal community search links (Preisjäger, mydealz, HotUKDeals, Dealabs, Slickdeals) for AT, DE, CH, UK, FR, and US. Strictly read-only with zero scraping.",
+      inputSchema: {
+        query: z
+          .string()
+          .trim()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe("Optional product, brand, or merchant keyword to filter deals and vouchers."),
+        region: z
+          .enum(["AT", "DE", "CH", "UK", "FR", "US"])
+          .optional()
+          .default("DE")
+          .describe("Target region for live promotions and deal links: DE (default), AT, CH, UK, FR, or US."),
+        category: z
+          .string()
+          .trim()
+          .min(1)
+          .max(80)
+          .optional()
+          .describe("Optional category keyword to narrow deals (e.g. 'electronics', 'fashion', 'sports')."),
+        max_price: z
+          .number()
+          .min(0)
+          .max(1000000)
+          .optional()
+          .describe("Optional target maximum budget in major currency units."),
+        include_vouchers: z
+          .boolean()
+          .optional()
+          .default(true)
+          .describe("Include active voucher/coupon codes from partner promotions (default true)."),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(25)
+          .optional()
+          .default(10)
+          .describe("Maximum number of live vouchers and live deals to return per list (1-25, default 10).")
+      },
+      annotations: makeAnnotations("Find Hot Deals & Vouchers")
+    },
+    async ({ query, region, category, max_price, include_vouchers, limit }) =>
+      runGuardedTool(ctx, "find_hot_deals", async () => {
+        const cleanQuery = query ? sanitizeText(query, 200) : "";
+        const cleanCategory = category ? sanitizeText(category, 80) : "";
+        const effectiveRegion = region ?? "DE";
+        const effectiveIncludeVouchers = include_vouchers ?? true;
+        const effectiveLimit = limit ?? 10;
+
+        const dealLinks = buildDealSearchLinks({
+          query: cleanQuery || undefined,
+          region: effectiveRegion,
+          category: cleanCategory || undefined,
+          attribution,
+          comparisonConfig
+        });
+
+        const promotionsResult = await awinPromotions.search({
+          region: effectiveRegion,
+          query: cleanQuery || undefined,
+          category: cleanCategory || undefined,
+          includeVouchers: effectiveIncludeVouchers,
+          limit: effectiveLimit,
+          concurrencyKey: ctx.concurrencyKey
+        });
+
+        const notices = [...promotionsResult.notices];
+        if (max_price !== undefined) {
+          notices.push(
+            `Target budget hint (${max_price}) noted; partner promotion/voucher feeds do not expose per-item prices, so verify final item totals on the merchant store via get_product.`
+          );
+        }
+
+        const hasLivePromos =
+          promotionsResult.live_vouchers.length > 0 || promotionsResult.live_deals.length > 0;
+        const anyAffiliate =
+          promotionsResult.affiliate_disclosure || dealLinks.affiliate_disclosure;
+        const disclosureNote = anyAffiliate
+          ? (promotionsResult.disclosure_note ??
+              dealLinks.disclosure_note ??
+              AFFILIATE_DISCLOSURE_NOTE)
+          : undefined;
+
+        return {
+          query: cleanQuery || null,
+          region: effectiveRegion,
+          category: cleanCategory || null,
+          ...(hasLivePromos ? { source_notice: SOURCE_NOTICE_CATALOG } : {}),
+          live_vouchers: promotionsResult.live_vouchers,
+          live_deals: promotionsResult.live_deals,
+          deal_search_links: dealLinks.links,
+          providers: {
+            tier_a_live: {
+              awin_promotions: promotionsResult.configured ? "active" : "not_configured"
+            },
+            tier_b_deeplinks: dealLinks.links.map((link) => link.provider),
+            monetization_hooks: {
+              affiliate_rules:
+                attribution.affiliateRules.length > 0 ? "configured" : "not_configured",
+              sovrn_commerce: comparisonConfig.sovrnDeeplinkTemplate
+                ? "configured"
+                : "not_configured"
+            }
+          },
+          affiliate_disclosure: anyAffiliate,
+          ...(disclosureNote ? { disclosure_note: disclosureNote } : {}),
+          notices,
+          agent_guidance:
+            "Deal + Voucher workflow: share relevant live_vouchers, live_deals, and 1-click deal_search_links with the user. When a deal or voucher applies to a specific merchant store, call inspect_store(store_url) -> search_products / get_product to verify live stock and price, check find_store_discounts for storefront-native promos, and pass any verified voucher_code as discount_code into create_cart_link. Never invent coupon codes."
         };
       })
   );
