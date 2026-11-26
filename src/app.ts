@@ -9,7 +9,7 @@ import {
   type AffiliateFeedProvider,
   type AwinPromotionsProvider
 } from "./adapters/affiliate-feed/index.js";
-import { AdapterRegistry } from "./adapters/registry.js";
+import { AdapterRegistry, createIsolatedStoreCheckRegistry } from "./adapters/registry.js";
 import { createBearerAuthMiddleware } from "./auth/bearer.js";
 import { CimdResolver } from "./auth/cimd.js";
 import { EmailOtpService, type EmailSender } from "./auth/email-otp.js";
@@ -32,17 +32,24 @@ import { createGuidesRouter } from "./web/guides.js";
 import { renderLandingPage } from "./web/landing.js";
 import { renderNotFoundPage, renderPrivacyPage, renderSecurityTxt, renderTermsPage } from "./web/legal.js";
 import { createStoresRouter } from "./web/stores.js";
+import { createStoreCheckRouter } from "./web/store-check.js";
+import type { StoreCheckRateLimiter } from "./web/store-check-core.js";
 
 export interface CreateAppDeps {
   config: AppConfig;
   store: StorageBackend;
   registry?: AdapterRegistry;
+  storeCheckRegistry?: AdapterRegistry;
   affiliateFeed?: AffiliateFeedProvider;
   awinPromotions?: AwinPromotionsProvider;
   cimdResolver?: CimdResolver;
   emailSender?: EmailSender;
   otpService?: EmailOtpService;
   stripeClient?: BillingStripeClient;
+  storeCheckRateLimiter?: StoreCheckRateLimiter;
+  storeCheckTimeoutMs?: number;
+  storeCheckMaxConcurrent?: number;
+  storeCheckGlobalMaxConcurrency?: number;
 }
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
@@ -105,6 +112,16 @@ const STATIC_LANDING_ASSETS: Array<{ route: string; file: string; contentType: s
     route: "/assets/stores.js",
     file: "assets/stores.js",
     contentType: "application/javascript; charset=utf-8"
+  },
+  {
+    route: "/assets/store-check.css",
+    file: "assets/store-check.css",
+    contentType: "text/css; charset=utf-8"
+  },
+  {
+    route: "/assets/store-check.js",
+    file: "assets/store-check.js",
+    contentType: "application/javascript; charset=utf-8"
   }
 ];
 
@@ -127,6 +144,9 @@ function corsMiddleware(req: Request, res: Response, next: NextFunction): void {
 export function createApp(deps: CreateAppDeps): Express {
   const { config, store } = deps;
   const registry = deps.registry ?? new AdapterRegistry();
+  // Always isolate the anonymous public self-check from the shared MCP AdapterRegistry
+  // (separate caches and AmazonAdapter initialized with empty env so paid quotas cannot be spent).
+  const storeCheckRegistry = deps.storeCheckRegistry ?? createIsolatedStoreCheckRegistry();
   const affiliateFeed = deps.affiliateFeed ?? createAffiliateFeedProvider(config.affiliateFeed);
   const awinPromotions =
     deps.awinPromotions ?? createAwinPromotionsProvider(config.affiliateFeed);
@@ -458,6 +478,17 @@ export function createApp(deps: CreateAppDeps): Express {
 
   app.use(createForMerchantsRouter(config));
   app.use(createStoresRouter(config));
+  app.use(
+    createStoreCheckRouter({
+      config,
+      registry: storeCheckRegistry,
+      rateLimiter: deps.storeCheckRateLimiter,
+      timeoutMs: deps.storeCheckTimeoutMs,
+      trustedProxyHops: config.trustedProxyHops,
+      maxConcurrentChecks: deps.storeCheckMaxConcurrent,
+      globalMaxConcurrency: deps.storeCheckGlobalMaxConcurrency
+    })
+  );
   app.use(createGuidesRouter(config));
   app.use(createBillingRouter(config, store, otpService, deps.stripeClient));
 

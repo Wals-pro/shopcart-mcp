@@ -1,5 +1,6 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { LookupAddress, LookupOptions } from "node:dns";
-import dns from "node:dns/promises";
+import { Resolver } from "node:dns/promises";
 import net from "node:net";
 import { Agent, fetch as undiciFetch, type Dispatcher, type RequestInit as UndiciRequestInit } from "undici";
 import { isValidLdhHostname } from "./identifiers.js";
@@ -12,7 +13,28 @@ export type SsrfErrorCode =
   | "TOO_MANY_REDIRECTS"
   | "BODY_TOO_LARGE"
   | "TIMEOUT"
+  | "ABORTED"
   | "CONCURRENCY_LIMIT";
+
+export const SELFCHECK_GLOBAL_SLOT_KEY = "selfcheck:__global__";
+export const SELFCHECK_GLOBAL_MAX_CONCURRENT = 24;
+const MAX_DNS_TIMEOUT_MS = 2500;
+
+export interface FetchContext {
+  signal?: AbortSignal;
+  globalKey?: string;
+  globalMaxConcurrent?: number;
+}
+
+const fetchContextStorage = new AsyncLocalStorage<FetchContext>();
+
+export function withFetchContext<T>(ctx: FetchContext, fn: () => T): T {
+  return fetchContextStorage.run(ctx, fn);
+}
+
+export function getActiveFetchContext(): FetchContext | undefined {
+  return fetchContextStorage.getStore();
+}
 
 export class SsrfError extends Error {
   readonly code: SsrfErrorCode;
@@ -40,6 +62,9 @@ export interface SafeFetchOptions {
   truncateOnMaxBytes?: boolean;
   concurrencyKey?: string;
   maxConcurrency?: number;
+  globalConcurrencyKey?: string;
+  globalMaxConcurrency?: number;
+  signal?: AbortSignal;
   lookupFn?: DnsLookupFn;
   validateRedirectUrl?: (url: URL) => void;
   fetchImpl?: (url: string, init: UndiciRequestInit) => Promise<{
@@ -239,12 +264,182 @@ export function normalizeStoreOrigin(storeUrl: string): string {
   return `https://${parsed.hostname.toLowerCase().replace(/\.$/, "")}`;
 }
 
-const defaultLookupFn: DnsLookupFn = async (hostname: string) => {
-  const results = await dns.lookup(hostname, { all: true, verbatim: true });
-  return results.map((r) => ({ address: r.address, family: r.family === 6 ? 6 : 4 }));
-};
+function makeAbortSsrfError(signal: AbortSignal, timeoutMs: number): SsrfError {
+  const reason = signal.reason;
+  if (reason instanceof SsrfError) {
+    return reason;
+  }
+  if (
+    reason instanceof Error &&
+    (reason.name === "TimeoutError" || reason.name === "StoreCheckTimeoutError")
+  ) {
+    return new SsrfError("TIMEOUT", `Request timed out after ${timeoutMs}ms`);
+  }
+  return new SsrfError("ABORTED", "Request was aborted");
+}
+
+function combineAbortSignals(signals: Array<AbortSignal | undefined>): AbortSignal | undefined {
+  const active = signals.filter((s): s is AbortSignal => Boolean(s));
+  if (active.length === 0) return undefined;
+  if (active.length === 1) return active[0];
+  return AbortSignal.any(active);
+}
+
+/**
+ * Non-blocking c-ares DNS lookup using `dns.promises.Resolver` (zero libuv threadpool usage).
+ * Resolves IPv4 (A) and IPv6 (AAAA) records in parallel and cancels immediately on hop timeout or abort.
+ */
+async function resolveHostnameWithCares(
+  hostname: string,
+  budgetMs: number,
+  signal?: AbortSignal
+): Promise<DnsAddress[]> {
+  if (signal?.aborted) {
+    throw makeAbortSsrfError(signal, budgetMs);
+  }
+  if (net.isIP(hostname) !== 0) {
+    return [{ address: hostname, family: net.isIP(hostname) === 6 ? 6 : 4 }];
+  }
+
+  const effectiveBudgetMs = Math.max(50, Math.min(budgetMs, MAX_DNS_TIMEOUT_MS));
+  const resolver = new Resolver({ timeout: effectiveBudgetMs, tries: 1 });
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+
+  const lookupPromise = Promise.allSettled([
+    resolver.resolve4(hostname),
+    resolver.resolve6(hostname)
+  ]).then(([v4Res, v6Res]) => {
+    const out: DnsAddress[] = [];
+    if (v4Res.status === "fulfilled") {
+      for (const address of v4Res.value) {
+        if (net.isIP(address) === 4) {
+          out.push({ address, family: 4 });
+        }
+      }
+    }
+    if (v6Res.status === "fulfilled") {
+      for (const address of v6Res.value) {
+        if (net.isIP(address) === 6) {
+          out.push({ address, family: 6 });
+        }
+      }
+    }
+    if (out.length === 0) {
+      const reasons: string[] = [];
+      if (v4Res.status === "rejected") {
+        reasons.push(v4Res.reason instanceof Error ? v4Res.reason.message : String(v4Res.reason));
+      }
+      if (v6Res.status === "rejected") {
+        reasons.push(v6Res.reason instanceof Error ? v6Res.reason.message : String(v6Res.reason));
+      }
+      throw new SsrfError(
+        "DNS_FAILED",
+        `DNS lookup failed for ${hostname}${reasons.length ? `: ${reasons[0]}` : ""}`
+      );
+    }
+    return out;
+  });
+
+  // Prevent unhandled rejections if the race settles via timeout/abort first
+  lookupPromise.catch(() => undefined);
+
+  const cancelPromise = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      try {
+        resolver.cancel();
+      } catch {
+        // ignore cancel errors on already-finished resolvers
+      }
+      reject(new SsrfError("TIMEOUT", `DNS lookup timed out after ${effectiveBudgetMs}ms`));
+    }, effectiveBudgetMs);
+
+    if (signal) {
+      onAbort = () => {
+        try {
+          resolver.cancel();
+        } catch {
+          // ignore
+        }
+        reject(makeAbortSsrfError(signal, effectiveBudgetMs));
+      };
+      if (signal.aborted) {
+        onAbort();
+      } else {
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+    }
+  });
+
+  try {
+    return await Promise.race([lookupPromise, cancelPromise]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+    if (signal && onAbort) {
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
+}
+
+async function resolveWithCustomLookup(
+  lookupFn: DnsLookupFn,
+  hostname: string,
+  budgetMs: number,
+  signal?: AbortSignal
+): Promise<DnsAddress[]> {
+  if (signal?.aborted) {
+    throw makeAbortSsrfError(signal, budgetMs);
+  }
+  const effectiveBudgetMs = Math.max(10, Math.min(budgetMs, MAX_DNS_TIMEOUT_MS));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+
+  const lookupPromise = Promise.resolve().then(() => lookupFn(hostname));
+  lookupPromise.catch(() => undefined);
+
+  const cancelPromise = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new SsrfError("TIMEOUT", `DNS lookup timed out after ${effectiveBudgetMs}ms`));
+    }, effectiveBudgetMs);
+
+    if (signal) {
+      onAbort = () => {
+        reject(makeAbortSsrfError(signal, effectiveBudgetMs));
+      };
+      if (signal.aborted) {
+        onAbort();
+      } else {
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+    }
+  });
+
+  try {
+    return await Promise.race([lookupPromise, cancelPromise]);
+  } catch (err) {
+    if (err instanceof SsrfError) throw err;
+    throw new SsrfError(
+      "DNS_FAILED",
+      `DNS lookup failed for ${hostname}: ${err instanceof Error ? err.message : String(err)}`
+    );
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+    if (signal && onAbort) {
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
+}
 
 const inFlightByKey = new Map<string, number>();
+
+export function getInFlightSlotCount(key: string): number {
+  return inFlightByKey.get(key) ?? 0;
+}
 
 function acquireSlot(key: string, maxConcurrency: number): () => void {
   const current = inFlightByKey.get(key) ?? 0;
@@ -262,6 +457,29 @@ function acquireSlot(key: string, maxConcurrency: number): () => void {
     const next = (inFlightByKey.get(key) ?? 1) - 1;
     if (next <= 0) inFlightByKey.delete(key);
     else inFlightByKey.set(key, next);
+  };
+}
+
+function acquireSlots(
+  primaryKey: string,
+  primaryMax: number,
+  globalKey?: string,
+  globalMax?: number
+): () => void {
+  const releasePrimary = acquireSlot(primaryKey, primaryMax);
+  if (!globalKey || globalKey === primaryKey || !globalMax || globalMax <= 0) {
+    return releasePrimary;
+  }
+  let releaseGlobal: () => void;
+  try {
+    releaseGlobal = acquireSlot(globalKey, globalMax);
+  } catch (err) {
+    releasePrimary();
+    throw err;
+  }
+  return () => {
+    releaseGlobal();
+    releasePrimary();
   };
 }
 
@@ -290,11 +508,19 @@ function createPinnedAgent(pinned: DnsAddress): Agent {
 async function readBoundedBody(
   res: { body: AsyncIterable<Uint8Array> | null; arrayBuffer?: () => Promise<ArrayBuffer> },
   maxBytes: number,
-  truncateOnMaxBytes = false
+  truncateOnMaxBytes = false,
+  signal?: AbortSignal,
+  timeoutMs = 6000
 ): Promise<Buffer> {
+  if (signal?.aborted) {
+    throw makeAbortSsrfError(signal, timeoutMs);
+  }
   if (!res.body) {
     if (res.arrayBuffer) {
       const ab = await res.arrayBuffer();
+      if (signal?.aborted) {
+        throw makeAbortSsrfError(signal, timeoutMs);
+      }
       if (ab.byteLength > maxBytes) {
         if (truncateOnMaxBytes) {
           return Buffer.from(ab, 0, maxBytes);
@@ -308,6 +534,9 @@ async function readBoundedBody(
   const chunks: Buffer[] = [];
   let total = 0;
   for await (const chunk of res.body) {
+    if (signal?.aborted) {
+      throw makeAbortSsrfError(signal, timeoutMs);
+    }
     const nextTotal = total + chunk.byteLength;
     if (nextTotal > maxBytes) {
       if (truncateOnMaxBytes) {
@@ -333,26 +562,40 @@ export async function safeFetch(
   const timeoutMs = options.timeoutMs ?? 6000;
   const maxRedirects = options.maxRedirects ?? 3;
   const maxBytes = options.maxBytes ?? 1_048_576;
-  const lookupFn = options.lookupFn ?? defaultLookupFn;
   const concurrencyKey = options.concurrencyKey ?? "global";
   const maxConcurrency = options.maxConcurrency ?? 8;
 
-  const release = acquireSlot(concurrencyKey, maxConcurrency);
+  const fetchCtx = getActiveFetchContext();
+  const callerSignal = combineAbortSignals([options.signal, fetchCtx?.signal]);
+  if (callerSignal?.aborted) {
+    throw makeAbortSsrfError(callerSignal, timeoutMs);
+  }
+
+  const globalKey =
+    options.globalConcurrencyKey ??
+    fetchCtx?.globalKey ??
+    (concurrencyKey.startsWith("selfcheck:") ? SELFCHECK_GLOBAL_SLOT_KEY : undefined);
+  const globalMax =
+    options.globalMaxConcurrency ??
+    fetchCtx?.globalMaxConcurrent ??
+    (globalKey ? SELFCHECK_GLOBAL_MAX_CONCURRENT : undefined);
+
+  const release = acquireSlots(concurrencyKey, maxConcurrency, globalKey, globalMax);
   try {
     let currentUrl = validateExternalUrl(rawUrl);
     let method = options.method ?? "GET";
     let body = options.body;
 
     for (let hop = 0; hop <= maxRedirects; hop++) {
-      let addresses: DnsAddress[];
-      try {
-        addresses = await lookupFn(currentUrl.hostname);
-      } catch (err) {
-        throw new SsrfError(
-          "DNS_FAILED",
-          `DNS lookup failed for ${currentUrl.hostname}: ${err instanceof Error ? err.message : String(err)}`
-        );
+      if (callerSignal?.aborted) {
+        throw makeAbortSsrfError(callerSignal, timeoutMs);
       }
+
+      const hopStart = Date.now();
+      const addresses = options.lookupFn
+        ? await resolveWithCustomLookup(options.lookupFn, currentUrl.hostname, timeoutMs, callerSignal)
+        : await resolveHostnameWithCares(currentUrl.hostname, timeoutMs, callerSignal);
+
       if (!addresses.length) {
         throw new SsrfError("DNS_FAILED", `No DNS records found for ${currentUrl.hostname}`);
       }
@@ -365,6 +608,18 @@ export async function safeFetch(
         }
       }
 
+      if (callerSignal?.aborted) {
+        throw makeAbortSsrfError(callerSignal, timeoutMs);
+      }
+
+      const remainingHopMs = timeoutMs - (Date.now() - hopStart);
+      if (remainingHopMs <= 0) {
+        throw new SsrfError("TIMEOUT", `Request timed out after ${timeoutMs}ms`);
+      }
+
+      const hopTimeoutSignal = AbortSignal.timeout(remainingHopMs);
+      const effectiveSignal = combineAbortSignals([hopTimeoutSignal, callerSignal])!;
+
       // Prefer IPv4 when available for better compatibility on Cloud Run / Shopify
       const pinned = addresses.find((a) => a.family === 4) ?? addresses[0]!;
       const agent = options.fetchImpl ? undefined : createPinnedAgent(pinned);
@@ -375,7 +630,7 @@ export async function safeFetch(
           headers: options.headers,
           body: method === "GET" || method === "HEAD" ? undefined : body,
           redirect: "manual",
-          signal: AbortSignal.timeout(timeoutMs),
+          signal: effectiveSignal,
           dispatcher: agent as unknown as Dispatcher
         };
 
@@ -413,7 +668,13 @@ export async function safeFetch(
         const bodyBuffer =
           method === "HEAD"
             ? Buffer.alloc(0)
-            : await readBoundedBody(res, maxBytes, Boolean(options.truncateOnMaxBytes));
+            : await readBoundedBody(
+                res,
+                maxBytes,
+                Boolean(options.truncateOnMaxBytes),
+                effectiveSignal,
+                timeoutMs
+              );
         const contentType = res.headers.get("content-type") ?? "";
         const selectedHeaders: Record<string, string> = {};
         for (const key of [
@@ -441,13 +702,20 @@ export async function safeFetch(
         };
       } catch (err) {
         if (err instanceof SsrfError) throw err;
-        if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+        if (callerSignal?.aborted) {
+          throw makeAbortSsrfError(callerSignal, timeoutMs);
+        }
+        if (
+          hopTimeoutSignal.aborted ||
+          (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError"))
+        ) {
           throw new SsrfError("TIMEOUT", `Request timed out after ${timeoutMs}ms`);
         }
         throw err;
       } finally {
         if (agent) {
-          await agent.close().catch(() => undefined);
+          const teardown = effectiveSignal.aborted ? agent.destroy() : agent.close();
+          await teardown.catch(() => undefined);
         }
       }
     }

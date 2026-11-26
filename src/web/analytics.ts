@@ -8,6 +8,7 @@ export type AnalyticsPageType =
   | "guides_index"
   | "for_merchants"
   | "stores_directory"
+  | "store_check"
   | "billing"
   | "oauth"
   | "legal";
@@ -80,6 +81,24 @@ export function buildGuidesCsp(ga4MeasurementId: string | undefined): string {
     "style-src 'self'",
     imgSrc,
     connectSrc,
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'"
+  ].join("; ");
+}
+
+export function buildStoreCheckCsp(ga4MeasurementId: string | undefined): string {
+  const enabled = hasValidGa4Id(ga4MeasurementId);
+  const scriptSrc = enabled ? `script-src 'self' ${GA4_CSP_SCRIPT_SRC}` : "script-src 'self'";
+  const imgSrc = enabled ? `img-src 'self' data: ${GA4_CSP_IMG_SRC}` : "img-src 'self' data:";
+  const connectSrc = enabled ? `connect-src 'self' ${GA4_CSP_CONNECT_SRC}` : "connect-src 'self'";
+  return [
+    "default-src 'self'",
+    scriptSrc,
+    "style-src 'self'",
+    imgSrc,
+    connectSrc,
+    "form-action 'self'",
     "object-src 'none'",
     "base-uri 'self'",
     "frame-ancestors 'none'"

@@ -1,11 +1,19 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  getInFlightSlotCount,
   isBlockedIp,
   normalizeStoreOrigin,
   safeFetch,
+  SELFCHECK_GLOBAL_SLOT_KEY,
   SsrfError,
-  validateExternalUrl
+  validateExternalUrl,
+  withFetchContext
 } from "../src/security/ssrf.js";
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("SSRF guardrails", () => {
   it("blocks private, loopback, link-local, metadata, and reserved IPv4 addresses", () => {
@@ -123,5 +131,97 @@ describe("SSRF guardrails", () => {
         })
       })
     ).rejects.toMatchObject({ code: "BODY_TOO_LARGE" });
+  });
+
+  it("uses non-blocking c-ares Resolver (zero dns.lookup) and enforces timeout/abort on hanging DNS lookups while releasing slots", async () => {
+    const ssrfSource = fs.readFileSync(path.join(REPO_ROOT, "src", "security", "ssrf.ts"), "utf8");
+    expect(ssrfSource).not.toMatch(/\bdns\.lookup\b/);
+    expect(ssrfSource).toContain("new Resolver(");
+
+    // 1. Hanging DNS lookup aborts within hop budget and releases both per-key and global SSRF slots
+    const hangingLookup = () => new Promise<Array<{ address: string; family: 4 | 6 }>>(() => undefined);
+    const start = Date.now();
+    await expect(
+      safeFetch("https://tarpit-dns.example/meta.json", {
+        timeoutMs: 60,
+        concurrencyKey: "selfcheck:dns-timeout-test",
+        lookupFn: hangingLookup
+      })
+    ).rejects.toMatchObject({ code: "TIMEOUT" });
+    expect(Date.now() - start).toBeLessThan(1000);
+    expect(getInFlightSlotCount("selfcheck:dns-timeout-test")).toBe(0);
+    expect(getInFlightSlotCount(SELFCHECK_GLOBAL_SLOT_KEY)).toBe(0);
+
+    // 2. AbortSignal via withFetchContext aborts a hanging DNS lookup immediately and releases slots
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(new Error("client_disconnected")), 25);
+    await expect(
+      withFetchContext({ signal: ac.signal }, () =>
+        safeFetch("https://tarpit-dns-abort.example/meta.json", {
+          timeoutMs: 5000,
+          concurrencyKey: "selfcheck:dns-abort-test",
+          lookupFn: hangingLookup
+        })
+      )
+    ).rejects.toMatchObject({ code: "ABORTED" });
+    expect(getInFlightSlotCount("selfcheck:dns-abort-test")).toBe(0);
+    expect(getInFlightSlotCount(SELFCHECK_GLOBAL_SLOT_KEY)).toBe(0);
+  });
+
+  it("enforces global selfcheck slot cap across distinct client keys and rolls back primary slot on rejection", async () => {
+    const resolvers: Array<() => void> = [];
+    const lookupFn = async () => [{ address: "23.227.38.65", family: 4 as const }];
+    const deferredFetch = async () => {
+      await new Promise<void>((resolve) => {
+        resolvers.push(resolve);
+      });
+      return {
+        status: 200,
+        headers: { get: () => "application/json" },
+        body: null,
+        arrayBuffer: async () => new TextEncoder().encode("{}").buffer
+      };
+    };
+
+    const customGlobalKey = "selfcheck:__test_global__";
+    const p1 = safeFetch("https://shop-a.example/meta.json", {
+      concurrencyKey: "selfcheck:203.0.113.1",
+      globalConcurrencyKey: customGlobalKey,
+      globalMaxConcurrency: 2,
+      lookupFn,
+      fetchImpl: deferredFetch
+    });
+    const p2 = safeFetch("https://shop-b.example/meta.json", {
+      concurrencyKey: "selfcheck:2001:db8:abcd:12::/64",
+      globalConcurrencyKey: customGlobalKey,
+      globalMaxConcurrency: 2,
+      lookupFn,
+      fetchImpl: deferredFetch
+    });
+
+    for (let i = 0; i < 30 && resolvers.length < 2; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(resolvers.length).toBe(2);
+    expect(getInFlightSlotCount(customGlobalKey)).toBe(2);
+
+    // 3rd request from a completely different client key hits the global cap and must NOT leak its primary slot
+    await expect(
+      safeFetch("https://shop-c.example/meta.json", {
+        concurrencyKey: "selfcheck:203.0.113.99",
+        globalConcurrencyKey: customGlobalKey,
+        globalMaxConcurrency: 2,
+        lookupFn,
+        fetchImpl: deferredFetch
+      })
+    ).rejects.toMatchObject({ code: "CONCURRENCY_LIMIT" });
+    expect(getInFlightSlotCount("selfcheck:203.0.113.99")).toBe(0);
+    expect(getInFlightSlotCount(customGlobalKey)).toBe(2);
+
+    for (const r of resolvers) r();
+    await Promise.all([p1, p2]);
+    expect(getInFlightSlotCount("selfcheck:203.0.113.1")).toBe(0);
+    expect(getInFlightSlotCount("selfcheck:2001:db8:abcd:12::/64")).toBe(0);
+    expect(getInFlightSlotCount(customGlobalKey)).toBe(0);
   });
 });

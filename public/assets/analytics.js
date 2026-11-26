@@ -16,11 +16,27 @@
     "guides_index",
     "for_merchants",
     "stores_directory",
+    "store_check",
     "billing",
     "oauth",
     "legal"
   ]);
   const ALLOWED_FOR_MERCHANTS_CTAS = new Set(["self_check", "book_call"]);
+  const ALLOWED_CHECK_PLATFORMS = new Set([
+    "shopify",
+    "woocommerce",
+    "shopware",
+    "magento",
+    "bigcommerce",
+    "amazon",
+    "jsonld",
+    "unknown"
+  ]);
+  const ALLOWED_CHECK_STATUSES = new Set([
+    "ai_ready",
+    "partially_readable",
+    "not_publicly_readable"
+  ]);
   const ALLOWED_CLIENTS = new Set([
     "claude",
     "chatgpt",
@@ -549,6 +565,22 @@
         transport_type: "beacon"
       });
     }
+  });
+
+  // Storefront self-check anonymous event (strict allowlisted categorical fields only; ZERO URLs/PII)
+  document.addEventListener("shopcart:store_check_run", (event) => {
+    if (!analyticsEnabled) return;
+    const detail = event && typeof event === "object" ? event.detail : null;
+    if (!detail || typeof detail !== "object") return;
+    const rawPlatform = typeof detail.platform === "string" ? detail.platform.trim().toLowerCase() : "";
+    const rawStatus = typeof detail.status === "string" ? detail.status.trim().toLowerCase() : "";
+    const platform = ALLOWED_CHECK_PLATFORMS.has(rawPlatform) ? rawPlatform : "unknown";
+    if (!ALLOWED_CHECK_STATUSES.has(rawStatus)) return;
+    trackEvent("storefront_self_check_run", {
+      platform,
+      status: rawStatus,
+      has_product_url: Boolean(detail.has_product_url)
+    });
   });
 
   // =========================================================================
