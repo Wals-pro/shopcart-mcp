@@ -31,6 +31,7 @@ import { createForMerchantsRouter } from "./web/for-merchants.js";
 import { createGuidesRouter } from "./web/guides.js";
 import { renderLandingPage } from "./web/landing.js";
 import { renderNotFoundPage, renderPrivacyPage, renderSecurityTxt, renderTermsPage } from "./web/legal.js";
+import { createStoresRouter } from "./web/stores.js";
 
 export interface CreateAppDeps {
   config: AppConfig;
@@ -94,6 +95,16 @@ const STATIC_LANDING_ASSETS: Array<{ route: string; file: string; contentType: s
     route: "/assets/legal.css",
     file: "assets/legal.css",
     contentType: "text/css; charset=utf-8"
+  },
+  {
+    route: "/assets/stores.css",
+    file: "assets/stores.css",
+    contentType: "text/css; charset=utf-8"
+  },
+  {
+    route: "/assets/stores.js",
+    file: "assets/stores.js",
+    contentType: "application/javascript; charset=utf-8"
   }
 ];
 
@@ -446,6 +457,7 @@ export function createApp(deps: CreateAppDeps): Express {
   });
 
   app.use(createForMerchantsRouter(config));
+  app.use(createStoresRouter(config));
   app.use(createGuidesRouter(config));
   app.use(createBillingRouter(config, store, otpService, deps.stripeClient));
 

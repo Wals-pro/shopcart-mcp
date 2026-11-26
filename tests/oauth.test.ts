@@ -310,6 +310,7 @@ describe("OAuth 2.1 compliance & MCP auth", () => {
     }>;
     const toolNames = tools.map((t) => t.name);
     expect(toolNames).toEqual([
+      "discover_stores",
       "inspect_store",
       "list_collections",
       "search_products",
@@ -325,7 +326,7 @@ describe("OAuth 2.1 compliance & MCP auth", () => {
       expect(tool.title && tool.title.length > 0 && tool.title.length <= 64).toBe(true);
       expect(tool.annotations?.readOnlyHint).toBe(true);
       expect(tool.annotations?.destructiveHint).toBe(false);
-      expect(tool.annotations?.openWorldHint).toBe(true);
+      expect(tool.annotations?.openWorldHint).toBe(tool.name !== "discover_stores");
     }
 
     // Verify initialize returns server instructions

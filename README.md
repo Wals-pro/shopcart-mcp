@@ -8,7 +8,7 @@ Connect **Claude.ai**, **ChatGPT**, **Google Gemini**, **Cursor**, **Claude Code
 
 > **Independent open-source tool by wals.pro**, not affiliated with or endorsed by Shopify, WooCommerce (Automattic), Amazon, BigCommerce, Shopware, or Adobe (Magento). All trademarks belong to their respective owners.
 
-Website & hosted server: <https://shopcart.wals.pro> · Guides: <https://shopcart.wals.pro/guides> · For AI agents: [`/llms.txt`](https://shopcart.wals.pro/llms.txt)
+Website & hosted server: <https://shopcart.wals.pro> · Store Directory: <https://shopcart.wals.pro/stores> · Guides: <https://shopcart.wals.pro/guides> · For AI agents: [`/llms.txt`](https://shopcart.wals.pro/llms.txt)
 
 ---
 
@@ -47,8 +47,9 @@ What the shopper gets differs by platform, and ShopCart MCP says so honestly in 
 
 ### Tools
 
-All 10 core tools are read-only (`readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true`):
+All 11 core tools are read-only (`readOnlyHint: true, destructiveHint: false, idempotentHint: true`):
 
+0. **`discover_stores`** — Instant in-memory search across ShopCart's curated, live-verified global store directory (12 categories, DACH + US/UK/EU, multi-platform) whenever the user has not named a specific store domain.
 1. **`inspect_store`** — Detects the platform (Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2, or Universal JSON-LD), resolves currency/country, WAF restrictions, and catalog capabilities including Shopify Storefront MCP and UCP endpoints.
 2. **`list_collections`** — Lists a Shopify store's public collections and flags Sale, Black Friday, and Bestseller collections.
 3. **`search_products`** — WAF-resilient product search with normalized prices, availability/price filters, `collection` filter, and `sort_by` (`relevance`, `price_asc`, `price_desc`, `discount_desc`).
@@ -60,7 +61,7 @@ All 10 core tools are read-only (`readOnlyHint: true, destructiveHint: false, id
 9. **`find_hot_deals`** — Discovers active partner promotions and vouchers (when configured) alongside 1-click regional deal community search links (Preisjäger, mydealz, HotUKDeals, Dealabs, Slickdeals).
 10. **`match_visual_product`** — Zero-cost visual product search: accepts structured attributes extracted by your vision model from a user photo (`product_type`, `brand`, `model_or_text`, `ean`, `color`, `material`, `style_keywords`), queries up to 5 validated `target_stores` in parallel (plus configured partner feeds / exact EAN lookup), and returns deterministically ranked matches with confidence scores and web-search fallback queries.
 
-Self-hosted only: an optional eleventh tool, `search_affiliate_deals`, appears when you configure your own Awin product feed. It is not enabled on the hosted server.
+Self-hosted only: an optional twelfth tool, `search_affiliate_deals`, appears when you configure your own Awin product feed. It is not enabled on the hosted server.
 
 ### Google Gemini Setup (Web, CLI, Enterprise & SDK)
 

@@ -119,6 +119,7 @@ export function createMcpbManifest(version) {
       "Connect Claude Desktop directly to public Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2, Universal JSON-LD storefronts, and Amazon marketplaces with zero login, zero API keys required for core features, and zero telemetry.",
       "",
       "**Included read-only tools:**",
+      "- `discover_stores` — Instant in-memory search across ShopCart's curated, live-verified global store directory (12 categories, DACH + US/UK/EU, multi-platform) whenever no store domain is specified.",
       "- `inspect_store` — Detect platform (Amazon, Shopify incl. UCP, WooCommerce, BigCommerce, Shopware 6, Magento 2, or Universal JSON-LD), currency, country, WAF behavior, and capabilities.",
       "- `list_collections` — Browse Shopify store collections and automatically highlight Sale, Black Friday, Bestseller, and seasonal deal collections.",
       "- `search_products` — Search public product catalogs across supported storefronts (or Amazon via optional PA-API/Keepa) with availability, price, and discount sorting (`discount_desc`, `price_asc`, `price_desc`).",
@@ -174,6 +175,11 @@ export function createMcpbManifest(version) {
       }
     },
     tools: [
+      {
+        name: "discover_stores",
+        description:
+          "Search ShopCart's curated, live-verified global online store directory (0 ms in-memory lookup, zero scraping) by keyword, category, country (DE, AT, CH, DACH, US, UK, EU), platform, and cart_only when no store domain is named."
+      },
       {
         name: "inspect_store",
         description:

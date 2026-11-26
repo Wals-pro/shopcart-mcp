@@ -6,6 +6,7 @@ export type AnalyticsPageType =
   | "guide"
   | "guides_index"
   | "for_merchants"
+  | "stores_directory"
   | "billing"
   | "oauth"
   | "legal";
