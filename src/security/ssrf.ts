@@ -36,6 +36,7 @@ export interface SafeFetchOptions {
   timeoutMs?: number;
   maxRedirects?: number;
   maxBytes?: number;
+  truncateOnMaxBytes?: boolean;
   concurrencyKey?: string;
   maxConcurrency?: number;
   lookupFn?: DnsLookupFn;
@@ -284,12 +285,16 @@ function createPinnedAgent(pinned: DnsAddress): Agent {
 
 async function readBoundedBody(
   res: { body: AsyncIterable<Uint8Array> | null; arrayBuffer?: () => Promise<ArrayBuffer> },
-  maxBytes: number
+  maxBytes: number,
+  truncateOnMaxBytes = false
 ): Promise<Buffer> {
   if (!res.body) {
     if (res.arrayBuffer) {
       const ab = await res.arrayBuffer();
       if (ab.byteLength > maxBytes) {
+        if (truncateOnMaxBytes) {
+          return Buffer.from(ab, 0, maxBytes);
+        }
         throw new SsrfError("BODY_TOO_LARGE", `Upstream response exceeded ${maxBytes} bytes`);
       }
       return Buffer.from(ab);
@@ -299,10 +304,19 @@ async function readBoundedBody(
   const chunks: Buffer[] = [];
   let total = 0;
   for await (const chunk of res.body) {
-    total += chunk.byteLength;
-    if (total > maxBytes) {
+    const nextTotal = total + chunk.byteLength;
+    if (nextTotal > maxBytes) {
+      if (truncateOnMaxBytes) {
+        const remaining = maxBytes - total;
+        if (remaining > 0) {
+          chunks.push(Buffer.from(chunk.subarray(0, remaining)));
+          total += remaining;
+        }
+        break;
+      }
       throw new SsrfError("BODY_TOO_LARGE", `Upstream response exceeded ${maxBytes} bytes`);
     }
+    total = nextTotal;
     chunks.push(Buffer.from(chunk));
   }
   return Buffer.concat(chunks, total);
@@ -393,7 +407,9 @@ export async function safeFetch(
         }
 
         const bodyBuffer =
-          method === "HEAD" ? Buffer.alloc(0) : await readBoundedBody(res, maxBytes);
+          method === "HEAD"
+            ? Buffer.alloc(0)
+            : await readBoundedBody(res, maxBytes, Boolean(options.truncateOnMaxBytes));
         const contentType = res.headers.get("content-type") ?? "";
         const selectedHeaders: Record<string, string> = {};
         for (const key of [

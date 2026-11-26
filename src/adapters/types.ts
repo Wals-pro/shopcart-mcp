@@ -221,6 +221,45 @@ export interface AdditionalCartLink {
   cart_url: string;
 }
 
+export type DiscountSource =
+  | "homepage_announcement"
+  | "homepage_banner"
+  | "homepage_text"
+  | "collection_description"
+  | "partner_rule";
+
+export type DiscountConfidence = "high" | "medium";
+
+export interface ExtractedDiscountCode {
+  code: string;
+  context_snippet: string;
+  source: DiscountSource;
+  estimated_discount_text?: string;
+  confidence: DiscountConfidence;
+}
+
+export interface AutomaticDeal {
+  text: string;
+  source: Exclude<DiscountSource, "partner_rule">;
+}
+
+export interface FindStoreDiscountsOptions {
+  timeoutMs?: number;
+  fastMode?: boolean;
+  forceRefresh?: boolean;
+  concurrencyKey?: string;
+}
+
+export interface StoreDiscountsResult {
+  store_origin: string;
+  codes: ExtractedDiscountCode[];
+  automatic_deals: AutomaticDeal[];
+  checked_sources: string[];
+  source_notice: string;
+  disclaimer: string;
+  notices?: string[];
+}
+
 export type CartMode = "cart_permalink" | "checkout_permalink" | "direct_product_link";
 
 export interface CartLinkResult {
@@ -230,6 +269,10 @@ export interface CartLinkResult {
   cart_mode?: CartMode;
   items: CartLinkItemResult[];
   additional_cart_links?: AdditionalCartLink[];
+  applied_discount_code?: string;
+  discount_source?: DiscountSource | "user_supplied";
+  discount_context?: string;
+  discount_notice?: string;
   affiliate_disclosure?: boolean;
   warnings: string[];
   next_step: string;
@@ -239,6 +282,10 @@ export interface StoreAdapter {
   readonly platform: string;
   detect(origin: string, concurrencyKey?: string): Promise<StoreInfo | null>;
   listCollections?(origin: string, opts?: ListCollectionsOptions): Promise<ListCollectionsResult>;
+  findStoreDiscounts?(
+    origin: string,
+    opts?: FindStoreDiscountsOptions
+  ): Promise<StoreDiscountsResult>;
   searchProducts(origin: string, opts: SearchProductsOptions): Promise<SearchProductsResult>;
   getProduct(
     origin: string,

@@ -62,6 +62,7 @@ export interface AttributionConfig {
 
 export interface AttributionLinkOptions {
   kind?: "cart" | "product" | "generic";
+  skipRuleDiscount?: boolean;
 }
 
 export interface AttributedLinkResult {
@@ -417,8 +418,8 @@ export function applyAttribution(
       parsed.searchParams.set("ref", matchedRule.ref);
       monetized = true;
     }
-    // Preserve any user-supplied discount code on cart permalinks; apply rule discount only when absent
-    if (matchedRule.discount && !parsed.searchParams.has("discount")) {
+    // Preserve any user-supplied discount code on cart permalinks; apply rule discount only when absent and not opted out
+    if (matchedRule.discount && !opts.skipRuleDiscount && !parsed.searchParams.has("discount")) {
       parsed.searchParams.set("discount", matchedRule.discount);
       monetized = true;
     }

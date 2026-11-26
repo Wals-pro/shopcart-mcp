@@ -601,7 +601,7 @@ describe("ShopifyAdapter.listCollections & collection search + discount_desc sor
     expect(detail.product.variants[1]!.savings).toBeNull();
   });
 
-  it("registers all 6 tools on createShopcartMcpServer with valid read-only annotations and <= 64 char titles", () => {
+  it("registers all 7 tools on createShopcartMcpServer with valid read-only annotations and <= 64 char titles", () => {
     const adapter = new ShopifyAdapter(new ShopifyClient(makeFixtureFetcher({})));
     const server = createShopcartMcpServer({ registry: new AdapterRegistry([adapter]) });
     // Ensure server constructs cleanly with updated tools and instructions

@@ -19,6 +19,7 @@ const EXPECTED_TOOLS = [
   "search_products",
   "get_product",
   "get_store_policies",
+  "find_store_discounts",
   "create_cart_link"
 ];
 
