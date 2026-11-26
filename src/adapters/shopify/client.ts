@@ -1,5 +1,6 @@
 import {
   safeFetch,
+  SsrfError,
   validateExternalUrl,
   type SafeFetchOptions,
   type SafeFetchResponse
@@ -50,6 +51,10 @@ function hasExpectedPathSuffix(rawUrl: string | undefined, suffix: string): bool
 
 function isShopifyMetaPayload(data: MetaJsonPayload): boolean {
   return Boolean(data.currency || data.myshopify_domain || data.shop_id);
+}
+
+function isTransientFetchError(err: unknown): boolean {
+  return err instanceof SsrfError && (err.code === "CONCURRENCY_LIMIT" || err.code === "TIMEOUT");
 }
 
 function isInternalOrCheckoutHost(hostname: string): boolean {
@@ -279,6 +284,8 @@ export class ShopifyClient {
       detectedShopify: false
     };
     let metaJsonBlocked = false;
+    let transientFailure = false;
+    let concurrencySaturated = false;
 
     // 1. Primary: /meta.json (follows 301/308 redirects and exposes canonical storefront domain)
     try {
@@ -328,19 +335,29 @@ export class ShopifyClient {
               state.detectedShopify = false;
               this.applyMetaJsonPayload(canonicalMetaRes.data, state);
             }
-          } catch {
+          } catch (err) {
+            if (isTransientFetchError(err)) {
+              transientFailure = true;
+            }
             // Keep working origin if canonical probe fails
           }
         }
       } else if (metaRes.status === 403 || metaRes.status === 401) {
         metaJsonBlocked = true;
       }
-    } catch {
-      metaJsonBlocked = true;
+    } catch (err) {
+      if (isTransientFetchError(err)) {
+        transientFailure = true;
+        if (err instanceof SsrfError && err.code === "CONCURRENCY_LIMIT") {
+          concurrencySaturated = true;
+        }
+      } else {
+        metaJsonBlocked = true;
+      }
     }
 
     // 2. Fallback / verification: /cart.js (survives Cloudflare WAF and reveals apex->www 301 redirects)
-    if (!state.currency || !state.detectedShopify) {
+    if (!concurrencySaturated && (!state.currency || !state.detectedShopify)) {
       try {
         const cartRes = await this.getJson<{
           token?: string;
@@ -363,7 +380,10 @@ export class ShopifyClient {
             canonicalOrigin = cartRedirectOrigin;
           }
         }
-      } catch {
+      } catch (err) {
+        if (isTransientFetchError(err)) {
+          transientFailure = true;
+        }
         // ignore, caller checks detectedShopify
       }
     }
@@ -382,11 +402,15 @@ export class ShopifyClient {
       expiresAt: now + META_CACHE_TTL_MS
     };
 
-    this.setCacheEntry(origin, meta, now);
-    // Only alias canonicalOrigin into the shared cache when it is same-site (apex <-> www)
-    // so an attacker domain cannot poison cached metadata for an unrelated store origin.
-    if (canonicalOrigin !== origin && isSameStoreSite(origin, canonicalOrigin)) {
-      this.setCacheEntry(canonicalOrigin, meta, now);
+    // Never poison or overwrite cached metadata with fallback defaults on transient
+    // CONCURRENCY_LIMIT or TIMEOUT failures.
+    if (!transientFailure) {
+      this.setCacheEntry(origin, meta, now);
+      // Only alias canonicalOrigin into the shared cache when it is same-site (apex <-> www)
+      // so an attacker domain cannot poison cached metadata for an unrelated store origin.
+      if (canonicalOrigin !== origin && isSameStoreSite(origin, canonicalOrigin)) {
+        this.setCacheEntry(canonicalOrigin, meta, now);
+      }
     }
     return meta;
   }

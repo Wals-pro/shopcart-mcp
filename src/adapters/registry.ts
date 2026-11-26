@@ -89,10 +89,14 @@ export class AdapterRegistry {
 
   async resolve(
     origin: string,
-    concurrencyKey?: string
+    concurrencyKey?: string,
+    signal?: AbortSignal
   ): Promise<{ adapter: StoreAdapter; store: StoreInfo | null }> {
     const now = Date.now();
     for (const adapter of this.adapters) {
+      if (signal?.aborted) {
+        throw signal.reason instanceof Error ? signal.reason : new Error("Store resolution aborted");
+      }
       const store = await adapter.detect(origin, concurrencyKey);
       if (store) {
         this.cacheResolution(origin, adapter, store, now);
@@ -125,4 +129,22 @@ export class AdapterRegistry {
 
     return this.getFallback();
   }
+}
+
+/**
+ * Isolated AdapterRegistry for the anonymous public Storefront Self-Check (/api/store-check).
+ * Uses dedicated adapter & client cache instances separate from authenticated /mcp traffic,
+ * and instantiates AmazonAdapter with empty env ({}) so operator PA-API/Keepa quotas can never
+ * be spent by anonymous callers.
+ */
+export function createIsolatedStoreCheckRegistry(): AdapterRegistry {
+  return new AdapterRegistry([
+    new AmazonAdapter({ env: {} }),
+    new ShopifyAdapter(),
+    new WooCommerceAdapter(),
+    new BigCommerceAdapter(),
+    new ShopwareAdapter(),
+    new MagentoAdapter(),
+    new UniversalJsonLdAdapter()
+  ]);
 }

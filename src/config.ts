@@ -15,6 +15,7 @@ import {
 export interface AppConfig {
   port: number;
   appOrigin: string;
+  trustedProxyHops: number;
   storageBackend: "firestore" | "memory";
   gcpProject: string | undefined;
   freeDailyLimit: number;
@@ -95,6 +96,17 @@ export function parseGa4MeasurementId(raw: string | undefined): string | undefin
   return GA4_MEASUREMENT_ID_RE.test(val) ? val : undefined;
 }
 
+export function parseTrustedProxyHops(raw: string | undefined, defaultHops = 1): number {
+  const val = raw?.trim();
+  if (!val) return defaultHops;
+  if (!/^\d+$/.test(val)) return defaultHops;
+  const parsed = Number.parseInt(val, 10);
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 10) {
+    return defaultHops;
+  }
+  return parsed;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const port = Number.parseInt(env.PORT ?? "8080", 10) || 8080;
   const appOrigin = normalizeOrigin(env.APP_ORIGIN ?? `http://localhost:${port}`);
@@ -134,6 +146,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     port,
     appOrigin,
+    trustedProxyHops: parseTrustedProxyHops(env.TRUSTED_PROXY_HOPS, 1),
     storageBackend,
     gcpProject: env.GOOGLE_CLOUD_PROJECT?.trim() || undefined,
     freeDailyLimit,

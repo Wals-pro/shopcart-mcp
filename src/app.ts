@@ -9,7 +9,7 @@ import {
   type AffiliateFeedProvider,
   type AwinPromotionsProvider
 } from "./adapters/affiliate-feed/index.js";
-import { AdapterRegistry } from "./adapters/registry.js";
+import { AdapterRegistry, createIsolatedStoreCheckRegistry } from "./adapters/registry.js";
 import { createBearerAuthMiddleware } from "./auth/bearer.js";
 import { CimdResolver } from "./auth/cimd.js";
 import { EmailOtpService, type EmailSender } from "./auth/email-otp.js";
@@ -39,6 +39,7 @@ export interface CreateAppDeps {
   config: AppConfig;
   store: StorageBackend;
   registry?: AdapterRegistry;
+  storeCheckRegistry?: AdapterRegistry;
   affiliateFeed?: AffiliateFeedProvider;
   awinPromotions?: AwinPromotionsProvider;
   cimdResolver?: CimdResolver;
@@ -47,6 +48,7 @@ export interface CreateAppDeps {
   stripeClient?: BillingStripeClient;
   storeCheckRateLimiter?: StoreCheckRateLimiter;
   storeCheckTimeoutMs?: number;
+  storeCheckMaxConcurrent?: number;
 }
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
@@ -141,6 +143,9 @@ function corsMiddleware(req: Request, res: Response, next: NextFunction): void {
 export function createApp(deps: CreateAppDeps): Express {
   const { config, store } = deps;
   const registry = deps.registry ?? new AdapterRegistry();
+  // Always isolate the anonymous public self-check from the shared MCP AdapterRegistry
+  // (separate caches and AmazonAdapter initialized with empty env so paid quotas cannot be spent).
+  const storeCheckRegistry = deps.storeCheckRegistry ?? createIsolatedStoreCheckRegistry();
   const affiliateFeed = deps.affiliateFeed ?? createAffiliateFeedProvider(config.affiliateFeed);
   const awinPromotions =
     deps.awinPromotions ?? createAwinPromotionsProvider(config.affiliateFeed);
@@ -475,9 +480,11 @@ export function createApp(deps: CreateAppDeps): Express {
   app.use(
     createStoreCheckRouter({
       config,
-      registry,
+      registry: storeCheckRegistry,
       rateLimiter: deps.storeCheckRateLimiter,
-      timeoutMs: deps.storeCheckTimeoutMs
+      timeoutMs: deps.storeCheckTimeoutMs,
+      trustedProxyHops: config.trustedProxyHops,
+      maxConcurrentChecks: deps.storeCheckMaxConcurrent
     })
   );
   app.use(createGuidesRouter(config));

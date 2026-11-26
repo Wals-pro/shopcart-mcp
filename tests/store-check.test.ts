@@ -4,7 +4,9 @@ import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
+import { AmazonAdapter } from "../src/adapters/amazon/adapter.js";
 import { AdapterRegistry } from "../src/adapters/registry.js";
+import { ShopifyClient } from "../src/adapters/shopify/client.js";
 import type {
   GetProductResult,
   StoreAdapter,
@@ -13,12 +15,14 @@ import type {
   StorePoliciesResult
 } from "../src/adapters/types.js";
 import { createApp } from "../src/app.js";
-import { loadConfig } from "../src/config.js";
-import { safeFetch } from "../src/security/ssrf.js";
+import { loadConfig, parseTrustedProxyHops } from "../src/config.js";
+import { safeFetch, SsrfError } from "../src/security/ssrf.js";
 import { MemoryStore } from "../src/store/memory.js";
 import {
   buildStoreCheckAssessment,
+  extractTrustedClientIp,
   INDEPENDENCE_DISCLAIMER,
+  normalizeClientRateLimitKey,
   STORE_CHECK_MAX_BODY_BYTES,
   StoreCheckRateLimiter
 } from "../src/web/store-check-core.js";
@@ -89,6 +93,7 @@ function makeTestApp(opts?: {
   adapters?: StoreAdapter[];
   rateLimiter?: StoreCheckRateLimiter;
   timeoutMs?: number;
+  maxConcurrentChecks?: number;
   extraEnv?: Record<string, string>;
 }) {
   const config = loadConfig({
@@ -98,13 +103,14 @@ function makeTestApp(opts?: {
     PROMO_FREE_PRO_UNTIL: "2026-12-06T23:59:59+01:00",
     ...opts?.extraEnv
   });
-  const registry = opts?.adapters ? new AdapterRegistry(opts.adapters) : new AdapterRegistry();
+  const storeCheckRegistry = opts?.adapters ? new AdapterRegistry(opts.adapters) : undefined;
   const app = createApp({
     config,
     store: new MemoryStore(),
-    registry,
+    storeCheckRegistry,
     storeCheckRateLimiter: opts?.rateLimiter,
-    storeCheckTimeoutMs: opts?.timeoutMs
+    storeCheckTimeoutMs: opts?.timeoutMs,
+    storeCheckMaxConcurrent: opts?.maxConcurrentChecks
   });
   return { config, app };
 }
@@ -699,6 +705,394 @@ describe("POST /api/store-check — Security, Abuse Hardening & Functional API",
 
     expect(res.body.error).toBe("timeout");
     expect(res.body.message).toContain("did not respond");
+  });
+
+  it("never spends operator Amazon PA-API or Keepa budgets via anonymous /api/store-check (isolated registry + skip getProduct)", async () => {
+    const prevEnv = {
+      AMAZON_PAAPI_ACCESS_KEY: process.env.AMAZON_PAAPI_ACCESS_KEY,
+      AMAZON_PAAPI_SECRET_KEY: process.env.AMAZON_PAAPI_SECRET_KEY,
+      AMAZON_ASSOCIATE_TAG_DE: process.env.AMAZON_ASSOCIATE_TAG_DE,
+      KEEPA_API_KEY: process.env.KEEPA_API_KEY
+    };
+    process.env.AMAZON_PAAPI_ACCESS_KEY = "dummy_paapi_access_key";
+    process.env.AMAZON_PAAPI_SECRET_KEY = "dummy_paapi_secret_key";
+    process.env.AMAZON_ASSOCIATE_TAG_DE = "dummytag-21";
+    process.env.KEEPA_API_KEY = "dummy_keepa_key";
+
+    try {
+      // 1. Default isolated production registry ignores process.env Amazon keys completely
+      const { app: prodIsolatedApp } = makeTestApp();
+      const isolatedRes = await request(prodIsolatedApp)
+        .post("/api/store-check")
+        .set("Origin", "https://shopcart.wals.pro")
+        .set("Content-Type", "application/json")
+        .send({
+          storeUrl: "amazon.de",
+          productUrl: "https://www.amazon.de/dp/B08N5WRWNW",
+          lang: "de"
+        })
+        .expect(200);
+
+      expect(isolatedRes.body.platform).toBe("amazon");
+      expect(isolatedRes.body.status).toBe("partially_readable");
+      expect(isolatedRes.body.productCheck.ok).toBe(false);
+      expect(isolatedRes.body.productCheck.errorMessage).toMatch(/PA-API|Keepa/);
+      // Search capability must NOT claim liveSearch is active even with process.env keys set
+      expect(
+        isolatedRes.body.capabilities.find((c: { key: string }) => c.key === "product_search")?.state
+      ).toBe("limited");
+
+      // 2. Defense-in-depth: even if an AmazonAdapter had a live fetcher/credentials, runStoreCheck skips getProduct
+      let providerCalls = 0;
+      const spyAmazonAdapter = new AmazonAdapter({
+        env: {
+          AMAZON_PAAPI_ACCESS_KEY: "dummy_paapi_access_key",
+          AMAZON_PAAPI_SECRET_KEY: "dummy_paapi_secret_key",
+          AMAZON_ASSOCIATE_TAG_DE: "dummytag-21",
+          KEEPA_API_KEY: "dummy_keepa_key"
+        },
+        fetcher: async () => {
+          providerCalls += 1;
+          throw new Error("Paid Amazon provider must never be called from /api/store-check");
+        }
+      });
+
+      const { app: spyApp } = makeTestApp({ adapters: [spyAmazonAdapter] });
+      const spyRes = await request(spyApp)
+        .post("/api/store-check")
+        .set("Origin", "https://shopcart.wals.pro")
+        .set("Content-Type", "application/json")
+        .send({
+          storeUrl: "amazon.de",
+          productUrl: "https://www.amazon.de/dp/B08N5WRWNW",
+          lang: "en"
+        })
+        .expect(200);
+
+      expect(providerCalls).toBe(0);
+      expect(spyRes.body.platform).toBe("amazon");
+      expect(spyRes.body.productCheck.ok).toBe(false);
+      expect(spyRes.body.productCheck.errorMessage).toMatch(/PA-API|Keepa/);
+    } finally {
+      for (const [key, val] of Object.entries(prevEnv)) {
+        if (val === undefined) delete process.env[key];
+        else process.env[key] = val;
+      }
+    }
+  });
+
+  it("does not cache poisoned Shopify metadata defaults or overwrite valid cache on transient CONCURRENCY_LIMIT / TIMEOUT errors", async () => {
+    // Case A: Cold cache + CONCURRENCY_LIMIT -> must NOT cache USD/wafRestricted defaults
+    let failMode: "concurrency" | "timeout" | "ok" = "concurrency";
+    const clientA = new ShopifyClient(async (url) => {
+      if (failMode === "concurrency") {
+        throw new SsrfError("CONCURRENCY_LIMIT", "Too many concurrent requests");
+      }
+      if (failMode === "timeout") {
+        throw new SsrfError("TIMEOUT", "Request timed out");
+      }
+      return {
+        status: 200,
+        url,
+        contentType: "application/json",
+        headers: {},
+        bodyBuffer: Buffer.from(
+          JSON.stringify({
+            name: "Clean DE Shop",
+            currency: "EUR",
+            country: "DE",
+            myshopify_domain: "clean-de.myshopify.com"
+          })
+        ),
+        bodyText: JSON.stringify({
+          name: "Clean DE Shop",
+          currency: "EUR",
+          country: "DE",
+          myshopify_domain: "clean-de.myshopify.com"
+        })
+      };
+    });
+
+    const transientMeta = await clientA.resolveDomainMetadata("https://clean-de.example", {
+      concurrencyKey: "selfcheck:attacker"
+    });
+    expect(transientMeta.detectedShopify).toBe(false);
+    expect(transientMeta.wafRestricted).toBe(false);
+
+    // Next normal call must NOT hit a poisoned cache entry; it must resolve fresh EUR metadata
+    failMode = "ok";
+    const freshMeta = await clientA.resolveDomainMetadata("https://clean-de.example", {
+      concurrencyKey: "user:legit"
+    });
+    expect(freshMeta.detectedShopify).toBe(true);
+    expect(freshMeta.currency).toBe("EUR");
+    expect(freshMeta.name).toBe("Clean DE Shop");
+    expect(freshMeta.wafRestricted).toBe(false);
+
+    // Case B: Warm valid cache + forceRefresh hitting TIMEOUT -> existing valid cache stays intact
+    failMode = "timeout";
+    const failedRefresh = await clientA.resolveDomainMetadata("https://clean-de.example", {
+      forceRefresh: true,
+      concurrencyKey: "selfcheck:attacker"
+    });
+    expect(failedRefresh.detectedShopify).toBe(false);
+
+    // Subsequent cached read returns the intact pre-existing EUR metadata (no overwrite)
+    failMode = "concurrency";
+    const preserved = await clientA.resolveDomainMetadata("https://clean-de.example", {
+      concurrencyKey: "user:legit"
+    });
+    expect(preserved.detectedShopify).toBe(true);
+    expect(preserved.currency).toBe("EUR");
+    expect(preserved.name).toBe("Clean DE Shop");
+    expect(preserved.wafRestricted).toBe(false);
+  });
+
+  it("supports configurable TRUSTED_PROXY_HOPS (0, 1, 2) and prevents leftmost XFF spoofing across topologies", async () => {
+    expect(parseTrustedProxyHops(undefined)).toBe(1);
+    expect(parseTrustedProxyHops("0")).toBe(0);
+    expect(parseTrustedProxyHops("2")).toBe(2);
+    expect(parseTrustedProxyHops("10")).toBe(10);
+    expect(parseTrustedProxyHops("-1")).toBe(1);
+    expect(parseTrustedProxyHops("11")).toBe(1);
+    expect(parseTrustedProxyHops("abc")).toBe(1);
+
+    const makeFakeReq = (xff: string | undefined, remoteAddress: string) =>
+      ({
+        headers: xff !== undefined ? { "x-forwarded-for": xff } : {},
+        socket: { remoteAddress }
+      }) as unknown as import("express").Request;
+
+    // hops = 0 -> ignore XFF completely, use socket remoteAddress
+    expect(extractTrustedClientIp(makeFakeReq("198.51.100.1, 203.0.113.42", "192.0.2.9"), 0)).toBe(
+      "192.0.2.9"
+    );
+    // hops = 1 -> rightmost XFF entry (Cloud Run direct)
+    expect(extractTrustedClientIp(makeFakeReq("198.51.100.1, 203.0.113.42", "10.0.0.1"), 1)).toBe(
+      "203.0.113.42"
+    );
+    // hops = 2 -> 2nd from right (CDN/LB -> Cloud Run): skips LB 34.120.0.1 and ignores leftmost spoof 198.51.100.1
+    expect(
+      extractTrustedClientIp(makeFakeReq("198.51.100.1, 203.0.113.42, 34.120.0.1", "10.0.0.1"), 2)
+    ).toBe("203.0.113.42");
+
+    // End-to-end with TRUSTED_PROXY_HOPS=2: two distinct users behind the same LB get separate buckets,
+    // while leftmost spoofing by one user still shares that user's bucket
+    const { app } = makeTestApp({
+      adapters: [makeMockAdapter({ platform: "shopify", store: makeShopifyStore() })],
+      extraEnv: { TRUSTED_PROXY_HOPS: "2" }
+    });
+
+    for (let i = 0; i < 10; i++) {
+      await request(app)
+        .post("/api/store-check")
+        .set("Origin", "https://shopcart.wals.pro")
+        .set("X-Forwarded-For", `198.51.100.${i + 1}, 203.0.113.50, 34.120.0.1`)
+        .set("Content-Type", "application/json")
+        .send({ storeUrl: "snocks.com", lang: "de" })
+        .expect(200);
+    }
+
+    // 11th request for 203.0.113.50 (different spoofed leftmost IP, same LB) -> 429
+    await request(app)
+      .post("/api/store-check")
+      .set("Origin", "https://shopcart.wals.pro")
+      .set("X-Forwarded-For", "198.51.100.250, 203.0.113.50, 34.120.0.1")
+      .set("Content-Type", "application/json")
+      .send({ storeUrl: "snocks.com", lang: "de" })
+      .expect(429);
+
+    // Different user (203.0.113.51) behind the same LB 34.120.0.1 -> still allowed (200)
+    await request(app)
+      .post("/api/store-check")
+      .set("Origin", "https://shopcart.wals.pro")
+      .set("X-Forwarded-For", "203.0.113.51, 34.120.0.1")
+      .set("Content-Type", "application/json")
+      .send({ storeUrl: "snocks.com", lang: "de" })
+      .expect(200);
+  });
+
+  it("groups IPv6 clients by canonical /64 prefix for both rate-limit buckets and selfcheck concurrency keys", async () => {
+    expect(normalizeClientRateLimitKey("2001:db8:abcd:12::1")).toBe("2001:db8:abcd:12::/64");
+    expect(normalizeClientRateLimitKey("2001:0db8:abcd:0012:0000:0000:0000:ffff")).toBe(
+      "2001:db8:abcd:12::/64"
+    );
+    expect(normalizeClientRateLimitKey("2001:DB8:ABCD:12:1111:2222:3333:4444")).toBe(
+      "2001:db8:abcd:12::/64"
+    );
+    expect(normalizeClientRateLimitKey("2001:db8:abcd:13::1")).toBe("2001:db8:abcd:13::/64");
+    // IPv4-mapped IPv6 (both dotted and hex forms) map to canonical IPv4
+    expect(normalizeClientRateLimitKey("::ffff:203.0.113.42")).toBe("203.0.113.42");
+    expect(normalizeClientRateLimitKey("::ffff:cb00:712a")).toBe("203.0.113.42");
+
+    const observedConcurrencyKeys: string[] = [];
+    const trackingAdapter: StoreAdapter = {
+      platform: "shopify",
+      async detect(_origin, concurrencyKey) {
+        if (concurrencyKey) observedConcurrencyKeys.push(concurrencyKey);
+        return makeShopifyStore();
+      },
+      async searchProducts(origin) {
+        return { store_origin: origin, currency: "EUR", products: [], notices: [] };
+      },
+      async getProduct() {
+        throw new Error("not used");
+      },
+      async buildCartLink(origin) {
+        return { store_origin: origin, cart_url: `${origin}/cart`, mode: "cart", items: [], warnings: [], next_step: "" };
+      }
+    };
+
+    const { app } = makeTestApp({ adapters: [trackingAdapter] });
+    const rotatingIpv6SameSlash64 = [
+      "2001:db8:abcd:12::1",
+      "2001:0db8:abcd:0012:0000:0000:0000:0002",
+      "2001:db8:abcd:12::3",
+      "2001:DB8:ABCD:12:0:0:0:4",
+      "2001:db8:abcd:12:aaaa::5",
+      "2001:db8:abcd:12:bbbb::6",
+      "2001:db8:abcd:12:cccc::7",
+      "2001:db8:abcd:12:dddd::8",
+      "2001:db8:abcd:12:eeee::9",
+      "2001:db8:abcd:12:ffff::a"
+    ];
+
+    for (const ip of rotatingIpv6SameSlash64) {
+      await request(app)
+        .post("/api/store-check")
+        .set("Origin", "https://shopcart.wals.pro")
+        .set("X-Forwarded-For", ip)
+        .set("Content-Type", "application/json")
+        .send({ storeUrl: "snocks.com", lang: "de" })
+        .expect(200);
+    }
+
+    // All 10 rotated addresses within the same /64 shared the exact same selfcheck concurrency key
+    expect(new Set(observedConcurrencyKeys)).toEqual(new Set(["selfcheck:2001:db8:abcd:12::/64"]));
+
+    // 11th request from a new host ID in the same /64 -> 429 rate limited
+    await request(app)
+      .post("/api/store-check")
+      .set("Origin", "https://shopcart.wals.pro")
+      .set("X-Forwarded-For", "2001:db8:abcd:12:9999::beef")
+      .set("Content-Type", "application/json")
+      .send({ storeUrl: "snocks.com", lang: "de" })
+      .expect(429);
+
+    // Request from a distinct /64 subnet -> allowed (200)
+    await request(app)
+      .post("/api/store-check")
+      .set("Origin", "https://shopcart.wals.pro")
+      .set("X-Forwarded-For", "2001:db8:abcd:13::1")
+      .set("Content-Type", "application/json")
+      .send({ storeUrl: "snocks.com", lang: "de" })
+      .expect(200);
+  });
+
+  it("enforces process-wide concurrent self-check limit and releases slots cleanly after completion", async () => {
+    const resolvers: Array<() => void> = [];
+    const deferredAdapter = makeMockAdapter({
+      platform: "shopify",
+      store: makeShopifyStore(),
+      async onDetect() {
+        await new Promise<void>((resolve) => {
+          resolvers.push(resolve);
+        });
+        return makeShopifyStore();
+      }
+    });
+
+    const { app } = makeTestApp({
+      adapters: [deferredAdapter],
+      maxConcurrentChecks: 2
+    });
+
+    const req1 = request(app)
+      .post("/api/store-check")
+      .set("Origin", "https://shopcart.wals.pro")
+      .set("X-Forwarded-For", "203.0.113.101")
+      .set("Content-Type", "application/json")
+      .send({ storeUrl: "snocks.com", lang: "de" });
+    const req2 = request(app)
+      .post("/api/store-check")
+      .set("Origin", "https://shopcart.wals.pro")
+      .set("X-Forwarded-For", "203.0.113.102")
+      .set("Content-Type", "application/json")
+      .send({ storeUrl: "snocks.com", lang: "de" });
+
+    // Start both requests and wait until both are inside detect()
+    const p1 = req1.then((r) => r);
+    const p2 = req2.then((r) => r);
+    for (let i = 0; i < 40 && resolvers.length < 2; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(resolvers.length).toBe(2);
+
+    // 3rd simultaneous request (from a 3rd distinct IP) hits process-wide cap -> 429 + Retry-After
+    const overflowRes = await request(app)
+      .post("/api/store-check")
+      .set("Origin", "https://shopcart.wals.pro")
+      .set("X-Forwarded-For", "203.0.113.103")
+      .set("Content-Type", "application/json")
+      .send({ storeUrl: "snocks.com", lang: "en" })
+      .expect(429);
+    expect(overflowRes.body.error).toBe("concurrency_limit");
+    expect(Number(overflowRes.headers["retry-after"])).toBeGreaterThanOrEqual(1);
+
+    // Release both in-flight checks
+    for (const resolve of resolvers) resolve();
+    const [r1, r2] = await Promise.all([p1, p2]);
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
+
+    // After slots are freed in finally, a subsequent check succeeds immediately
+    const quickAdapter = makeMockAdapter({ platform: "shopify", store: makeShopifyStore() });
+    const { app: quickApp } = makeTestApp({ adapters: [quickAdapter], maxConcurrentChecks: 1 });
+    await request(quickApp)
+      .post("/api/store-check")
+      .set("Origin", "https://shopcart.wals.pro")
+      .set("Content-Type", "application/json")
+      .send({ storeUrl: "snocks.com", lang: "de" })
+      .expect(200);
+    await request(quickApp)
+      .post("/api/store-check")
+      .set("Origin", "https://shopcart.wals.pro")
+      .set("Content-Type", "application/json")
+      .send({ storeUrl: "snocks.com", lang: "de" })
+      .expect(200);
+  });
+
+  it("aborts sequential follow-up adapter probes once the overall timeout expires", async () => {
+    let secondAdapterCalled = 0;
+    const slowNullAdapter = makeMockAdapter({
+      platform: "shopify",
+      store: null,
+      delayMs: 120
+    });
+    const secondAdapter = makeMockAdapter({
+      platform: "woocommerce",
+      store: null,
+      async onDetect() {
+        secondAdapterCalled += 1;
+        return null;
+      }
+    });
+
+    const { app } = makeTestApp({
+      adapters: [slowNullAdapter, secondAdapter],
+      timeoutMs: 40
+    });
+
+    await request(app)
+      .post("/api/store-check")
+      .set("Origin", "https://shopcart.wals.pro")
+      .set("Content-Type", "application/json")
+      .send({ storeUrl: "slow-store.example", lang: "en" })
+      .expect(504);
+
+    // Wait past slowNullAdapter's 120ms delay to verify the abort signal stopped the loop
+    await new Promise((r) => setTimeout(r, 160));
+    expect(secondAdapterCalled).toBe(0);
   });
 });
 

@@ -347,46 +347,143 @@ export function validateStoreCheckInput(rawBody: unknown): StoreCheckValidationR
   };
 }
 
+function parseIpv4Octets(ip: string): [number, number, number, number] | null {
+  const parts = ip.split(".");
+  if (parts.length !== 4) return null;
+  const nums: number[] = [];
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    const n = Number(part);
+    if (n < 0 || n > 255) return null;
+    nums.push(n);
+  }
+  return [nums[0]!, nums[1]!, nums[2]!, nums[3]!];
+}
+
+function parseIpv6Groups(raw: string): number[] | null {
+  let addr = raw.toLowerCase().trim();
+  const zoneIdx = addr.indexOf("%");
+  if (zoneIdx !== -1) addr = addr.slice(0, zoneIdx);
+
+  // Handle embedded dotted IPv4 tail like ::ffff:203.0.113.5
+  const lastColon = addr.lastIndexOf(":");
+  if (lastColon !== -1 && addr.slice(lastColon + 1).includes(".")) {
+    const octets = parseIpv4Octets(addr.slice(lastColon + 1));
+    if (!octets) return null;
+    const hi = ((octets[0] << 8) | octets[1]).toString(16);
+    const lo = ((octets[2] << 8) | octets[3]).toString(16);
+    addr = `${addr.slice(0, lastColon)}:${hi}:${lo}`;
+  }
+
+  const doubleColonParts = addr.split("::");
+  if (doubleColonParts.length > 2) return null;
+
+  const left = doubleColonParts[0] ? doubleColonParts[0].split(":") : [];
+  const right = doubleColonParts[1] ? doubleColonParts[1].split(":") : [];
+
+  let groups: string[];
+  if (doubleColonParts.length === 2) {
+    const missing = 8 - (left.length + right.length);
+    if (missing < 0) return null;
+    groups = [...left, ...Array<string>(missing).fill("0"), ...right];
+  } else {
+    groups = left;
+  }
+
+  if (groups.length !== 8) return null;
+  const nums: number[] = [];
+  for (const g of groups) {
+    if (!/^[0-9a-f]{1,4}$/.test(g)) return null;
+    nums.push(Number.parseInt(g, 16));
+  }
+  return nums;
+}
+
 function normalizeIpString(raw: string): string | null {
   let cleaned = raw.trim();
   if (!cleaned) return null;
   if (cleaned.startsWith("[") && cleaned.endsWith("]")) {
     cleaned = cleaned.slice(1, -1);
   }
-  // Normalize IPv4-mapped IPv6 addresses like ::ffff:203.0.113.5
-  if (cleaned.toLowerCase().startsWith("::ffff:")) {
-    const tail = cleaned.slice(7);
-    if (net.isIP(tail) === 4) {
-      return tail;
-    }
+  const zoneIdx = cleaned.indexOf("%");
+  if (zoneIdx !== -1) {
+    cleaned = cleaned.slice(0, zoneIdx);
   }
-  return net.isIP(cleaned) !== 0 ? cleaned.toLowerCase() : null;
+  const family = net.isIP(cleaned);
+  if (family === 4) {
+    return cleaned;
+  }
+  if (family === 6) {
+    const groups = parseIpv6Groups(cleaned);
+    if (!groups) return null;
+    // Normalize IPv4-mapped IPv6 (both ::ffff:203.0.113.5 and ::ffff:cb00:7105) to canonical IPv4
+    if (
+      groups[0] === 0 &&
+      groups[1] === 0 &&
+      groups[2] === 0 &&
+      groups[3] === 0 &&
+      groups[4] === 0 &&
+      groups[5] === 0xffff
+    ) {
+      const g6 = groups[6]!;
+      const g7 = groups[7]!;
+      return `${(g6 >>> 8) & 0xff}.${g6 & 0xff}.${(g7 >>> 8) & 0xff}.${g7 & 0xff}`;
+    }
+    return cleaned.toLowerCase();
+  }
+  return null;
 }
 
 /**
- * Cloud-Run-safe client IP extraction.
- * Behind Google Front End / Cloud Run, the real connecting client IP is appended to the RIGHT
- * of X-Forwarded-For (`<client-spoofed>, <real-ip>`). Reading the rightmost trusted hop
- * (default hopCount = 1) prevents attackers from bypassing per-IP rate limits by rotating
- * spoofed leftmost X-Forwarded-For entries.
+ * Normalize a client IP into a stable rate-limit / concurrency bucket key:
+ * - IPv4 (and IPv4-mapped IPv6) -> canonical IPv4 address (e.g. `203.0.113.42`)
+ * - IPv6 -> canonical `/64` prefix (e.g. `2001:db8:abcd:12::/64`) so rotating host IDs
+ *   within a single `/64` allocation cannot multiply rate-limit buckets or fetch-slot keys.
+ */
+export function normalizeClientRateLimitKey(rawIp: string): string {
+  const normalized = normalizeIpString(rawIp);
+  if (!normalized) return "unknown";
+  if (net.isIP(normalized) === 4) {
+    return normalized;
+  }
+  const groups = parseIpv6Groups(normalized);
+  if (!groups) return "unknown";
+  return `${groups[0]!.toString(16)}:${groups[1]!.toString(16)}:${groups[2]!.toString(16)}:${groups[3]!.toString(16)}::/64`;
+}
+
+/**
+ * Proxy-topology-aware client IP extraction.
+ * - `trustedProxyHops === 0`: ignore `X-Forwarded-For` and use `req.socket.remoteAddress`.
+ * - `trustedProxyHops >= 1`: read the hop `trustedProxyHops` entries from the RIGHT of
+ *   `X-Forwarded-For` (e.g. `1` for direct Cloud Run / single LB, `2` for CDN/LB -> Cloud Run),
+ *   preventing leftmost header spoofing.
  */
 export function extractTrustedClientIp(req: Request, trustedProxyHops = 1): string {
-  const hops = Math.max(1, Math.floor(trustedProxyHops));
-  const rawXff = req.headers["x-forwarded-for"];
-  const xffString = Array.isArray(rawXff) ? rawXff.join(",") : rawXff;
-  if (typeof xffString === "string" && xffString.trim().length > 0) {
-    const parts = xffString
-      .split(",")
-      .map((part) => normalizeIpString(part))
-      .filter((ip): ip is string => ip !== null);
-    if (parts.length > 0) {
-      const idx = Math.max(0, parts.length - hops);
-      return parts[idx]!;
+  const hops = Number.isFinite(trustedProxyHops)
+    ? Math.max(0, Math.min(10, Math.floor(trustedProxyHops)))
+    : 1;
+
+  if (hops > 0) {
+    const rawXff = req.headers["x-forwarded-for"];
+    const xffString = Array.isArray(rawXff) ? rawXff.join(",") : rawXff;
+    if (typeof xffString === "string" && xffString.trim().length > 0) {
+      const parts = xffString
+        .split(",")
+        .map((part) => normalizeIpString(part))
+        .filter((ip): ip is string => ip !== null);
+      if (parts.length > 0) {
+        const idx = Math.max(0, parts.length - hops);
+        return parts[idx]!;
+      }
     }
   }
 
   const socketIp = req.socket?.remoteAddress ? normalizeIpString(req.socket.remoteAddress) : null;
   return socketIp ?? "unknown";
+}
+
+export function extractTrustedClientKey(req: Request, trustedProxyHops = 1): string {
+  return normalizeClientRateLimitKey(extractTrustedClientIp(req, trustedProxyHops));
 }
 
 export interface RateLimitCheckResult {
@@ -1255,7 +1352,7 @@ function buildActionableHints(params: {
     });
   }
 
-  if (productCheck && !productCheck.ok) {
+  if (productCheck && !productCheck.ok && platform !== "amazon") {
     hints.push({
       title: de ? "Produktseite liefert keine auslesbaren Strukturdaten" : "Product page returned no readable structured data",
       text: de
@@ -1357,19 +1454,38 @@ export class StoreCheckTimeoutError extends Error {
   }
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  signal?: AbortSignal
+): Promise<T> {
+  if (signal?.aborted) {
+    throw signal.reason instanceof Error ? signal.reason : new StoreCheckTimeoutError(timeoutMs);
+  }
   if (timeoutMs <= 0) {
     throw new StoreCheckTimeoutError(0);
   }
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+  let onAbort: (() => void) | undefined;
+  const racePromise = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => reject(new StoreCheckTimeoutError(timeoutMs)), timeoutMs);
+    if (signal) {
+      onAbort = () => {
+        reject(
+          signal.reason instanceof Error ? signal.reason : new StoreCheckTimeoutError(timeoutMs)
+        );
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
   });
   try {
-    return await Promise.race([promise, timeoutPromise]);
+    return await Promise.race([promise, racePromise]);
   } finally {
     if (timer !== undefined) {
       clearTimeout(timer);
+    }
+    if (signal && onAbort) {
+      signal.removeEventListener("abort", onAbort);
     }
   }
 }
@@ -1385,19 +1501,47 @@ export interface RunStoreCheckOptions {
   input: ValidatedStoreCheckInput;
   concurrencyKey: string;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export async function runStoreCheck(opts: RunStoreCheckOptions): Promise<StoreCheckResult> {
   const totalTimeoutMs = opts.timeoutMs ?? STORE_CHECK_TIMEOUT_MS;
   const deadline = Date.now() + totalTimeoutMs;
-  const { registry, input, concurrencyKey } = opts;
+  const { registry, input, concurrencyKey, signal: externalSignal } = opts;
+
+  const controller = new AbortController();
+  const overallTimer = setTimeout(() => {
+    controller.abort(new StoreCheckTimeoutError(totalTimeoutMs));
+  }, Math.max(1, totalTimeoutMs));
+
+  const onExternalAbort = () => {
+    controller.abort(
+      externalSignal?.reason instanceof Error
+        ? externalSignal.reason
+        : new StoreCheckTimeoutError(totalTimeoutMs)
+    );
+  };
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      onExternalAbort();
+    } else {
+      externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+    }
+  }
 
   const work = async (): Promise<StoreCheckResult> => {
-    const remainingForResolve = Math.max(100, deadline - Date.now());
+    const remainingForResolve = Math.max(1, deadline - Date.now());
     const { adapter, store } = await withTimeout(
-      registry.resolve(input.storeOrigin, concurrencyKey),
-      remainingForResolve
+      registry.resolve(input.storeOrigin, concurrencyKey, controller.signal),
+      remainingForResolve,
+      controller.signal
     );
+
+    if (controller.signal.aborted) {
+      throw controller.signal.reason instanceof Error
+        ? controller.signal.reason
+        : new StoreCheckTimeoutError(totalTimeoutMs);
+    }
 
     if (!store) {
       return buildStoreCheckAssessment({
@@ -1427,20 +1571,32 @@ export async function runStoreCheck(opts: RunStoreCheckOptions): Promise<StoreCh
     let policyProbe: PolicyProbeSummary | null = null;
     let discountProbe: DiscountProbeSummary | null = null;
 
-    if (remainingMs > 400) {
+    // Never invoke AmazonAdapter.getProduct from the anonymous self-check so paid operator
+    // PA-API / Keepa quotas cannot be consumed without authentication or user quotas.
+    const skipAmazonProductLookup = Boolean(input.productUrl && store.platform === "amazon");
+    if (skipAmazonProductLookup) {
+      productError =
+        input.lang === "de"
+          ? "Produkt-Detailabrufe für Amazon werden im öffentlichen Selbstcheck nicht über kostenpflichtige API-Kontingente (PA-API/Keepa) ausgeführt — Amazon-Marktplatz-Erkennung und offizielle Multi-Artikel-Warenkorb-Links per ASIN stehen wie beschrieben bereit."
+          : "Product detail lookups for Amazon are skipped in the public self-check so paid API quotas (PA-API/Keepa) are never consumed — Amazon marketplace detection and official multi-item cart links by ASIN work as described above.";
+    }
+
+    if (!controller.signal.aborted && remainingMs > 400) {
       const secondaryTimeout = Math.min(remainingMs - 150, 3500);
       const tasks: Array<Promise<void>> = [];
 
-      if (input.productUrl) {
+      if (input.productUrl && !skipAmazonProductLookup) {
         tasks.push(
           (async () => {
+            if (controller.signal.aborted) return;
             try {
               productResult = await withTimeout(
                 adapter.getProduct(effectiveOrigin, input.productUrl!, {
                   currencyHint: store.currency,
                   concurrencyKey
                 }),
-                Math.min(remainingMs - 100, 4500)
+                Math.min(remainingMs - 100, 4500),
+                controller.signal
               );
             } catch (err) {
               if (isHardSsrfError(err)) throw err;
@@ -1464,10 +1620,12 @@ export async function runStoreCheck(opts: RunStoreCheckOptions): Promise<StoreCh
         if (adapter.getStorePolicies) {
           tasks.push(
             (async () => {
+              if (controller.signal.aborted) return;
               try {
                 const pol: StorePoliciesResult = await withTimeout(
                   adapter.getStorePolicies!(effectiveOrigin, { topic: "all", concurrencyKey }),
-                  Math.min(secondaryTimeout, 2500)
+                  Math.min(secondaryTimeout, 2500),
+                  controller.signal
                 );
                 policyProbe = {
                   checked: true,
@@ -1485,6 +1643,7 @@ export async function runStoreCheck(opts: RunStoreCheckOptions): Promise<StoreCh
         if (adapter.findStoreDiscounts) {
           tasks.push(
             (async () => {
+              if (controller.signal.aborted) return;
               try {
                 const disc: StoreDiscountsResult = await withTimeout(
                   adapter.findStoreDiscounts!(effectiveOrigin, {
@@ -1492,7 +1651,8 @@ export async function runStoreCheck(opts: RunStoreCheckOptions): Promise<StoreCh
                     timeoutMs: Math.min(secondaryTimeout, 2000),
                     concurrencyKey
                   }),
-                  Math.min(secondaryTimeout, 2500)
+                  Math.min(secondaryTimeout, 2500),
+                  controller.signal
                 );
                 discountProbe = {
                   checked: true,
@@ -1531,5 +1691,12 @@ export async function runStoreCheck(opts: RunStoreCheckOptions): Promise<StoreCh
     });
   };
 
-  return withTimeout(work(), totalTimeoutMs);
+  try {
+    return await withTimeout(work(), totalTimeoutMs, controller.signal);
+  } finally {
+    clearTimeout(overallTimer);
+    if (externalSignal) {
+      externalSignal.removeEventListener("abort", onExternalAbort);
+    }
+  }
 }

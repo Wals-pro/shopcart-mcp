@@ -14,7 +14,7 @@ import { renderFaviconHeadLinks, renderShopCartWordmark, renderSparkCartSvg } fr
 import { formatPromoEnd, serializeJsonLd } from "./content.js";
 import { getTrademarkDisclaimer } from "./platforms.js";
 import {
-  extractTrustedClientIp,
+  extractTrustedClientKey,
   INDEPENDENCE_DISCLAIMER,
   isAllowedStoreCheckOrigin,
   isJsonContentType,
@@ -26,12 +26,15 @@ import {
   validateStoreCheckInput
 } from "./store-check-core.js";
 
+export const STORE_CHECK_MAX_CONCURRENT = 8;
+
 export interface StoreCheckRouterDeps {
   config: AppConfig;
   registry: AdapterRegistry;
   rateLimiter?: StoreCheckRateLimiter;
   timeoutMs?: number;
   trustedProxyHops?: number;
+  maxConcurrentChecks?: number;
 }
 
 class PayloadTooLargeError extends Error {
@@ -450,7 +453,12 @@ export function createStoreCheckRouter(deps: StoreCheckRouterDeps): Router {
   const { config, registry } = deps;
   const rateLimiter = deps.rateLimiter ?? new StoreCheckRateLimiter();
   const timeoutMs = deps.timeoutMs ?? STORE_CHECK_TIMEOUT_MS;
-  const trustedProxyHops = deps.trustedProxyHops ?? 1;
+  const trustedProxyHops = deps.trustedProxyHops ?? config.trustedProxyHops ?? 1;
+  const maxConcurrentChecks = Math.max(
+    1,
+    Math.floor(deps.maxConcurrentChecks ?? STORE_CHECK_MAX_CONCURRENT)
+  );
+  let activeChecks = 0;
   const csp = buildStoreCheckCsp(config.ga4MeasurementId);
 
   const router = Router();
@@ -522,9 +530,9 @@ export function createStoreCheckRouter(deps: StoreCheckRouterDeps): Router {
         : "de";
     const de = reqLang === "de";
 
-    // 4. Per-IP dual-window rate limiting (10/min + 60/hour) BEFORE any outbound network call
-    const clientIp = extractTrustedClientIp(req, trustedProxyHops);
-    const limitResult = rateLimiter.consume(clientIp);
+    // 4. Per-IP (IPv4 or IPv6 /64) dual-window rate limiting (10/min + 60/hour) BEFORE any outbound network call
+    const clientKey = extractTrustedClientKey(req, trustedProxyHops);
+    const limitResult = rateLimiter.consume(clientKey);
     if (!limitResult.allowed) {
       res.setHeader("Retry-After", String(limitResult.retryAfterSeconds));
       res.status(429).json({
@@ -548,16 +556,42 @@ export function createStoreCheckRouter(deps: StoreCheckRouterDeps): Router {
       return;
     }
 
-    // 6. Execute SSRF-hardened read-only check under hard overall timeout
+    // 6. Process-wide concurrency cap to protect Cloud Run instance saturation
+    if (activeChecks >= maxConcurrentChecks) {
+      res.setHeader("Retry-After", "5");
+      res.status(429).json({
+        error: "concurrency_limit",
+        retryAfterSeconds: 5,
+        message: de
+          ? "Der Selbstcheck ist gerade stark ausgelastet. Bitte warte kurz und versuche es erneut."
+          : "The self-check is currently busy. Please wait a moment and try again."
+      });
+      return;
+    }
+
+    activeChecks += 1;
+    const reqAbort = new AbortController();
+    const onClose = () => {
+      if (!res.writableEnded) {
+        reqAbort.abort(new StoreCheckTimeoutError(timeoutMs));
+      }
+    };
+    res.on("close", onClose);
+
+    // 7. Execute SSRF-hardened read-only check under hard overall timeout
     try {
       const result = await runStoreCheck({
         registry,
         input: validated.data,
-        concurrencyKey: `selfcheck:${clientIp}`,
-        timeoutMs
+        concurrencyKey: `selfcheck:${clientKey}`,
+        timeoutMs,
+        signal: reqAbort.signal
       });
-      res.status(200).json(result);
+      if (!res.headersSent) {
+        res.status(200).json(result);
+      }
     } catch (err) {
+      if (res.headersSent) return;
       if (err instanceof StoreCheckTimeoutError || (err instanceof SsrfError && err.code === "TIMEOUT")) {
         res.status(504).json({
           error: "timeout",
@@ -596,6 +630,9 @@ export function createStoreCheckRouter(deps: StoreCheckRouterDeps): Router {
           ? "Der Shop konnte aktuell nicht geprüft werden. Bitte prüfe die Domain und versuche es erneut."
           : "The store could not be checked right now. Please verify the domain and try again."
       });
+    } finally {
+      res.off("close", onClose);
+      activeChecks = Math.max(0, activeChecks - 1);
     }
   });
 
