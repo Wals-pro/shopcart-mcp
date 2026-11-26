@@ -37,7 +37,7 @@ function makeResponse(url: string, status: number, body: unknown): SafeFetchResp
 
 describe("Wave 3 security hardening regressions", () => {
   it("strips adversarial ReDoS HTML, hidden-style, comment, and shortcode payloads in linear time", () => {
-    const start = performance.now();
+    const startCpu = process.cpuUsage();
 
     const quarticHiddenPayload =
       `${'<div style="opacity:0;opacity:0;opacity:0;display:none;" '.repeat(4000)}${"x".repeat(50_000)}`;
@@ -56,8 +56,9 @@ describe("Wave 3 security hardening regressions", () => {
     sanitizeWooText(unclosedSvgPayload, 200);
     sanitizeWooDescription(unclosedShortcodePayload, null, 500);
 
-    const elapsedMs = performance.now() - start;
-    expect(elapsedMs).toBeLessThan(500);
+    const cpuDelta = process.cpuUsage(startCpu);
+    const elapsedCpuMs = (cpuDelta.user + cpuDelta.system) / 1000;
+    expect(elapsedCpuMs).toBeLessThan(500);
   });
 
   it("strips hidden style blocks even after >1024-char attributes or quoted angle brackets", () => {

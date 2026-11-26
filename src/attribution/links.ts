@@ -425,10 +425,25 @@ export function applyAttribution(
     }
     if (matchedRule.params) {
       for (const [k, v] of Object.entries(matchedRule.params)) {
+        if (opts.skipRuleDiscount && k.toLowerCase() === "discount") {
+          continue;
+        }
         if (!parsed.searchParams.has(k)) {
           parsed.searchParams.set(k, v);
           monetized = true;
         }
+      }
+    }
+
+    // Disclose monetization whenever the final URL carries the configured partner discount code
+    // (whether attached by rule, storefront deduplication, or passed explicitly after discovery).
+    if (matchedRule.discount) {
+      const currentDiscount = parsed.searchParams.get("discount")?.trim();
+      if (
+        currentDiscount &&
+        currentDiscount.toLowerCase() === matchedRule.discount.trim().toLowerCase()
+      ) {
+        monetized = true;
       }
     }
 

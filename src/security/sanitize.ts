@@ -120,24 +120,27 @@ export function stripHtmlCommentsLinear(html: string): string {
  * Scans forward on a single lowercased copy and never backtracks across unclosed tags.
  */
 export function stripTagBlocksLinear(html: string, tagNames: readonly string[]): string {
-  if (!html || !html.includes("<")) return html;
+  if (!html || !html.includes("<") || tagNames.length === 0) return html;
   const tagSet = new Set(tagNames.map((t) => t.toLowerCase()));
+  let maxTagLen = 0;
+  for (const t of tagSet) {
+    if (t.length > maxTagLen) maxTagLen = t.length;
+  }
   const noCloseTag = new Set<string>();
   const lower = asciiLowerCase(html);
   const len = html.length;
-  let out = "";
+  const parts: string[] = [];
+  let copyStart = 0;
   let pos = 0;
 
   while (pos < len) {
     const lt = lower.indexOf("<", pos);
-    if (lt === -1) {
-      out += html.slice(pos);
-      break;
-    }
+    if (lt === -1) break;
 
     // Parse ASCII tag name immediately following '<'
     let nameEnd = lt + 1;
-    while (nameEnd < len) {
+    const nameLimit = Math.min(len, lt + 1 + maxTagLen + 1);
+    while (nameEnd < nameLimit) {
       const c = lower.charCodeAt(nameEnd);
       if ((c >= 97 && c <= 122) || (c >= 48 && c <= 57)) {
         nameEnd++;
@@ -146,20 +149,26 @@ export function stripTagBlocksLinear(html: string, tagNames: readonly string[]):
       }
     }
 
-    const tagName = lower.slice(lt + 1, nameEnd);
-    if (tagName && tagSet.has(tagName) && isTagNameBoundary(lower[nameEnd])) {
+    const nameLen = nameEnd - (lt + 1);
+    const tagName =
+      nameLen > 0 && nameLen <= maxTagLen && isTagNameBoundary(lower[nameEnd])
+        ? lower.slice(lt + 1, nameEnd)
+        : "";
+    if (tagName && tagSet.has(tagName)) {
       const openEnd = lower.indexOf(">", nameEnd);
       if (openEnd === -1) {
         // Unclosed opening tag: strip tag marker and stop rescanning
-        out += html.slice(pos, lt);
-        out += " ";
+        if (lt > copyStart) parts.push(html.slice(copyStart, lt));
+        parts.push(" ");
+        copyStart = len;
         break;
       }
 
       // Self-closing tag (e.g. <svg/>)
-      if (lower[openEnd - 1] === "/") {
-        out += html.slice(pos, lt);
-        out += " ";
+      if (lower.charCodeAt(openEnd - 1) === 47) {
+        if (lt > copyStart) parts.push(html.slice(copyStart, lt));
+        parts.push(" ");
+        copyStart = openEnd + 1;
         pos = openEnd + 1;
         continue;
       }
@@ -173,9 +182,11 @@ export function stripTagBlocksLinear(html: string, tagNames: readonly string[]):
 
         if (closeIdx !== -1) {
           const closeEnd = lower.indexOf(">", closeIdx + closeNeedle.length);
-          out += html.slice(pos, lt);
-          out += " ";
-          pos = closeEnd === -1 ? len : closeEnd + 1;
+          if (lt > copyStart) parts.push(html.slice(copyStart, lt));
+          parts.push(" ");
+          const nextPos = closeEnd === -1 ? len : closeEnd + 1;
+          copyStart = nextPos;
+          pos = nextPos;
           continue;
         }
 
@@ -183,17 +194,19 @@ export function stripTagBlocksLinear(html: string, tagNames: readonly string[]):
         noCloseTag.add(tagName);
       }
 
-      out += html.slice(pos, lt);
-      out += " ";
+      if (lt > copyStart) parts.push(html.slice(copyStart, lt));
+      parts.push(" ");
+      copyStart = openEnd + 1;
       pos = openEnd + 1;
       continue;
     }
 
-    out += html.slice(pos, lt + 1);
     pos = lt + 1;
   }
 
-  return out;
+  if (copyStart === 0) return html;
+  if (copyStart < len) parts.push(html.slice(copyStart));
+  return parts.join("");
 }
 
 /**
@@ -206,19 +219,18 @@ export function stripHiddenStyleBlocksLinear(html: string): string {
   if (!lower.includes("style")) return html;
   const noCloseTag = new Set<string>();
   const len = html.length;
-  let out = "";
+  const parts: string[] = [];
+  let copyStart = 0;
   let pos = 0;
   let rawFallbackUntil = 0;
 
   while (pos < len) {
     const lt = lower.indexOf("<", pos);
-    if (lt === -1) {
-      out += html.slice(pos);
-      break;
-    }
+    if (lt === -1) break;
 
     let nameEnd = lt + 1;
-    while (nameEnd < len) {
+    const nameLimit = Math.min(len, lt + 9); // longest in HIDDEN_STYLE_TAGS is "section" (7)
+    while (nameEnd < nameLimit) {
       const c = lower.charCodeAt(nameEnd);
       if (c >= 97 && c <= 122) {
         nameEnd++;
@@ -227,8 +239,12 @@ export function stripHiddenStyleBlocksLinear(html: string): string {
       }
     }
 
-    const tagName = lower.slice(lt + 1, nameEnd);
-    if (tagName && HIDDEN_STYLE_TAGS.has(tagName) && isTagNameBoundary(lower[nameEnd])) {
+    const nameLen = nameEnd - (lt + 1);
+    const tagName =
+      nameLen >= 1 && nameLen <= 7 && isTagNameBoundary(lower[nameEnd])
+        ? lower.slice(lt + 1, nameEnd)
+        : "";
+    if (tagName && HIDDEN_STYLE_TAGS.has(tagName)) {
       // Bound '>' search to MAX_HIDDEN_STYLE_ATTR_WINDOW (8192 chars) with quote-aware O(N) scanning
       // so long Shopify/Tailwind attributes or quoted '>'/'<' cannot bypass hidden-style stripping.
       const searchEnd = Math.min(len, nameEnd + MAX_HIDDEN_STYLE_ATTR_WINDOW);
@@ -237,28 +253,28 @@ export function stripHiddenStyleBlocksLinear(html: string): string {
 
       if (nameEnd < rawFallbackUntil) {
         for (let j = nameEnd; j < searchEnd; j++) {
-          const ch = lower[j]!;
-          if (ch === ">") {
+          const c = lower.charCodeAt(j);
+          if (c === 62) {
             openEnd = j;
             break;
           }
-          if (ch === "<") {
+          if (c === 60) {
             unquotedLt = j;
             break;
           }
         }
       } else {
-        let quote: string | null = null;
+        let quote = 0;
         for (let j = nameEnd; j < searchEnd; j++) {
-          const ch = lower[j]!;
-          if (quote) {
-            if (ch === quote) quote = null;
-          } else if (ch === '"' || ch === "'") {
-            quote = ch;
-          } else if (ch === ">") {
+          const c = lower.charCodeAt(j);
+          if (quote !== 0) {
+            if (c === quote) quote = 0;
+          } else if (c === 34 || c === 39) {
+            quote = c;
+          } else if (c === 62) {
             openEnd = j;
             break;
-          } else if (ch === "<") {
+          } else if (c === 60) {
             unquotedLt = j;
             break;
           }
@@ -266,7 +282,6 @@ export function stripHiddenStyleBlocksLinear(html: string): string {
 
         if (openEnd === -1 && unquotedLt === -1) {
           rawFallbackUntil = Math.max(rawFallbackUntil, searchEnd);
-          out += html.slice(pos, lt + 1);
           pos = lt + 1;
           continue;
         }
@@ -287,32 +302,33 @@ export function stripHiddenStyleBlocksLinear(html: string): string {
               noCloseTag.add(tagName);
             }
           }
-          out += html.slice(pos, lt);
-          out += " ";
-          if (closeIdx !== -1) {
-            const closeEnd = lower.indexOf(">", closeIdx + tagName.length + 2);
-            pos = closeEnd === -1 ? len : closeEnd + 1;
-          } else {
-            pos = openEnd + 1;
-          }
+          if (lt > copyStart) parts.push(html.slice(copyStart, lt));
+          parts.push(" ");
+          const nextPos =
+            closeIdx !== -1
+              ? (() => {
+                  const closeEnd = lower.indexOf(">", closeIdx + tagName.length + 2);
+                  return closeEnd === -1 ? len : closeEnd + 1;
+                })()
+              : openEnd + 1;
+          copyStart = nextPos;
+          pos = nextPos;
           continue;
         }
-        out += html.slice(pos, openEnd + 1);
         pos = openEnd + 1;
         continue;
       }
 
-      const nextPos = unquotedLt !== -1 ? unquotedLt : searchEnd;
-      out += html.slice(pos, nextPos);
-      pos = nextPos;
+      pos = unquotedLt !== -1 ? unquotedLt : searchEnd;
       continue;
     }
 
-    out += html.slice(pos, lt + 1);
     pos = lt + 1;
   }
 
-  return out;
+  if (copyStart === 0) return html;
+  if (copyStart < len) parts.push(html.slice(copyStart));
+  return parts.join("");
 }
 
 export function isSameStoreSite(originA: string, originB: string): boolean {

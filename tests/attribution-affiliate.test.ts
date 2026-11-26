@@ -335,6 +335,31 @@ describe("Universal UTM Attribution & Affiliate Engine (src/attribution/links.ts
     const nonMatch = applyAttribution("https://notexample.de/products/a", cfg, { kind: "product" });
     expect(new URL(nonMatch.url).hostname).toBe("notexample.de");
     expect(nonMatch.affiliate_disclosure).toBe(false);
+
+    // skipRuleDiscount skips both rule.discount and case-insensitive params.discount;
+    // matching an existing URL discount code against rule.discount still discloses monetization.
+    const discountRuleCfg = loadAttributionConfig({
+      AFFILIATE_RULES_JSON: JSON.stringify([
+        { domain: "partner-code.example", network: "direct", discount: "CODE20" },
+        { domain: "param-discount.example", network: "direct", params: { DISCOUNT: "PARAM10" } }
+      ])
+    });
+    const matchedExisting = applyAttribution(
+      "https://partner-code.example/cart/123:1?storefront=true&discount=code20",
+      discountRuleCfg,
+      { kind: "cart" }
+    );
+    expect(matchedExisting.affiliate_disclosure).toBe(true);
+    expect(matchedExisting.disclosure_note).toBe(AFFILIATE_DISCLOSURE_NOTE);
+
+    const skippedParam = applyAttribution(
+      "https://param-discount.example/cart/123:1?storefront=true",
+      discountRuleCfg,
+      { kind: "cart", skipRuleDiscount: true }
+    );
+    expect(new URL(skippedParam.url).searchParams.get("DISCOUNT")).toBeNull();
+    expect(new URL(skippedParam.url).searchParams.get("discount")).toBeNull();
+    expect(skippedParam.affiliate_disclosure).toBe(false);
   });
 
   it("rejects unsafe deeplink templates and degrades safely on malformed JSON env vars", () => {

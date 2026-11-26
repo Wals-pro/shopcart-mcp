@@ -38,6 +38,8 @@ const HARD_SSRF_CODES = new Set(["INVALID_URL", "BLOCKED_HOST", "BLOCKED_IP", "C
 const MAX_VISIBLE_TEXT_CHARS = 150_000;
 const MAX_ZONE_SLICE_CHARS = 4096;
 const MAX_ZONE_MATCHES = 30;
+const MAX_ZONE_SCAN_ATTEMPTS = 60;
+const MAX_COLLECTIONS_INSPECT = 250;
 const MAX_ATTR_WINDOW = 8192;
 const MAX_RETURNED_CODES = 10;
 const MAX_RETURNED_AUTOMATIC_DEALS = 5;
@@ -488,6 +490,28 @@ function isTagStartChar(code: number): boolean {
   );
 }
 
+const BLOCK_HTML_TAGS = new Set([
+  "p",
+  "div",
+  "li",
+  "tr",
+  "br",
+  "hr",
+  "section",
+  "article",
+  "header",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6"
+]);
+
+function isTagNameBoundaryCode(c: number): boolean {
+  return c === 62 || c === 47 || c === 32 || c === 9 || c === 10 || c === 13;
+}
+
 /**
  * Strictly linear-time O(N) HTML tag stripper without regex backtracking.
  * Supports long Shopify/Tailwind/Alpine tag attributes (up to MAX_ATTR_WINDOW)
@@ -499,21 +523,42 @@ function stripTagsLinear(html: string): string {
   if (!html) return "";
   const len = html.length;
   const parts: string[] = [];
+  let lastWasSpace = false;
+  let lastWasNewline = false;
   let textStart = 0;
   let i = 0;
   let rawFallbackUntil = 0;
 
+  const pushSeparator = (isBlock: boolean) => {
+    if (isBlock) {
+      if (!lastWasNewline) {
+        parts.push("\n");
+        lastWasNewline = true;
+        lastWasSpace = false;
+      }
+    } else if (!lastWasSpace && !lastWasNewline) {
+      parts.push(" ");
+      lastWasSpace = true;
+    }
+  };
+
   while (i < len) {
     const lt = html.indexOf("<", i);
     if (lt === -1) {
-      parts.push(html.slice(textStart));
+      if (textStart < len) {
+        parts.push(html.slice(textStart));
+      }
       break;
     }
 
     if (lt + 1 >= len || !isTagStartChar(html.charCodeAt(lt + 1))) {
       // Bare '<' (e.g. "2 < 3" or "<<<"): skip in O(1)
-      if (lt > textStart) parts.push(html.slice(textStart, lt));
-      parts.push(" ");
+      if (lt > textStart) {
+        parts.push(html.slice(textStart, lt));
+        lastWasSpace = false;
+        lastWasNewline = false;
+      }
+      pushSeparator(false);
       textStart = lt + 1;
       i = lt + 1;
       continue;
@@ -525,32 +570,32 @@ function stripTagsLinear(html: string): string {
 
     if (lt < rawFallbackUntil) {
       for (let j = lt + 1; j < searchLimit; j++) {
-        const ch = html[j]!;
-        if (ch === ">") {
+        const c = html.charCodeAt(j);
+        if (c === 62) {
           gt = j;
           break;
         }
-        if (ch === "<") {
+        if (c === 60) {
           unquotedLt = j;
           break;
         }
       }
     } else {
-      let quote: string | null = null;
+      let quote = 0;
       let firstRawGt = -1;
       for (let j = lt + 1; j < searchLimit; j++) {
-        const ch = html[j]!;
-        if (ch === ">" && firstRawGt === -1) {
+        const c = html.charCodeAt(j);
+        if (c === 62 && firstRawGt === -1) {
           firstRawGt = j;
         }
-        if (quote) {
-          if (ch === quote) quote = null;
-        } else if (ch === '"' || ch === "'") {
-          quote = ch;
-        } else if (ch === ">") {
+        if (quote !== 0) {
+          if (c === quote) quote = 0;
+        } else if (c === 34 || c === 39) {
+          quote = c;
+        } else if (c === 62) {
           gt = j;
           break;
-        } else if (ch === "<") {
+        } else if (c === 60) {
           unquotedLt = j;
           break;
         }
@@ -566,8 +611,12 @@ function stripTagsLinear(html: string): string {
 
     if (gt === -1) {
       // Malformed unclosed tag: advance monotonically past its attributes so they never leak as text
-      if (lt > textStart) parts.push(html.slice(textStart, lt));
-      parts.push(" ");
+      if (lt > textStart) {
+        parts.push(html.slice(textStart, lt));
+        lastWasSpace = false;
+        lastWasNewline = false;
+      }
+      pushSeparator(false);
       const nextPos = unquotedLt !== -1 ? unquotedLt : searchLimit;
       textStart = nextPos;
       i = nextPos;
@@ -576,37 +625,25 @@ function stripTagsLinear(html: string): string {
 
     if (lt > textStart) {
       parts.push(html.slice(textStart, lt));
+      lastWasSpace = false;
+      lastWasNewline = false;
     }
 
-    // Inspect tag name for block separation
+    // Inspect tag name for block separation (max block tag length is 7: "section"/"article")
     let nameStart = lt + 1;
-    if (html[nameStart] === "/") nameStart++;
+    if (html.charCodeAt(nameStart) === 47) nameStart++;
     let nameEnd = nameStart;
-    while (nameEnd < gt && !isTagNameBoundary(html[nameEnd])) {
+    const nameLimit = Math.min(gt, nameStart + 8);
+    while (nameEnd < nameLimit && !isTagNameBoundaryCode(html.charCodeAt(nameEnd))) {
       nameEnd++;
     }
-    const tag = asciiLowerCase(html.slice(nameStart, nameEnd));
-    if (
-      tag === "p" ||
-      tag === "div" ||
-      tag === "li" ||
-      tag === "tr" ||
-      tag === "br" ||
-      tag === "hr" ||
-      tag === "section" ||
-      tag === "article" ||
-      tag === "header" ||
-      tag === "h1" ||
-      tag === "h2" ||
-      tag === "h3" ||
-      tag === "h4" ||
-      tag === "h5" ||
-      tag === "h6"
-    ) {
-      parts.push("\n");
-    } else {
-      parts.push(" ");
-    }
+    const nameLen = nameEnd - nameStart;
+    const isBlock =
+      nameLen >= 1 &&
+      nameLen <= 7 &&
+      (nameEnd === gt || isTagNameBoundaryCode(html.charCodeAt(nameEnd))) &&
+      BLOCK_HTML_TAGS.has(html.slice(nameStart, nameEnd).toLowerCase());
+    pushSeparator(isBlock);
 
     textStart = gt + 1;
     i = gt + 1;
@@ -649,9 +686,11 @@ function extractPromoZoneFragmentsLinear(visibleHtml: string): {
   const len = lower.length;
   let pos = 0;
   let rawFallbackUntil = 0;
+  let zoneAttempts = 0;
 
   while (
     pos < len &&
+    zoneAttempts < MAX_ZONE_SCAN_ATTEMPTS &&
     (announcements.length < MAX_ZONE_MATCHES || banners.length < MAX_ZONE_MATCHES)
   ) {
     const lt = lower.indexOf("<", pos);
@@ -732,12 +771,12 @@ function extractPromoZoneFragmentsLinear(visibleHtml: string): {
       BANNER_MARKERS.some((m) => markerHaystack.includes(m));
 
     if (isAnnouncement || isBanner) {
+      zoneAttempts++;
       const bodyStart = openEnd + 1;
       const maxEnd = Math.min(len, bodyStart + MAX_ZONE_SLICE_CHARS);
       const closeNeedle = `</${tagName}`;
-      const closeIdx = lower.indexOf(closeNeedle, bodyStart);
-      const sliceEnd =
-        closeIdx !== -1 && closeIdx < maxEnd ? closeIdx : maxEnd;
+      const closeRel = lower.slice(bodyStart, maxEnd).indexOf(closeNeedle);
+      const sliceEnd = closeRel !== -1 ? bodyStart + closeRel : maxEnd;
       const text = htmlFragmentToCleanText(visibleHtml.slice(bodyStart, sliceEnd), 1200);
       if (text.length >= 4) {
         if (isAnnouncement) {
@@ -1063,15 +1102,19 @@ export function extractDiscountsFromCollections(
   const rawCodes: ExtractedDiscountCode[] = [];
   const rawAutomaticDeals: AutomaticDeal[] = [];
 
-  // Prioritize classified deal collections first
-  const ordered = [...collections].sort((a, b) => {
-    const aDeal = classifyDealCollection(a.handle ?? "", a.title ?? "").isDeal ? 0 : 1;
-    const bDeal = classifyDealCollection(b.handle ?? "", b.title ?? "").isDeal ? 0 : 1;
-    return aDeal - bDeal;
-  });
+  // Hard-cap inspected entries and partition stably in a single linear pass (no O(N log N) sort)
+  const dealCollections: Array<{ col: RawCollectionForDiscounts; isDeal: boolean }> = [];
+  const otherCollections: Array<{ col: RawCollectionForDiscounts; isDeal: boolean }> = [];
+  for (const col of collections.slice(0, MAX_COLLECTIONS_INSPECT)) {
+    const isDeal = classifyDealCollection(col.handle ?? "", col.title ?? "").isDeal;
+    if (isDeal) {
+      dealCollections.push({ col, isDeal: true });
+    } else {
+      otherCollections.push({ col, isDeal: false });
+    }
+  }
 
-  for (const col of ordered.slice(0, 60)) {
-    const handle = sanitizeText(col.handle, 120);
+  for (const { col, isDeal } of [...dealCollections, ...otherCollections].slice(0, 60)) {
     const title = sanitizeText(col.title, 160);
     const rawDesc = col.description ?? col.body_html ?? "";
     if (!rawDesc && !title) continue;
@@ -1084,7 +1127,6 @@ export function extractDiscountsFromCollections(
     if (!combined) continue;
 
     // Only scan non-deal collections if they explicitly mention code/automat/discount cues
-    const isDeal = classifyDealCollection(handle, title).isDeal;
     if (!isDeal && !/(?:code|automat|rabatt|gutschein|discount|promo)/i.test(combined)) {
       continue;
     }

@@ -679,7 +679,9 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
                 : "Publicly advertised storefront discount code auto-applied to the cart link. Eligibility, minimum order values, exclusions, and expiration are validated by the merchant at checkout.";
           } else if (discovered && discovered.automatic_deals.length > 0) {
             hasStorefrontDiscountText = true;
-            discountNotice = `No promo code applied — store advertises an automatic checkout deal: "${discovered.automatic_deals[0]!.text}". Eligibility is validated by the merchant at checkout.`;
+            discountContext = discovered.automatic_deals[0]!.text;
+            discountNotice =
+              "No promo code applied — store advertises an automatic checkout deal (see discount_context). Eligibility is validated by the merchant at checkout.";
           }
         }
 

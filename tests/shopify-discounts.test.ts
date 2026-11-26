@@ -364,11 +364,49 @@ describe("Shopify Discount Extractor — HTML & Collection parsing", () => {
       `<div class="announcement-bar">Use code FAST25 for 25% off</div>`;
 
     expect(adversarial.length).toBeGreaterThan(300_000);
-    const start = performance.now();
+    const startCpu = process.cpuUsage();
     const stressRes = extractDiscountsFromHtml(adversarial);
-    const elapsedMs = performance.now() - start;
-    expect(elapsedMs).toBeLessThan(300);
+    const cpuDelta = process.cpuUsage(startCpu);
+    const elapsedCpuMs = (cpuDelta.user + cpuDelta.system) / 1000;
+    expect(elapsedCpuMs).toBeLessThan(300);
     expect(stressRes.codes.every((c) => c.code !== "HIDDEN99")).toBe(true);
+  });
+
+  it("bounds promo-zone close-tag scans and marker attempts on repeated <hero> and empty promo banners in <150ms", () => {
+    const repeatedHero = "<hero>".repeat(200_000); // ~1.2 MiB
+    const startHeroCpu = process.cpuUsage();
+    const heroRes = extractDiscountsFromHtml(repeatedHero);
+    const heroCpu = process.cpuUsage(startHeroCpu);
+    expect((heroCpu.user + heroCpu.system) / 1000).toBeLessThan(150);
+    expect(heroRes.codes).toEqual([]);
+
+    const emptyBanners = '<div class="promo-banner"></div>'.repeat(40_000); // ~1.28 MiB
+    const startBannerCpu = process.cpuUsage();
+    const bannerRes = extractDiscountsFromHtml(emptyBanners);
+    const bannerCpu = process.cpuUsage(startBannerCpu);
+    expect((bannerCpu.user + bannerCpu.system) / 1000).toBeLessThan(150);
+    expect(bannerRes.codes).toEqual([]);
+  });
+
+  it("caps and linearly partitions massive /collections.json payloads (50,000 entries) in <100ms", () => {
+    const hugeCollections = [
+      {
+        handle: "black-friday",
+        title: "Black Friday Deals",
+        description: "<p>Spare 25% mit Code: BFHUGE25 auf das gesamte Sortiment.</p>"
+      },
+      ...Array.from({ length: 50_000 }, (_, i) => ({
+        handle: `col-${i}`,
+        title: `Collection ${i}`
+      }))
+    ];
+
+    const startCpu = process.cpuUsage();
+    const res = extractDiscountsFromCollections(hugeCollections);
+    const cpuDelta = process.cpuUsage(startCpu);
+    expect((cpuDelta.user + cpuDelta.system) / 1000).toBeLessThan(100);
+    expect(res.codes).toHaveLength(1);
+    expect(res.codes[0]!.code).toBe("BFHUGE25");
   });
 
   it("caches per store origin with bounded TTL and merges partner rules dynamically", async () => {
@@ -755,8 +793,94 @@ describe("MCP Integration — find_store_discounts & create_cart_link auto-apply
     const autoDealCart = JSON.parse(autoDealCartRes.body.result.content[0].text as string);
     expect(new URL(autoDealCart.cart_url).searchParams.get("discount")).toBeNull();
     expect(autoDealCart.applied_discount_code).toBeUndefined();
-    expect(autoDealCart.discount_notice).toContain("automatic checkout deal");
-    expect(autoDealCart.discount_notice).toContain("wird automatisch im Checkout abgezogen");
+    expect(autoDealCart.discount_notice).toBe(
+      "No promo code applied — store advertises an automatic checkout deal (see discount_context). Eligibility is validated by the merchant at checkout."
+    );
+    expect(autoDealCart.discount_notice).not.toContain("wird automatisch im Checkout abgezogen");
+    expect(autoDealCart.discount_context).toContain("wird automatisch im Checkout abgezogen");
     expect(autoDealCart.source_notice).toBe(SOURCE_NOTICE_DISCOUNTS);
+  });
+
+  it("discloses partner affiliate monetization on overlapping storefront or user_supplied codes and honors auto_apply_discount=false for params.discount", async () => {
+    const emailSender = new MemoryEmailSender();
+    const config = loadConfig({
+      APP_ORIGIN: "https://shopcart.wals.pro",
+      STORAGE_BACKEND: "memory",
+      SESSION_SECRET: "test-session-secret-0123456789abcdef",
+      AFFILIATE_RULES_JSON: JSON.stringify([
+        { domain: "overlap-shop.example", network: "direct_partner", discount: "BLACK26" },
+        { domain: "param-rule.example", network: "direct_partner", params: { discount: "RULE10" } }
+      ])
+    });
+
+    const app = createApp({
+      config,
+      store: new MemoryStore(),
+      registry: makeMockRegistry({
+        homepageHtml: `
+          <html><body>
+            <announcement-bar class="announcement-bar">
+              Black Friday: 25% mit Code BLACK26
+            </announcement-bar>
+          </body></html>
+        `
+      }),
+      emailSender
+    });
+    const token = await issueBearerToken(app, emailSender);
+
+    const callTool = async (id: number, name: string, args: Record<string, unknown>) => {
+      const res = await request(app)
+        .post("/mcp")
+        .set("Authorization", `Bearer ${token}`)
+        .set("Accept", "application/json, text/event-stream")
+        .send({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } })
+        .expect(200);
+      return {
+        isError: Boolean(res.body.result.isError),
+        payload: JSON.parse(res.body.result.content[0].text as string)
+      };
+    };
+
+    // 1. Storefront advertises BLACK26 AND partner rule has discount: "BLACK26" (without ref)
+    //    -> storefront source wins dedup, yet affiliate_disclosure MUST still be true!
+    const overlapCart = await callTool(31, "create_cart_link", {
+      store_url: "overlap-shop.example",
+      items: [{ variant_id: "57591990780169", quantity: 1 }],
+      mode: "cart"
+    });
+    expect(overlapCart.isError).toBe(false);
+    expect(new URL(overlapCart.payload.cart_url).searchParams.get("discount")).toBe("BLACK26");
+    expect(overlapCart.payload.discount_source).toBe("homepage_announcement");
+    expect(overlapCart.payload.source_notice).toBe(SOURCE_NOTICE_DISCOUNTS);
+    expect(overlapCart.payload.affiliate_disclosure).toBe(true);
+    expect(overlapCart.payload.disclosure_note).toBe(AFFILIATE_DISCLOSURE_NOTE);
+
+    // 2. Model passes partner code discovered via find_store_discounts explicitly as discount_code
+    //    -> affiliate_disclosure MUST be true (case-insensitive match)!
+    const explicitPartnerCart = await callTool(32, "create_cart_link", {
+      store_url: "overlap-shop.example",
+      items: [{ variant_id: "57591990780169", quantity: 1 }],
+      mode: "cart",
+      discount_code: "black26"
+    });
+    expect(explicitPartnerCart.isError).toBe(false);
+    expect(new URL(explicitPartnerCart.payload.cart_url).searchParams.get("discount")).toBe("black26");
+    expect(explicitPartnerCart.payload.discount_source).toBe("user_supplied");
+    expect(explicitPartnerCart.payload.affiliate_disclosure).toBe(true);
+    expect(explicitPartnerCart.payload.disclosure_note).toBe(AFFILIATE_DISCLOSURE_NOTE);
+
+    // 3. Partner rule with params: { discount: "RULE10" } + auto_apply_discount: false
+    //    -> discount param MUST NOT be attached!
+    const optOutParamCart = await callTool(33, "create_cart_link", {
+      store_url: "param-rule.example",
+      items: [{ variant_id: "57591990780169", quantity: 1 }],
+      mode: "cart",
+      auto_apply_discount: false
+    });
+    expect(optOutParamCart.isError).toBe(false);
+    expect(new URL(optOutParamCart.payload.cart_url).searchParams.get("discount")).toBeNull();
+    expect(optOutParamCart.payload.applied_discount_code).toBeUndefined();
+    expect(optOutParamCart.payload.affiliate_disclosure).toBe(false);
   });
 });
