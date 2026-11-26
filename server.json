@@ -3,7 +3,7 @@
   "name": "io.github.Wals-pro/shopcart-mcp",
   "title": "ShopCart MCP",
   "description": "Search Shopify, WooCommerce, BigCommerce, Shopware & Magento stores; Shopify & Amazon cart links.",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "websiteUrl": "https://shopcart.wals.pro",
   "repository": {
     "url": "https://github.com/Wals-pro/shopcart-mcp",
@@ -36,7 +36,7 @@
     {
       "registryType": "npm",
       "identifier": "shopcart-mcp",
-      "version": "0.5.1",
+      "version": "0.6.0",
       "transport": {
         "type": "stdio"
       }

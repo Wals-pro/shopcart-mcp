@@ -163,7 +163,14 @@ describe("Google Gemini JSON Schema compliance (dynamic tools/list)", () => {
       await Promise.all([server.connect(st), client.connect(ct)]);
 
       const { tools } = await client.listTools();
-      expect(tools.length).toBeGreaterThanOrEqual(includeAffiliate ? 7 : 6);
+      expect(tools.length).toBeGreaterThanOrEqual(includeAffiliate ? 8 : 7);
+      const toolNames = tools.map((t) => t.name);
+      expect(toolNames).toContain("find_store_discounts");
+      expect(toolNames).toContain("create_cart_link");
+      const cartTool = tools.find((t) => t.name === "create_cart_link");
+      expect((cartTool?.inputSchema.properties as Record<string, unknown> | undefined)).toHaveProperty(
+        "auto_apply_discount"
+      );
 
       for (const tool of tools) {
         const violations = findGeminiSchemaViolations(tool.inputSchema, `${tool.name}.inputSchema`);
@@ -521,6 +528,7 @@ describe("Gemini CLI Extension manifest (gemini-extension.json) & GEMINI.md", ()
       "search_products",
       "get_product",
       "get_store_policies",
+      "find_store_discounts",
       "create_cart_link",
       "verify_handles",
       "read-only"

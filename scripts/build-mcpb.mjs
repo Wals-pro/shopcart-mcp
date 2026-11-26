@@ -124,7 +124,8 @@ export function createMcpbManifest(version) {
       "- `search_products` — Search public product catalogs across supported storefronts (or Amazon via optional PA-API/Keepa) with availability, price, and discount sorting (`discount_desc`, `price_asc`, `price_desc`).",
       "- `get_product` — Fetch sanitized product details, options, images, stock, compare-at discounts, and exact variant/SKU IDs or Amazon ASINs.",
       "- `get_store_policies` — Check Shopify shipping thresholds, delivery times, and return/refund policies via native Storefront MCP and public `/policies` pages.",
-      "- `create_cart_link` — Build one verified cart link (Shopify, Amazon), one add-to-cart link per item (WooCommerce, BigCommerce), or verified direct product links (Shopware 6, Magento 2, JSON-LD) so you review and complete checkout yourself.",
+      "- `find_store_discounts` — Discover official, publicly advertised Shopify promo codes (Black Friday / sale banners, deal collections) and automatic checkout deals, plus configured partner rules.",
+      "- `create_cart_link` — Build one verified cart link (Shopify with automatic promo-code discovery, Amazon), one add-to-cart link per item (WooCommerce, BigCommerce), or verified direct product links (Shopware 6, Magento 2, JSON-LD) so you review and complete checkout yourself.",
       "",
       "Includes built-in SSRF protection and prompt-injection sanitization. Independent open-source project by wals.pro, not affiliated with or endorsed by Shopify, WooCommerce (Automattic), Amazon, BigCommerce, Shopware, or Adobe (Magento)."
     ].join("\n"),
@@ -196,9 +197,14 @@ export function createMcpbManifest(version) {
           "Fetch a Shopify store's shipping, delivery, and return/refund policies via native Storefront MCP FAQ search and public /policies endpoints with sanitized excerpts, extracted hints, and official policy URLs."
       },
       {
+        name: "find_store_discounts",
+        description:
+          "Discover official, publicly advertised promo/discount codes (announcement bars, Black Friday / sale banners, deal collection descriptions) and automatic no-code-needed checkout deals on Shopify storefronts, plus any configured partner discount rules."
+      },
+      {
         name: "create_cart_link",
         description:
-          "Generate the read-only handoff from exact variant IDs or ASINs and quantities: one cart link on Shopify and Amazon, one add-to-cart link per item on WooCommerce and BigCommerce, verified direct product links on Shopware 6, Magento 2, and JSON-LD stores. Optionally verifies live availability via verify_handles."
+          "Generate the read-only handoff from exact variant IDs or ASINs and quantities: one cart link on Shopify (with optional automatic promo-code application) and Amazon, one add-to-cart link per item on WooCommerce and BigCommerce, verified direct product links on Shopware 6, Magento 2, and JSON-LD stores. Optionally verifies live availability via verify_handles."
       }
     ],
     tools_generated: false,

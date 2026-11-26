@@ -315,6 +315,7 @@ describe("OAuth 2.1 compliance & MCP auth", () => {
       "search_products",
       "get_product",
       "get_store_policies",
+      "find_store_discounts",
       "create_cart_link"
     ]);
     for (const tool of tools) {

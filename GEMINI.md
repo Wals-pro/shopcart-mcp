@@ -19,10 +19,11 @@ Follow this exact sequence whenever a user asks to find products, compare prices
    - Returns exact `variant_id` values, options/titles, SKU/EAN, live `available` stock status, `price`, and `compare_at_price`.
    - On any store without a dedicated search adapter (Universal Schema.org/JSON-LD), pass the full HTTPS product URL to verify live price, currency, availability, and SKU/EAN/GTIN.
 5. **`get_store_policies(store_url, topic?, question?)`** *(Shopify only)* — Check shipping costs, free-shipping thresholds, delivery times, and return/refund policies before handing over the cart.
-6. **`create_cart_link(store_url, items, mode?, discount_code?, verify_handles?)`** — Build the deterministic browser handoff once the user confirms items and quantities.
+6. **`find_store_discounts(store_url)`** *(Shopify + configured partner rules)* — Discover official, publicly advertised promo/discount codes (announcement bars, Black Friday / sale banners, deal collection descriptions) and automatic no-code-needed checkout deals.
+7. **`create_cart_link(store_url, items, mode?, discount_code?, auto_apply_discount?, verify_handles?)`** — Build the deterministic browser handoff once the user confirms items and quantities.
    - Always pass `verify_handles` so the server re-verifies live stock and unit prices.
    - Default to `mode: "cart"`; use `mode: "checkout"` only if the user explicitly asks to skip straight to checkout.
-   - Pass `discount_code` only if supplied by the user — never invent coupon codes.
+   - On Shopify, `auto_apply_discount` defaults to `true` when `discount_code` is omitted so verified public promo codes or configured partner rules are attached automatically (set `auto_apply_discount: false` to skip). Pass `discount_code` only if supplied by the user or returned by `find_store_discounts` — never invent coupon codes.
 
 ## Platform Handoff Reality (Always Be Honest)
 

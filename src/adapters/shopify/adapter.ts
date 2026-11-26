@@ -14,6 +14,7 @@ import type {
   CartLinkItemResult,
   CartLinkResult,
   CollectionSummary,
+  FindStoreDiscountsOptions,
   GetProductResult,
   ListCollectionsOptions,
   ListCollectionsResult,
@@ -24,11 +25,13 @@ import type {
   SearchProductsOptions,
   SearchProductsResult,
   StoreAdapter,
+  StoreDiscountsResult,
   StoreInfo,
   StorePoliciesOptions,
   StorePoliciesResult
 } from "../types.js";
 import { ShopifyClient } from "./client.js";
+import { ShopifyDiscountExtractor } from "./discounts.js";
 import {
   classifyDealCollection,
   computeDiscount,
@@ -324,9 +327,18 @@ function rethrowIfHardSsrfError(err: unknown): void {
 export class ShopifyAdapter implements StoreAdapter {
   readonly platform = "shopify";
   private readonly client: ShopifyClient;
+  private readonly discountExtractor: ShopifyDiscountExtractor;
 
   constructor(client = new ShopifyClient()) {
     this.client = client;
+    this.discountExtractor = new ShopifyDiscountExtractor(client);
+  }
+
+  async findStoreDiscounts(
+    origin: string,
+    opts: FindStoreDiscountsOptions = {}
+  ): Promise<StoreDiscountsResult> {
+    return this.discountExtractor.findDiscounts(origin, opts);
   }
 
   async detect(origin: string, concurrencyKey?: string): Promise<StoreInfo | null> {
@@ -1336,7 +1348,7 @@ export class ShopifyAdapter implements StoreAdapter {
       }
     }
 
-    if (opts.discountCode && !/^[A-Za-z0-9._-]{1,64}$/.test(opts.discountCode)) {
+    if (opts.discountCode && !/^[A-Za-z0-9_-]{2,40}$/.test(opts.discountCode)) {
       throw new Error("Invalid discount_code format");
     }
 

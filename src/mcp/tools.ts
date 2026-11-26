@@ -6,12 +6,25 @@ import {
 } from "../adapters/affiliate-feed/index.js";
 import { AdapterRegistry } from "../adapters/registry.js";
 import {
+  DISCOUNT_DISCLAIMER,
+  extractPartnerRuleDiscounts,
+  mergePartnerRuleDiscounts,
+  SOURCE_NOTICE_DISCOUNTS
+} from "../adapters/shopify/discounts.js";
+import type { DiscountSource } from "../adapters/types.js";
+import {
   AFFILIATE_DISCLOSURE_NOTE,
   applyAttribution,
+  getAffiliateRuleDiscount,
   loadAttributionConfig,
+  matchAffiliateRule,
   type AttributionConfig
 } from "../attribution/links.js";
-import { SOURCE_NOTICE_CATALOG, SOURCE_NOTICE_PRODUCT } from "../security/sanitize.js";
+import {
+  isSameStoreSite,
+  SOURCE_NOTICE_CATALOG,
+  SOURCE_NOTICE_PRODUCT
+} from "../security/sanitize.js";
 import { normalizeStoreOrigin, SsrfError } from "../security/ssrf.js";
 
 const SOURCE_NOTICE_POLICY =
@@ -506,11 +519,47 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
   );
 
   server.registerTool(
+    "find_store_discounts",
+    {
+      title: "Find Store Discounts & Promo Codes",
+      description:
+        "Discover official, publicly advertised promo/discount codes (e.g. Black Friday / Cyber Week banners, announcement bars, deal collection descriptions) and automatic no-code-needed checkout deals on Shopify storefronts, plus any configured partner discount rules on any platform. Strictly read-only; never fabricates codes.",
+      inputSchema: {
+        store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL")
+      },
+      annotations: makeAnnotations("Find Store Discounts & Promo Codes")
+    },
+    async ({ store_url }) =>
+      runGuardedTool(ctx, "find_store_discounts", async () => {
+        const origin = normalizeStoreOrigin(store_url);
+        const adapter = await ctx.registry.resolveAdapter(origin, ctx.concurrencyKey);
+        if (!adapter.findStoreDiscounts) {
+          const partnerCodes = extractPartnerRuleDiscounts(origin, attribution);
+          return {
+            store_origin: origin,
+            codes: partnerCodes,
+            automatic_deals: [],
+            checked_sources: attribution.affiliateRules.length > 0 ? ["partner_rules"] : [],
+            source_notice: SOURCE_NOTICE_DISCOUNTS,
+            disclaimer: DISCOUNT_DISCLAIMER,
+            notices: [
+              `Automatic storefront banner and collection discount scanning is currently supported for Shopify storefronts only ('${origin}' resolved to platform '${adapter.platform}').${partnerCodes.length > 0 ? " Returning configured partner discount code(s)." : ""}`
+            ]
+          };
+        }
+        const rawResult = await adapter.findStoreDiscounts(origin, {
+          concurrencyKey: ctx.concurrencyKey
+        });
+        return mergePartnerRuleDiscounts(rawResult, attribution, [origin]);
+      })
+  );
+
+  server.registerTool(
     "create_cart_link",
     {
       title: "Create Store Cart Link",
       description:
-        "Generate a read-only browser cart/checkout permalink (Shopify /cart/<id>:<qty>, WooCommerce ?add-to-cart=, BigCommerce /cart.php?action=add, Amazon /gp/aws/cart/add.html) or verified direct_product_link (Shopware 6, Magento 2, Universal JSON-LD) without mutating server-side carts, optionally verifying live availability via verify_handles.",
+        "Generate a read-only browser cart/checkout permalink (Shopify /cart/<id>:<qty>, WooCommerce ?add-to-cart=, BigCommerce /cart.php?action=add, Amazon /gp/aws/cart/add.html) or verified direct_product_link (Shopware 6, Magento 2, Universal JSON-LD) without mutating server-side carts, optionally verifying live availability via verify_handles. On Shopify, automatically applies a verified public high-confidence storefront promo code or configured partner rule by default unless discount_code is supplied or auto_apply_discount=false.",
       inputSchema: {
         store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
         items: z
@@ -534,9 +583,21 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           ),
         discount_code: z
           .string()
-          .regex(/^[A-Za-z0-9._-]{1,64}$/, "discount_code contains invalid characters")
+          .trim()
+          .regex(
+            /^[A-Za-z0-9_-]{2,40}$/,
+            "discount_code must be 2-40 characters using letters, digits, hyphens, or underscores"
+          )
           .optional()
-          .describe("Optional discount/coupon code supplied by the user"),
+          .describe(
+            "Optional discount/coupon code supplied by the user (always takes highest priority over automatic discovery)."
+          ),
+        auto_apply_discount: z
+          .boolean()
+          .optional()
+          .describe(
+            "Shopify only (default: true when discount_code is omitted): checks cached/fast publicly advertised high-confidence storefront promo codes or configured partner rules (<= 2.5s timeout) and attaches the best code to the cart URL."
+          ),
         verify_handles: z
           .array(z.string().min(1).max(1000))
           .max(10)
@@ -547,25 +608,182 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
       },
       annotations: makeAnnotations("Create Store Cart Link")
     },
-    async ({ store_url, items, mode, discount_code, verify_handles }) =>
+    async ({ store_url, items, mode, discount_code, auto_apply_discount, verify_handles }) =>
       runGuardedTool(ctx, "create_cart_link", async () => {
         const origin = normalizeStoreOrigin(store_url);
         const adapter = await ctx.registry.resolveAdapter(origin, ctx.concurrencyKey);
+
+        let effectiveDiscountCode = discount_code;
+        let discountSource: DiscountSource | "user_supplied" | undefined;
+        let discountContext: string | undefined;
+        let discountNotice: string | undefined;
+        let hasStorefrontDiscountText = false;
+
+        const hasValidShopifyVariants =
+          adapter.platform !== "shopify" ||
+          items.every((i) => /^\d{1,20}$/.test(i.variant_id));
+
+        if (discount_code && adapter.platform === "shopify") {
+          discountSource = "user_supplied";
+          discountNotice =
+            "User-supplied discount code attached to the cart link. Eligibility, exclusions, and expiration are validated by the merchant at checkout.";
+        } else if (
+          !discount_code &&
+          adapter.platform === "shopify" &&
+          hasValidShopifyVariants &&
+          auto_apply_discount !== false &&
+          adapter.findStoreDiscounts
+        ) {
+          let discovered = null;
+          try {
+            const rawDiscounts = await adapter.findStoreDiscounts(origin, {
+              timeoutMs: 2200,
+              fastMode: true,
+              concurrencyKey: ctx.concurrencyKey
+            });
+            discovered = mergePartnerRuleDiscounts(rawDiscounts, attribution, [origin]);
+          } catch (err) {
+            if (
+              err instanceof SsrfError &&
+              (err.code === "INVALID_URL" ||
+                err.code === "BLOCKED_HOST" ||
+                err.code === "BLOCKED_IP" ||
+                err.code === "CONCURRENCY_LIMIT")
+            ) {
+              throw err;
+            }
+            // Fall back to synchronous partner rule check if storefront scan failed/timed out
+            const partnerFallback = extractPartnerRuleDiscounts(origin, attribution);
+            if (partnerFallback.length > 0) {
+              discovered = {
+                store_origin: origin,
+                codes: partnerFallback,
+                automatic_deals: [],
+                checked_sources: ["partner_rules"],
+                source_notice: SOURCE_NOTICE_DISCOUNTS,
+                disclaimer: DISCOUNT_DISCLAIMER
+              };
+            }
+          }
+
+          const bestHigh = discovered?.codes.find((c) => c.confidence === "high");
+          if (bestHigh) {
+            effectiveDiscountCode = bestHigh.code;
+            discountSource = bestHigh.source;
+            discountContext = bestHigh.context_snippet;
+            if (
+              bestHigh.source === "homepage_announcement" ||
+              bestHigh.source === "homepage_banner" ||
+              bestHigh.source === "homepage_text" ||
+              bestHigh.source === "collection_description"
+            ) {
+              hasStorefrontDiscountText = true;
+            }
+            discountNotice =
+              bestHigh.source === "partner_rule"
+                ? "Configured partner discount code auto-applied to the cart link. Eligibility, exclusions, and expiration are validated by the merchant at checkout."
+                : "Publicly advertised storefront discount code auto-applied to the cart link. Eligibility, minimum order values, exclusions, and expiration are validated by the merchant at checkout.";
+          } else if (discovered && discovered.automatic_deals.length > 0) {
+            hasStorefrontDiscountText = true;
+            discountContext = discovered.automatic_deals[0]!.text;
+            discountNotice =
+              "No promo code applied — store advertises an automatic checkout deal (see discount_context). Eligibility is validated by the merchant at checkout.";
+          }
+        }
+
         const result = await adapter.buildCartLink(
           origin,
           items.map((i) => ({ variantId: i.variant_id, quantity: i.quantity })),
           {
             mode: mode ?? "cart",
-            discountCode: discount_code,
+            discountCode: effectiveDiscountCode,
             verifyHandles: verify_handles,
             concurrencyKey: ctx.concurrencyKey
           }
         );
-        const decorated = applyAttribution(result.cart_url, attribution, { kind: "cart" });
-        let anyAffiliate = Boolean(result.affiliate_disclosure || decorated.affiliate_disclosure);
+        const decorated = applyAttribution(result.cart_url, attribution, {
+          kind: "cart",
+          skipRuleDiscount: auto_apply_discount === false && !discount_code
+        });
+        let anyAffiliate = Boolean(
+          result.affiliate_disclosure ||
+            decorated.affiliate_disclosure ||
+            discountSource === "partner_rule"
+        );
         let disclosureNote = decorated.disclosure_note;
+
+        // Ensure partner discount disclosure stays consistent across submitted origin,
+        // canonical result.store_origin, and same-site www./apex aliases.
+        if (!anyAffiliate && attribution.affiliateRules.length > 0) {
+          const finalDiscounts = new Set<string>();
+          try {
+            const parsedDecorated = new URL(decorated.url);
+            for (const [k, v] of parsedDecorated.searchParams.entries()) {
+              if (k.toLowerCase() === "discount" && v.trim()) {
+                finalDiscounts.add(v.trim().toLowerCase());
+              }
+            }
+          } catch {
+            // ignore unparseable URL
+          }
+          if (effectiveDiscountCode?.trim()) {
+            finalDiscounts.add(effectiveDiscountCode.trim().toLowerCase());
+          }
+
+          if (finalDiscounts.size > 0) {
+            // Always include the requested origin alongside result.store_origin so a partner code
+            // surfaced for host A still triggers affiliate disclosure if the cart host redirects
+            // or drifts cross-site to host B.
+            const candidateOrigins = new Set<string>([result.store_origin, origin]);
+            for (const orig of [...candidateOrigins]) {
+              try {
+                const u = new URL(orig);
+                const h = u.hostname.toLowerCase();
+                const altHost = h.startsWith("www.") ? h.slice(4) : `www.${h}`;
+                const altOrigin = `${u.protocol}//${altHost}`;
+                if (isSameStoreSite(orig, altOrigin)) {
+                  candidateOrigins.add(altOrigin);
+                }
+              } catch {
+                // ignore
+              }
+            }
+
+            for (const candOrigin of candidateOrigins) {
+              try {
+                const candHost = new URL(candOrigin).hostname;
+                const matched = matchAffiliateRule(candHost, attribution.affiliateRules);
+                if (!matched) continue;
+                const ruleDiscount = getAffiliateRuleDiscount(matched);
+                const matchesRule = Array.from(finalDiscounts).some(
+                  (finalDiscount) =>
+                    (ruleDiscount !== undefined && ruleDiscount.toLowerCase() === finalDiscount) ||
+                    Boolean(
+                      matched.params &&
+                        Object.entries(matched.params).some(
+                          ([k, v]) =>
+                            k.toLowerCase() === "discount" &&
+                            v.trim().toLowerCase() === finalDiscount
+                        )
+                    )
+                );
+                if (matchesRule) {
+                  anyAffiliate = true;
+                  disclosureNote =
+                    disclosureNote ?? matched.disclosure_label ?? AFFILIATE_DISCLOSURE_NOTE;
+                  break;
+                }
+              } catch {
+                // ignore
+              }
+            }
+          }
+        }
         const decoratedAdditionalLinks = result.additional_cart_links?.map((link) => {
-          const decLink = applyAttribution(link.cart_url, attribution, { kind: "cart" });
+          const decLink = applyAttribution(link.cart_url, attribution, {
+            kind: "cart",
+            skipRuleDiscount: auto_apply_discount === false && !discount_code
+          });
           if (decLink.affiliate_disclosure) {
             anyAffiliate = true;
             disclosureNote = disclosureNote ?? decLink.disclosure_note;
@@ -578,6 +796,13 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
         return {
           ...result,
           cart_url: decorated.url,
+          ...(effectiveDiscountCode && adapter.platform === "shopify"
+            ? { applied_discount_code: effectiveDiscountCode }
+            : {}),
+          ...(discountSource ? { discount_source: discountSource } : {}),
+          ...(discountContext ? { discount_context: discountContext } : {}),
+          ...(discountNotice ? { discount_notice: discountNotice } : {}),
+          ...(hasStorefrontDiscountText ? { source_notice: SOURCE_NOTICE_DISCOUNTS } : {}),
           ...(decoratedAdditionalLinks ? { additional_cart_links: decoratedAdditionalLinks } : {}),
           affiliate_disclosure: anyAffiliate,
           ...(anyAffiliate

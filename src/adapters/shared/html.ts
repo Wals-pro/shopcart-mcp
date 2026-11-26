@@ -61,9 +61,12 @@ function isTagNameBoundary(ch: string | undefined): boolean {
 /**
  * Linear-time O(N) HTML attribute parser on a bounded single-tag slice.
  */
-export function parseTagAttributesLinear(attrSlice: string): Record<string, string> {
+export function parseTagAttributesLinear(
+  attrSlice: string,
+  maxLen = MAX_ATTR_WINDOW
+): Record<string, string> {
   const attrs: Record<string, string> = {};
-  const len = Math.min(attrSlice.length, MAX_ATTR_WINDOW);
+  const len = Math.min(attrSlice.length, maxLen);
   let i = 0;
 
   while (i < len) {

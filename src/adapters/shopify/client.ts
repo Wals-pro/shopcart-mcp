@@ -166,7 +166,12 @@ export class ShopifyClient {
 
   async getText(
     url: string,
-    opts: { timeoutMs?: number; maxBytes?: number; concurrencyKey?: string } = {}
+    opts: {
+      timeoutMs?: number;
+      maxBytes?: number;
+      truncateOnMaxBytes?: boolean;
+      concurrencyKey?: string;
+    } = {}
   ): Promise<{ status: number; text: string; contentType: string; url: string }> {
     const res = await this.fetcher(url, {
       method: "GET",
@@ -177,6 +182,7 @@ export class ShopifyClient {
       timeoutMs: opts.timeoutMs ?? 5000,
       maxRedirects: 3,
       maxBytes: opts.maxBytes ?? 1_048_576,
+      truncateOnMaxBytes: opts.truncateOnMaxBytes,
       concurrencyKey: opts.concurrencyKey
     });
 

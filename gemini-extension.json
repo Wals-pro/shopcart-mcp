@@ -1,6 +1,6 @@
 {
   "name": "shopcart-mcp",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Read-only agentic shopping & cart MCP server for Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2, and any store with Schema.org JSON-LD product data.",
   "contextFileName": "GEMINI.md",
   "mcpServers": {

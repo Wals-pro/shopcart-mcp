@@ -62,6 +62,7 @@ export interface AttributionConfig {
 
 export interface AttributionLinkOptions {
   kind?: "cart" | "product" | "generic";
+  skipRuleDiscount?: boolean;
 }
 
 export interface AttributedLinkResult {
@@ -283,6 +284,40 @@ export function loadAttributionConfig(
   };
 }
 
+function hasDiscountParamKey(params: URLSearchParams): boolean {
+  for (const k of params.keys()) {
+    if (k.toLowerCase() === "discount") {
+      return true;
+    }
+  }
+  return false;
+}
+
+function getDiscountParamValues(params: URLSearchParams): string[] {
+  const values: string[] = [];
+  for (const [k, v] of params.entries()) {
+    if (k.toLowerCase() === "discount") {
+      const trimmed = v.trim();
+      if (trimmed) values.push(trimmed.toLowerCase());
+    }
+  }
+  return values;
+}
+
+export function getAffiliateRuleDiscount(rule: AffiliateRule): string | undefined {
+  const topLevel = rule.discount?.trim();
+  if (topLevel) return topLevel;
+  if (rule.params) {
+    for (const [k, v] of Object.entries(rule.params)) {
+      if (k.toLowerCase() === "discount") {
+        const trimmed = v.trim();
+        if (trimmed) return trimmed;
+      }
+    }
+  }
+  return undefined;
+}
+
 export function matchAffiliateRule(
   hostname: string,
   rules: readonly AffiliateRule[]
@@ -417,17 +452,50 @@ export function applyAttribution(
       parsed.searchParams.set("ref", matchedRule.ref);
       monetized = true;
     }
-    // Preserve any user-supplied discount code on cart permalinks; apply rule discount only when absent
-    if (matchedRule.discount && !parsed.searchParams.has("discount")) {
+    // Preserve any existing discount code (case-insensitive key check) on cart/product URLs;
+    // apply rule discount only when absent and not opted out.
+    const ruleDiscount = getAffiliateRuleDiscount(matchedRule);
+    if (
+      matchedRule.discount &&
+      !opts.skipRuleDiscount &&
+      !hasDiscountParamKey(parsed.searchParams)
+    ) {
       parsed.searchParams.set("discount", matchedRule.discount);
       monetized = true;
     }
     if (matchedRule.params) {
       for (const [k, v] of Object.entries(matchedRule.params)) {
+        if (k.toLowerCase() === "discount") {
+          if (opts.skipRuleDiscount || hasDiscountParamKey(parsed.searchParams)) {
+            continue;
+          }
+        }
         if (!parsed.searchParams.has(k)) {
           parsed.searchParams.set(k, v);
           monetized = true;
         }
+      }
+    }
+
+    // Disclose monetization whenever any case-insensitive discount param on the final URL
+    // carries a configured partner discount code (whether configured in rule.discount or
+    // case-insensitive rule.params.discount, and whether attached by rule, storefront
+    // deduplication, pre-existing on a storefront product URL, or passed explicitly).
+    const finalDiscounts = getDiscountParamValues(parsed.searchParams);
+    if (finalDiscounts.length > 0) {
+      const matchesRuleDiscount = finalDiscounts.some(
+        (finalDiscount) =>
+          (ruleDiscount !== undefined && finalDiscount === ruleDiscount.toLowerCase()) ||
+          Boolean(
+            matchedRule.params &&
+              Object.entries(matchedRule.params).some(
+                ([k, v]) =>
+                  k.toLowerCase() === "discount" && v.trim().toLowerCase() === finalDiscount
+              )
+          )
+      );
+      if (matchesRuleDiscount) {
+        monetized = true;
       }
     }
 
