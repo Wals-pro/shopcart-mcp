@@ -8,6 +8,8 @@ import {
 } from "../attribution/links.js";
 import {
   enforceShellSafeHttpsUrl,
+  enforceShellSafeSearchActionTemplate,
+  isValidLdhHostname,
   sanitizeGenericVariantId,
   sanitizeSafeHandle
 } from "../security/identifiers.js";
@@ -138,6 +140,8 @@ Shell safety:
   Always reuse the user-named store domain for '<store>' (not an untrusted redirected origin).
   Only forward safe identifiers (^[A-Za-z0-9._~-]+$ for handles; ^[A-Za-z0-9._:-]+$ for variant IDs),
   and never reuse a store-returned URL as a shell argument unless it contains no quotes, whitespace, or shell metacharacters.
+  Reject or skip any untrusted or store-derived value containing quotes (', "), shell metacharacters ($, \`, (, ), ;, |, &, <, >, \\), or unexpected whitespace.
+  Never copy store-returned text (product titles, descriptions, snippets) into <query>, --question, or --note shell arguments; if a user-provided free-text value contains a single quote ('), pass arguments directly via an argv array (without a shell) or reject/omit it — never place raw ' inside '...'.
 
 Exit codes:
   0  Success
@@ -1006,6 +1010,45 @@ export function sanitizeCliOutput(payload: unknown): unknown {
         delete store.origin;
       }
     }
+    if (typeof store.myshopifyDomain === "string") {
+      const normalizedHost = store.myshopifyDomain.trim().toLowerCase().replace(/\.$/, "");
+      if (isValidLdhHostname(normalizedHost)) {
+        store.myshopifyDomain = normalizedHost;
+      } else {
+        delete store.myshopifyDomain;
+      }
+    }
+    if (
+      store.capabilities &&
+      typeof store.capabilities === "object" &&
+      !Array.isArray(store.capabilities)
+    ) {
+      const caps = { ...(store.capabilities as Record<string, unknown>) };
+      if (typeof caps.searchActionUrl === "string") {
+        const safeTemplate = enforceShellSafeSearchActionTemplate(caps.searchActionUrl);
+        if (safeTemplate) {
+          caps.searchActionUrl = safeTemplate;
+        } else {
+          delete caps.searchActionUrl;
+        }
+      }
+      for (const epKey of ["storefrontMcpEndpoint", "storefrontUcpEndpoint"] as const) {
+        if (typeof caps[epKey] === "string") {
+          const safeEp = enforceShellSafeHttpsUrl(caps[epKey]);
+          if (safeEp) {
+            caps[epKey] = safeEp;
+          } else {
+            delete caps[epKey];
+          }
+        }
+      }
+      if (Array.isArray(caps.sitemaps)) {
+        caps.sitemaps = (caps.sitemaps as unknown[])
+          .map((u) => (typeof u === "string" ? enforceShellSafeHttpsUrl(u) : null))
+          .filter((u): u is string => Boolean(u));
+      }
+      store.capabilities = caps;
+    }
     obj.store = store;
   }
 
@@ -1163,6 +1206,17 @@ export function sanitizeCliOutput(payload: unknown): unknown {
   return obj;
 }
 
+function sanitizeCliErrorMessage(raw: string): string {
+  const withSafeUrls = raw.replace(/https?:\/\/[^\s)\]]+/gi, (match) => {
+    const trailing = match.match(/[.,;:]+$/)?.[0] ?? "";
+    const core = trailing ? match.slice(0, -trailing.length) : match;
+    const safe = enforceShellSafeHttpsUrl(core);
+    return `${safe ?? "[redacted-url]"}${trailing}`;
+  });
+  const cleaned = sanitizeText(withSafeUrls, 500);
+  return cleaned.replace(/['"`$();|\\<>]/g, "").replace(/\s{2,}/g, " ").trim() || "Request failed";
+}
+
 export async function runCli(argv: readonly string[], deps: CliRunDeps = {}): Promise<number> {
   const stdout = deps.stdout ?? process.stdout;
   const stderr = deps.stderr ?? process.stderr;
@@ -1246,7 +1300,7 @@ export async function runCli(argv: readonly string[], deps: CliRunDeps = {}): Pr
           {
             error: "url_blocked",
             code: err.code,
-            message: err.message
+            message: sanitizeCliErrorMessage(err.message)
           },
           null,
           2
@@ -1258,7 +1312,7 @@ export async function runCli(argv: readonly string[], deps: CliRunDeps = {}): Pr
       `${JSON.stringify(
         {
           error: "runtime_error",
-          message: err instanceof Error ? err.message : String(err)
+          message: sanitizeCliErrorMessage(err instanceof Error ? err.message : String(err))
         },
         null,
         2

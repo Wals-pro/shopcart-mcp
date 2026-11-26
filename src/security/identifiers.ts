@@ -85,6 +85,55 @@ export function enforceShellSafeHttpsUrl(rawUrl: string): string | null {
   return finalUrl;
 }
 
+const SEARCH_ACTION_PLACEHOLDER_RE = /\{[A-Za-z0-9_]{1,64}\}/g;
+const SEARCH_ACTION_FORBIDDEN_RE = /[\x00-\x1f\x7f\s'"$`\\;|<>()#]/;
+
+/**
+ * Validate a Schema.org SearchAction URL template (e.g. `https://shop.example/search?q={search_term_string}`).
+ * Enforces `https:`, strict RFC 1123 LDH hostname, no userinfo/non-443 port, and rejects any quotes,
+ * whitespace, control characters, `#`, or shell metacharacters anywhere in the template (only allowing
+ * safe `{placeholder_name}` tokens in the path or query string).
+ */
+export function enforceShellSafeSearchActionTemplate(rawTemplate: string): string | null {
+  if (!rawTemplate || typeof rawTemplate !== "string") return null;
+  const trimmed = rawTemplate.trim();
+  if (!trimmed || trimmed.length > 500) return null;
+  if (!trimmed.startsWith("https://")) return null;
+  if (SEARCH_ACTION_FORBIDDEN_RE.test(trimmed)) return null;
+
+  // Forbid placeholders in scheme or authority
+  const afterScheme = trimmed.slice("https://".length);
+  const pathOrQueryIdx = afterScheme.search(/[/?]/);
+  const braceIdx = afterScheme.indexOf("{");
+  if (braceIdx !== -1 && (pathOrQueryIdx === -1 || braceIdx < pathOrQueryIdx)) {
+    return null;
+  }
+
+  // Replace only strict `{[A-Za-z0-9_]{1,64}}` placeholders; reject any remaining `{` or `}`
+  const probeUrl = trimmed.replace(SEARCH_ACTION_PLACEHOLDER_RE, "test");
+  if (probeUrl.includes("{") || probeUrl.includes("}")) {
+    return null;
+  }
+
+  const safeProbe = enforceShellSafeHttpsUrl(probeUrl);
+  if (!safeProbe) return null;
+
+  // Reject if path contained `&` or anything else that required percent-encoding or normalization changes
+  try {
+    const parsedProbe = new URL(probeUrl);
+    if (parsedProbe.protocol !== "https:" || parsedProbe.username || parsedProbe.password) {
+      return null;
+    }
+    if (parsedProbe.port !== "" && parsedProbe.port !== "443") return null;
+    if (!isValidLdhHostname(parsedProbe.hostname)) return null;
+    if (parsedProbe.pathname.includes("&")) return null;
+  } catch {
+    return null;
+  }
+
+  return trimmed;
+}
+
 /**
  * Validate a product or collection handle against the strict allowlist:
  * `^[A-Za-z0-9._~-]{1,200}$` with path traversal (`..`) rejected.

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import {
   enforceShellSafeHttpsUrl,
+  enforceShellSafeSearchActionTemplate,
   extractSafeHandleFromUrl,
   sanitizeGenericVariantId,
   sanitizeSafeHandle
@@ -1154,7 +1155,15 @@ function extractVariantAttributes(node: JsonObject): Array<{ name: string; value
 }
 
 function shortUrlHash(canonicalUrl: string): string {
-  return crypto.createHash("sha256").update(canonicalUrl).digest("hex").slice(0, 12);
+  let hashInput = canonicalUrl;
+  try {
+    const parsed = new URL(canonicalUrl);
+    // Hash origin + pathname only so query strings and fragments cannot vary fallback IDs
+    hashInput = `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    // fall back to raw canonicalUrl if unparseable
+  }
+  return crypto.createHash("sha256").update(hashInput).digest("hex").slice(0, 32);
 }
 
 function deriveHandleFromUrl(url: string, fallbackSku: string | null): string {
@@ -1432,8 +1441,7 @@ function buildFromProductGroup(
         ? sanitizeCatalogOptionalText(group["productGroupID"], 80)
         : null,
       groupIds.sku,
-      groupIds.gtin,
-      handle
+      groupIds.gtin
     ],
     `product-${urlHash}`
   );
@@ -1573,10 +1581,7 @@ function buildFromProductNode(
     }
 
     variants.push({
-      id: pickSafeJsonLdVariantId(
-        [vSku, vGtin, vMpn, offers.length === 1 ? deriveHandleFromUrl(canonicalUrl, null) : null],
-        `offer-${urlHash}-${i + 1}`
-      ),
+      id: pickSafeJsonLdVariantId([vSku, vGtin, vMpn], `offer-${urlHash}-${i + 1}`),
       title: offer.title ?? (optionValues.length > 0 ? optionValues.join(" / ") : "Default"),
       sku: vSku,
       gtin: vGtin,
@@ -1608,7 +1613,7 @@ function buildFromProductNode(
       usedOpenGraphFallback = true;
       variants.push({
         id: pickSafeJsonLdVariantId(
-          [skuFallback, productIds.gtin, deriveHandleFromUrl(canonicalUrl, null)],
+          [skuFallback, productIds.gtin, productIds.mpn],
           `offer-${urlHash}-1`
         ),
         title: optionValues.length > 0 ? optionValues.join(" / ") : "Default",
@@ -1645,7 +1650,7 @@ function buildFromProductNode(
 
   const handle = deriveHandleFromUrl(canonicalUrl, skuFallback);
   const productId = pickSafeJsonLdVariantId(
-    [skuFallback, productIds.gtin, productIds.mpn, handle],
+    [skuFallback, productIds.gtin, productIds.mpn],
     `product-${urlHash}`
   );
   const overallAvailability = pickOverallAvailability(variants);
@@ -1718,7 +1723,7 @@ function buildFromOpenGraphOnly(
 
   const money = formatMoney(parsedPrice.amount, currency);
   const urlHash = shortUrlHash(canonicalUrl);
-  const safeOgId = pickSafeJsonLdVariantId([sku, handle], `product-${urlHash}`);
+  const safeOgId = pickSafeJsonLdVariantId([sku], `product-${urlHash}`);
 
   return {
     currency,
@@ -1836,24 +1841,26 @@ function extractSearchActionTemplate(
 
       const cleaned = stripControlAndInvisible(template).trim();
       if (!cleaned || cleaned.length > 500) continue;
-      if (/[\s#\\]/.test(cleaned)) continue;
       if (LLM_CONTROL_TOKEN_TEST_RE.test(cleaned)) continue;
-      if (!cleaned.startsWith("https://") && !(cleaned.startsWith("/") && !cleaned.startsWith("//"))) {
+
+      let candidateTemplate: string;
+      if (cleaned.startsWith("https://")) {
+        candidateTemplate = cleaned;
+      } else if (cleaned.startsWith("/") && !cleaned.startsWith("//")) {
+        try {
+          candidateTemplate = `${new URL(pageUrl).origin}${cleaned}`;
+        } catch {
+          continue;
+        }
+      } else {
         continue;
       }
 
-      // Forbid placeholders inside scheme/authority (must appear only in path or query)
-      if (cleaned.startsWith("https://")) {
-        const afterScheme = cleaned.slice("https://".length);
-        const pathOrQueryIdx = afterScheme.search(/[/?]/);
-        const braceIdx = afterScheme.indexOf("{");
-        if (braceIdx !== -1 && (pathOrQueryIdx === -1 || braceIdx < pathOrQueryIdx)) {
-          continue;
-        }
-      }
+      const safeTemplate = enforceShellSafeSearchActionTemplate(candidateTemplate);
+      if (!safeTemplate) continue;
 
-      // Validate the base URL (replacing placeholder token with "test")
-      const probeUrl = cleaned.replace(/\{[^}]{1,64}\}/g, "test");
+      // Validate the resolved probe URL against SSRF + same-site store policy
+      const probeUrl = safeTemplate.replace(/\{[A-Za-z0-9_]{1,64}\}/g, "test");
       const safeProbe = sanitizeUniversalProductUrl(probeUrl, pageUrl);
       if (safeProbe) {
         try {
@@ -1863,7 +1870,7 @@ function extractSearchActionTemplate(
         } catch {
           continue;
         }
-        return cleaned;
+        return safeTemplate;
       }
     }
   }

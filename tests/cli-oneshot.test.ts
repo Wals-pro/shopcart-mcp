@@ -646,6 +646,7 @@ describe("CLI process E2E (one-shot flags + zero-arg stdio MCP backward compatib
         "search_products",
         "get_product",
         "get_store_policies",
+        "find_store_discounts",
         "create_cart_link"
       ]);
     } finally {

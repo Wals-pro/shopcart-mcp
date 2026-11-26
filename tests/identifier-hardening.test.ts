@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { BigCommerceAdapter } from "../src/adapters/bigcommerce/adapter.js";
 import { BigCommerceClient } from "../src/adapters/bigcommerce/client.js";
 import { UniversalJsonLdAdapter } from "../src/adapters/jsonld/adapter.js";
-import { parseProductFromHtml } from "../src/adapters/jsonld/parser.js";
+import { parseProductFromHtml, parseSiteMetadataFromHtml } from "../src/adapters/jsonld/parser.js";
 import { MagentoClient } from "../src/adapters/magento/client.js";
 import type { AdapterRegistry } from "../src/adapters/registry.js";
 import { ShopifyAdapter } from "../src/adapters/shopify/adapter.js";
@@ -258,10 +258,24 @@ describe("Strict identifier allowlists & adapter emission hardening", () => {
       "https://merchant.example.com/p/item%24%28id%29%3Bwhoami.html"
     );
     expect(parsed).not.toBeNull();
-    // Unsafe decoded URL handle and unsafe SKU must never be emitted; fallback IDs are product-unique hashes
+    // Unsafe decoded URL handle and unsafe SKU must never be emitted; fallback IDs are 128-bit product-unique hashes
     expect(parsed!.product.handle).toBe("");
-    expect(parsed!.product.id).toMatch(/^product-[0-9a-f]{12}$/);
-    expect(parsed!.product.variants[0]!.id).toMatch(/^offer-[0-9a-f]{12}-1$/);
+    expect(parsed!.product.id).toMatch(/^product-[0-9a-f]{32}$/);
+    expect(parsed!.product.variants[0]!.id).toMatch(/^offer-[0-9a-f]{32}-1$/);
+
+    // Fallback hash is identical regardless of query parameters on the product URL
+    const parsedWithQueryA = parseProductFromHtml(
+      html,
+      "https://merchant.example.com/p/item%24%28id%29%3Bwhoami.html?ref=alpha&color=red"
+    );
+    const parsedWithQueryB = parseProductFromHtml(
+      html,
+      "https://merchant.example.com/p/item%24%28id%29%3Bwhoami.html?ref=beta&sort=price"
+    );
+    expect(parsedWithQueryA!.product.id).toBe(parsed!.product.id);
+    expect(parsedWithQueryB!.product.id).toBe(parsed!.product.id);
+    expect(parsedWithQueryA!.product.variants[0]!.id).toBe(parsed!.product.variants[0]!.id);
+    expect(parsedWithQueryB!.product.variants[0]!.id).toBe(parsed!.product.variants[0]!.id);
 
     // Legitimate URL handle passes through unchanged
     const okParsed = parseProductFromHtml(
@@ -272,35 +286,31 @@ describe("Strict identifier allowlists & adapter emission hardening", () => {
     expect(okParsed!.product.variants[0]!.id).toBe("SKU-42");
   });
 
-  it("derives product-unique JSON-LD fallback IDs so two same-origin products cannot collide in variantCache", async () => {
-    const htmlA = `<!doctype html><html><head><script type="application/ld+json">${JSON.stringify({
-      "@context": "https://schema.org",
-      "@type": "Product",
-      name: "Product Alpha",
-      offers: {
-        "@type": "Offer",
-        price: "29.00",
-        priceCurrency: "EUR",
-        availability: "https://schema.org/InStock"
-      }
-    })}</script></head><body></body></html>`;
-    const htmlB = `<!doctype html><html><head><script type="application/ld+json">${JSON.stringify({
-      "@context": "https://schema.org",
-      "@type": "Product",
-      name: "Product Beta",
-      offers: {
-        "@type": "Offer",
-        price: "59.00",
-        priceCurrency: "EUR",
-        availability: "https://schema.org/InStock"
-      }
-    })}</script></head><body></body></html>`;
+  it("partitions JSON-LD variantCache per user and uses 128-bit query-stripped fallback IDs across same-last-segment paths", async () => {
+    const makeHtml = (name: string, price: string, sku?: string) =>
+      `<!doctype html><html><head><script type="application/ld+json">${JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "Product",
+        name,
+        ...(sku ? { sku } : {}),
+        offers: {
+          "@type": "Offer",
+          price,
+          priceCurrency: "EUR",
+          availability: "https://schema.org/InStock"
+        }
+      })}</script></head><body></body></html>`;
 
-    const urlA = "https://merchant.example.com/p/alpha%24%28id%29.html";
-    const urlB = "https://merchant.example.com/p/beta%24%28id%29.html";
+    const urlCatA = "https://merchant.example.com/cat-a/widget";
+    const urlCatB = "https://merchant.example.com/cat-b/widget";
+    const urlSharedSkuA = "https://merchant.example.com/deals/a";
+    const urlSharedSkuB = "https://merchant.example.com/deals/b";
 
     const mockFetch = async (url: string): Promise<SafeFetchResponse> => {
-      const bodyText = url.includes("beta") ? htmlB : htmlA;
+      let bodyText = makeHtml("Widget A", "29.00");
+      if (url.includes("/cat-b/widget")) bodyText = makeHtml("Widget B", "59.00");
+      else if (url.includes("/deals/a")) bodyText = makeHtml("Deal A", "19.00", "SHARED-SKU");
+      else if (url.includes("/deals/b")) bodyText = makeHtml("Deal B", "99.00", "SHARED-SKU");
       return {
         status: 200,
         url,
@@ -312,32 +322,183 @@ describe("Strict identifier allowlists & adapter emission hardening", () => {
     };
 
     const adapter = new UniversalJsonLdAdapter({ fetcher: mockFetch });
-    const prodA = await adapter.getProduct("https://merchant.example.com", urlA);
-    const prodB = await adapter.getProduct("https://merchant.example.com", urlB);
+
+    // 1. Two distinct paths sharing the same last path segment (/cat-a/widget vs /cat-b/widget) get distinct 128-bit IDs
+    const prodA = await adapter.getProduct("https://merchant.example.com", `${urlCatA}?src=userA`, {
+      concurrencyKey: "user:A"
+    });
+    const prodB = await adapter.getProduct("https://merchant.example.com", `${urlCatB}?src=userB`, {
+      concurrencyKey: "user:B"
+    });
 
     const varA = prodA.product.variants[0]!.id;
     const varB = prodB.product.variants[0]!.id;
-    expect(varA).toMatch(/^offer-[0-9a-f]{12}-1$/);
-    expect(varB).toMatch(/^offer-[0-9a-f]{12}-1$/);
+    expect(varA).toMatch(/^offer-[0-9a-f]{32}-1$/);
+    expect(varB).toMatch(/^offer-[0-9a-f]{32}-1$/);
     expect(varA).not.toBe(varB);
     expect(prodA.product.id).not.toBe(prodB.product.id);
 
-    // Building a cart link for product A after product B was fetched must still point to product A
+    // Same path with different query params produces the exact same 128-bit fallback ID
+    const prodAOtherQuery = await adapter.getProduct(
+      "https://merchant.example.com",
+      `${urlCatA}?utm_source=different`,
+      { concurrencyKey: "user:A" }
+    );
+    expect(prodAOtherQuery.product.variants[0]!.id).toBe(varA);
+
+    // User A resolves ONLY to User A's product; User B cannot hijack or read User A's bucket
     const cartA = await adapter.buildCartLink(
       "https://merchant.example.com",
       [{ variantId: varA, quantity: 1 }],
-      { mode: "cart" }
+      { mode: "cart", concurrencyKey: "user:A" }
     );
-    expect(cartA.cart_url).toContain("alpha");
-    expect(cartA.cart_url).not.toContain("beta");
+    expect(cartA.cart_url).toContain("/cat-a/widget");
+    expect(cartA.cart_url).not.toContain("/cat-b/widget");
+    expect(cartA.items[0]?.verified).toBe(true);
 
-    const cartB = await adapter.buildCartLink(
+    // User B trying to use User A's variant ID without verify_handles cannot read User A's cache bucket
+    await expect(
+      adapter.buildCartLink(
+        "https://merchant.example.com",
+        [{ variantId: varA, quantity: 1 }],
+        { mode: "cart", concurrencyKey: "user:B" }
+      )
+    ).rejects.toThrow(/without a product URL/i);
+
+    // 2. Even when two products share an identical SKU, User B's getProduct never overwrites User A's cache entry
+    await adapter.getProduct("https://merchant.example.com", urlSharedSkuA, {
+      concurrencyKey: "user:A"
+    });
+    await adapter.getProduct("https://merchant.example.com", urlSharedSkuB, {
+      concurrencyKey: "user:B"
+    });
+
+    const userASkuCart = await adapter.buildCartLink(
       "https://merchant.example.com",
-      [{ variantId: varB, quantity: 1 }],
-      { mode: "cart" }
+      [{ variantId: "SHARED-SKU", quantity: 1 }],
+      { mode: "cart", concurrencyKey: "user:A" }
     );
-    expect(cartB.cart_url).toContain("beta");
-    expect(cartB.cart_url).not.toContain("alpha");
+    expect(userASkuCart.cart_url).toBe(urlSharedSkuA);
+    expect(userASkuCart.items[0]?.verified).toBe(true);
+
+    const userBSkuCart = await adapter.buildCartLink(
+      "https://merchant.example.com",
+      [{ variantId: "SHARED-SKU", quantity: 1 }],
+      { mode: "cart", concurrencyKey: "user:B" }
+    );
+    expect(userBSkuCart.cart_url).toBe(urlSharedSkuB);
+    expect(userBSkuCart.items[0]?.verified).toBe(true);
+  });
+
+  it("gates searchActionUrl, store.myshopifyDomain, and CLI error messages against quotes and shell metacharacters", async () => {
+    const shellUnsafeRe = /['"$()`;|\\<>]/;
+
+    // 1. Unsafe SearchAction templates (quotes, $(...), bad placeholders) are rejected at parse time
+    const badSearchHtml = `<!doctype html><html><head><script type="application/ld+json">${JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      name: "Unsafe Search Store",
+      potentialAction: {
+        "@type": "SearchAction",
+        target: "https://merchant.example.com/search?q={search_term_string}&x='$(id)'"
+      }
+    })}</script></head><body></body></html>`;
+    expect(parseSiteMetadataFromHtml(badSearchHtml, "https://merchant.example.com/").searchActionTemplate).toBeNull();
+
+    const badPlaceholderHtml = badSearchHtml.replace(
+      "https://merchant.example.com/search?q={search_term_string}&x='$(id)'",
+      "https://merchant.example.com/search?q={$(whoami)}"
+    );
+    expect(parseSiteMetadataFromHtml(badPlaceholderHtml, "https://merchant.example.com/").searchActionTemplate).toBeNull();
+
+    // Legitimate SearchAction template with query params and {search_term_string} is preserved
+    const goodSearchHtml = badSearchHtml.replace(
+      "https://merchant.example.com/search?q={search_term_string}&x='$(id)'",
+      "https://merchant.example.com/search?type=product&q={search_term_string}"
+    );
+    expect(parseSiteMetadataFromHtml(goodSearchHtml, "https://merchant.example.com/").searchActionTemplate).toBe(
+      "https://merchant.example.com/search?type=product&q={search_term_string}"
+    );
+
+    // 2. sanitizeCliOutput strips unsafe store.myshopifyDomain and unsafe store.capabilities.searchActionUrl
+    const cleanedStorePayload = sanitizeCliOutput({
+      store: {
+        platform: "jsonld",
+        origin: "https://merchant.example.com",
+        myshopifyDomain: "evil'$(id).myshopify.com",
+        capabilities: {
+          searchActionUrl: "https://merchant.example.com/search?q={search_term_string}'$(whoami)",
+          storefrontMcpEndpoint: "https://evil'host.example.com/api/mcp",
+          sitemaps: [
+            "https://merchant.example.com/sitemap.xml",
+            "https://evil'host.example.com/sitemap.xml"
+          ]
+        }
+      }
+    }) as {
+      store: {
+        origin?: string;
+        myshopifyDomain?: string;
+        capabilities: {
+          searchActionUrl?: string;
+          storefrontMcpEndpoint?: string;
+          sitemaps?: string[];
+        };
+      };
+    };
+    expect(cleanedStorePayload.store.origin).toBe("https://merchant.example.com");
+    expect(cleanedStorePayload.store.myshopifyDomain).toBeUndefined();
+    expect(cleanedStorePayload.store.capabilities.searchActionUrl).toBeUndefined();
+    expect(cleanedStorePayload.store.capabilities.storefrontMcpEndpoint).toBeUndefined();
+    expect(cleanedStorePayload.store.capabilities.sitemaps).toEqual([
+      "https://merchant.example.com/sitemap.xml"
+    ]);
+    expect(JSON.stringify(cleanedStorePayload)).not.toMatch(/['$()`;|\\<>]/);
+
+    // Legitimate myshopifyDomain and searchActionUrl survive intact
+    const safeStorePayload = sanitizeCliOutput({
+      store: {
+        platform: "shopify",
+        origin: "https://snocks.com",
+        myshopifyDomain: "Snocks-Store.myshopify.com",
+        capabilities: {
+          searchActionUrl: "https://snocks.com/search?q={search_term_string}"
+        }
+      }
+    }) as { store: { myshopifyDomain?: string; capabilities: { searchActionUrl?: string } } };
+    expect(safeStorePayload.store.myshopifyDomain).toBe("snocks-store.myshopify.com");
+    expect(safeStorePayload.store.capabilities.searchActionUrl).toBe(
+      "https://snocks.com/search?q={search_term_string}"
+    );
+
+    // 3. Redirect / extraction error in UniversalJsonLdAdapter never leaks raw quotes or shell metacharacters into CLI stderr
+    const redirectAdapter = new UniversalJsonLdAdapter({
+      fetcher: async (): Promise<SafeFetchResponse> => ({
+        status: 200,
+        url: "https://merchant.example.com/redirected'$(id);|whoami",
+        contentType: "text/html; charset=utf-8",
+        headers: { "content-type": "text/html; charset=utf-8" },
+        bodyBuffer: Buffer.from("<html><body>No product metadata here</body></html>", "utf8"),
+        bodyText: "<html><body>No product metadata here</body></html>"
+      })
+    });
+    const registry = {
+      resolve: vi.fn(),
+      resolveAdapter: vi.fn(async () => redirectAdapter)
+    } as unknown as AdapterRegistry;
+
+    const stdout = makeCapture();
+    const stderr = makeCapture();
+    const code = await runCli(
+      ["product", "merchant.example.com", "https://merchant.example.com/p/item"],
+      { registry, stdout, stderr }
+    );
+    expect(code).toBe(1);
+    expect(stdout.text()).toBe("");
+    const errPayload = JSON.parse(stderr.text()) as { error: string; message: string };
+    expect(errPayload.error).toBe("runtime_error");
+    expect(errPayload.message).not.toMatch(shellUnsafeRe);
+    expect(errPayload.message).not.toContain("$(id)");
   });
 
   it("enforces RFC 1123 ASCII LDH hostnames and blocks cross-site canonicalOrigin takeover on redirects", async () => {
@@ -787,34 +948,47 @@ describe("Strict identifier allowlists & adapter emission hardening", () => {
     for (const [name, doc] of [
       ["SKILL.md", skillText],
       ["/SKILL.md", skillHttp],
+      ["/llms.txt", llmsTxt],
+      ["/llms-full.txt", llmsFullTxt],
+      ["README.md", readmeText],
+      ["renderCliHelp()", helpText]
+    ] as const) {
+      expect(doc, `${name} quoting rule`).toMatch(/single-quote/i);
+      expect(doc, `${name} user-named domain rule`).toMatch(/user-named store domain|user-named/i);
+      // Catch-all rejection rule
+      expect(doc, `${name} catch-all rejection`).toMatch(/reject(?:\s+or\s+|\/)skip\s+any\s+untrusted/i);
+      expect(doc, `${name} shell metacharacters`).toMatch(/shell metacharacters/i);
+      expect(doc, `${name} unexpected whitespace`).toMatch(/unexpected whitespace/i);
+      // Free-text single-quote / argv rule
+      expect(doc, `${name} free-text never copy`).toMatch(/never copy store-returned text/i);
+      expect(doc, `${name} free-text flags`).toMatch(/--question.*--note/i);
+      expect(doc, `${name} free-text single quote argv`).toMatch(/single quote[\s\S]*?argv/i);
+      expect(doc, `${name} never raw single quote inside single quotes`).toMatch(/never plac(?:e|ing) raw `?'`? inside/i);
+    }
+
+    for (const [name, doc] of [
+      ["SKILL.md", skillText],
+      ["/SKILL.md", skillHttp],
       ["/llms.txt", llmsTxt]
     ] as const) {
       expect(doc, `${name} single-quoted inspect`).toContain("npx -y shopcart-mcp inspect '<store>'");
       expect(doc, `${name} single-quoted search`).toContain("npx -y shopcart-mcp search '<store>' '<query>'");
       expect(doc, `${name} single-quoted product`).toContain("npx -y shopcart-mcp product '<store>'");
       expect(doc, `${name} single-quoted cart`).toContain("npx -y shopcart-mcp cart '<store>' '<variantId:qty>'");
-      expect(doc, `${name} quoting rule`).toMatch(/single-quote/i);
-      expect(doc, `${name} user-named domain rule`).toMatch(/user-named store domain|user-named/i);
       expect(doc, `${name} no bare <store> in inspect`).not.toContain("shopcart-mcp inspect <store>");
       expect(doc, `${name} no double-quoted <query>`).not.toContain('"<query>"');
     }
 
     expect(llmsFullTxt).toContain("npx -y shopcart-mcp inspect '<store>'");
-    expect(llmsFullTxt).toMatch(/single-quot/i);
-    expect(llmsFullTxt).toMatch(/user-named store domain|user-named/i);
 
     expect(readmeText).toContain("npx -y shopcart-mcp inspect 'snocks.com'");
     expect(readmeText).toContain("npx -y shopcart-mcp search 'snocks.com' 'socken'");
     expect(readmeText).toContain("npx -y shopcart-mcp product 'snocks.com' '<handle>'");
     expect(readmeText).toContain("npx -y shopcart-mcp cart 'snocks.com' '<variantId>:1'");
-    expect(readmeText).toMatch(/single-quote/i);
-    expect(readmeText).toMatch(/user-named store domain|user-named/i);
 
     expect(helpText).toContain("shopcart-mcp inspect '<store>'");
     expect(helpText).toContain("shopcart-mcp search '<store>' '<query>'");
     expect(helpText).toContain("shopcart-mcp product '<store>' '<handle-or-url>'");
     expect(helpText).toContain("shopcart-mcp cart '<store>' '<id:qty>'");
-    expect(helpText).toMatch(/single-quote/i);
-    expect(helpText).toMatch(/user-named store domain|user-named/i);
   });
 });
