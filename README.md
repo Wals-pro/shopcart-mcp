@@ -1,4 +1,4 @@
-# shopcart-mcp
+# <img src="public/logo.svg" alt="ShopCart" width="32" height="32" valign="middle"> shopcart-mcp
 
 [![Wals-pro/shopcart-mcp MCP server](https://glama.ai/mcp/servers/Wals-pro/shopcart-mcp/badges/score.svg)](https://glama.ai/mcp/servers/Wals-pro/shopcart-mcp)
 

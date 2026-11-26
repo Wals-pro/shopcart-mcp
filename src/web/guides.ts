@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import type { AppConfig } from "../config.js";
 import { detectLang, escapeHtml, type Lang } from "../auth/pages.js";
 import { isPromoFreeProActive } from "../billing/quota.js";
+import { renderFaviconHeadLinks, renderShopCartWordmark, renderSparkCartSvg } from "./brand.js";
 import { ANSWER_PAGE_GUIDES } from "./guides-answer-pages.js";
 import {
   getComfortFeatures,
@@ -1250,11 +1251,16 @@ code {
   font-size: 16px;
 }
 
-.brand img {
+.brand img,
+.brand svg {
   width: 26px;
   height: 26px;
-  border-radius: 7px;
   display: block;
+  flex-shrink: 0;
+}
+
+.brand-accent {
+  color: #ff2d59;
 }
 
 .brand-badge {
@@ -1790,6 +1796,13 @@ li {
   color: var(--walspro-ink);
 }
 
+.foot-brand svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+  flex-shrink: 0;
+}
+
 .foot-links {
   display: flex;
   align-items: center;
@@ -1889,8 +1902,8 @@ function renderHeader(config: AppConfig, lang: Lang, switchHref: string, current
   return `<header class="site-header">
   <div class="wrap nav">
     <a class="brand" href="/?lang=${lang}">
-      <img src="/assets/walspro-mark.svg" alt="wals.pro" width="26" height="26">
-      <span>ShopCart MCP</span>
+      ${renderSparkCartSvg({ size: 26, className: "brand-logo" })}
+      ${renderShopCartWordmark("MCP")}
       <span class="brand-badge">&gt; MCP_</span>
     </a>
     <nav class="nav-links" aria-label="${de ? "Hauptnavigation" : "Main navigation"}">
@@ -1910,8 +1923,8 @@ function renderFooter(config: AppConfig, lang: Lang): string {
   <div class="wrap">
     <div class="foot-row">
       <div class="foot-brand">
-        <img src="/assets/walspro-mark.svg" alt="" width="20" height="20">
-        <span><strong>ShopCart MCP</strong> · by <a href="https://wals.pro" target="_blank" rel="noopener noreferrer">wals.pro</a></span>
+        ${renderSparkCartSvg({ size: 20, className: "foot-mark" })}
+        <span><strong>Shop<span class="brand-accent">Cart</span> MCP</strong> · by <a href="https://wals.pro" target="_blank" rel="noopener noreferrer">wals.pro</a></span>
       </div>
       <div class="foot-links">
         <a href="/guides?lang=${lang}">Guides</a>
@@ -2188,9 +2201,7 @@ export function renderGuidePage(config: AppConfig, guide: GuideDefinition): stri
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#141414">
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="icon" type="image/png" href="/favicon.png">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+${renderFaviconHeadLinks()}
 <title>${escapeHtml(guide.metaTitle)}</title>
 <meta name="description" content="${escapeHtml(guide.metaDescription)}">
 <link rel="canonical" href="${escapeHtml(canonicalUrl)}">
@@ -2384,9 +2395,7 @@ export function renderGuidesOverviewPage(config: AppConfig, lang: Lang): string 
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#141414">
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="icon" type="image/png" href="/favicon.png">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+${renderFaviconHeadLinks()}
 <title>${escapeHtml(metaTitle)}</title>
 <meta name="description" content="${escapeHtml(metaDescription)}">
 <link rel="canonical" href="${escapeHtml(canonicalUrl)}">

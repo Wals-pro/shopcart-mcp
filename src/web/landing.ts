@@ -1,6 +1,7 @@
 import type { AppConfig } from "../config.js";
 import { escapeHtml, type Lang } from "../auth/pages.js";
 import { isPromoFreeProActive } from "../billing/quota.js";
+import { renderFaviconHeadLinks, renderShopCartWordmark, renderSparkCartSvg } from "./brand.js";
 import {
   AI_LINK_BASES,
   CONNECT_SETTINGS_URLS,
@@ -701,9 +702,7 @@ export function renderLandingPage(config: AppConfig, lang: Lang): string {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#090909">
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="icon" type="image/png" href="/favicon.png">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+${renderFaviconHeadLinks()}
 <title>${escapeHtml(title)}</title>
 <meta name="description" content="${escapeHtml(description)}">
 <link rel="canonical" href="${escapeHtml(pageUrl)}">
@@ -744,8 +743,8 @@ ${
 <header class="site-header">
   <div class="wrap nav">
     <a class="brand" href="/?lang=${lang}">
-      <img class="brand-logo" src="/assets/walspro-mark.svg" alt="wals.pro" width="28" height="28">
-      <span>ShopCart</span>
+      ${renderSparkCartSvg({ size: 28, className: "brand-logo" })}
+      ${renderShopCartWordmark()}
     </a>
 
     <nav class="nav-links" aria-label="${de ? "Hauptnavigation" : "Main navigation"}">
@@ -1348,8 +1347,8 @@ ${
   <div class="wrap">
     <div class="foot-row">
       <div class="foot-brand">
-        <img class="foot-mark" src="/assets/walspro-mark.svg" alt="" width="20" height="20">
-        <span><strong>ShopCart</strong> · by <a href="https://wals.pro" target="_blank" rel="noopener noreferrer">wals.pro</a></span>
+        ${renderSparkCartSvg({ size: 20, className: "foot-mark" })}
+        <span><strong>Shop<span class="brand-accent">Cart</span></strong> · by <a href="https://wals.pro" target="_blank" rel="noopener noreferrer">wals.pro</a></span>
       </div>
       <div class="foot-links">
         <a href="/guides?lang=${lang}">${de ? "Ratgeber" : "Guides"}</a>
