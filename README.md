@@ -1,5 +1,7 @@
 # shopcart-mcp
 
+[![Wals-pro/shopcart-mcp MCP server](https://glama.ai/mcp/servers/Wals-pro/shopcart-mcp/badges/score.svg)](https://glama.ai/mcp/servers/Wals-pro/shopcart-mcp)
+
 **Agentic Shopping & Cart MCP for Shopify (and more)** — built by [Wals.pro](https://wals.pro).
 
 Connect **Claude.ai**, **ChatGPT**, **Cursor**, **Claude Code**, or **VS Code** directly to Shopify storefronts to search products, inspect live variants & pricing, and build deterministic cart permalinks — with built-in SSRF protection and prompt-injection sanitization.
