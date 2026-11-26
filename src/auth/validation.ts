@@ -1,6 +1,14 @@
 import { sha256Base64Url, timingSafeEqualStr } from "./crypto.js";
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+const LDH_LABEL_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
+
+export function isValidHttpsHostname(hostname: string): boolean {
+  if (!hostname || hostname.length > 253 || !hostname.includes(".")) return false;
+  const labels = hostname.split(".");
+  if (labels.length < 2) return false;
+  return labels.every((label) => LDH_LABEL_RE.test(label));
+}
 
 export function isLoopbackHost(hostname: string): boolean {
   return LOOPBACK_HOSTS.has(hostname.toLowerCase());
@@ -22,7 +30,7 @@ export function isValidRedirectUri(rawUri: string): boolean {
     if (u.hash) return false;
     if (u.username || u.password) return false;
     if (u.protocol === "https:") {
-      return Boolean(u.hostname && u.hostname.includes("."));
+      return isValidHttpsHostname(u.hostname);
     }
     if (u.protocol === "http:") {
       return isLoopbackHost(u.hostname);

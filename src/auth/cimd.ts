@@ -50,6 +50,16 @@ const FIRST_PARTY_PINS: Record<string, ResolvedOAuthClient> = {
     grantTypes: ["authorization_code", "refresh_token"],
     isCimd: true,
     applicationType: "native"
+  },
+  "https://chatgpt.com/oauth/client.json": {
+    clientId: "https://chatgpt.com/oauth/client.json",
+    clientName: "ChatGPT",
+    redirectUris: ["https://chatgpt.com/connector_platform_oauth_redirect"],
+    tokenEndpointAuthMethod: "none",
+    clientSecretHash: null,
+    grantTypes: ["authorization_code", "refresh_token"],
+    isCimd: true,
+    applicationType: "web"
   }
 };
 

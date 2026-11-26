@@ -1,5 +1,6 @@
 import { parseGa4MeasurementId, type AppConfig } from "../config.js";
 import { escapeHtml, type Lang } from "../auth/pages.js";
+import { isLoopbackHost, isValidHttpsHostname } from "../auth/validation.js";
 
 export type AnalyticsPageType =
   | "landing"
@@ -21,12 +22,29 @@ function hasValidGa4Id(raw: string | undefined): boolean {
   return Boolean(parseGa4MeasurementId(raw));
 }
 
-function normalizeFormActionOrigin(raw: string | undefined): string | null {
-  if (!raw) return null;
+const STRICT_CSP_ORIGIN_RE =
+  /^https?:\/\/(?:\[::1\]|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*)(?::\d{1,5})?$/i;
+
+export function normalizeFormActionOrigin(raw: string | undefined): string | null {
+  if (!raw || typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed || /[\s;,]/.test(trimmed)) return null;
   try {
-    const parsed = new URL(raw);
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
-    return parsed.origin;
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === "https:") {
+      if (!isValidHttpsHostname(parsed.hostname)) return null;
+    } else if (parsed.protocol === "http:") {
+      if (!isLoopbackHost(parsed.hostname)) return null;
+    } else {
+      return null;
+    }
+    if (parsed.port) {
+      const portNum = Number(parsed.port);
+      if (!/^\d{1,5}$/.test(parsed.port) || portNum < 1 || portNum > 65535) return null;
+    }
+    const origin = parsed.origin;
+    if (!STRICT_CSP_ORIGIN_RE.test(origin)) return null;
+    return origin;
   } catch {
     return null;
   }
@@ -106,7 +124,14 @@ export function buildOAuthCsp(
   formActionOrigin?: string
 ): string {
   const safeOrigin = normalizeFormActionOrigin(formActionOrigin);
-  const formAction = safeOrigin ? `'self' ${safeOrigin}` : "'self'";
+  // Chromium & WebKit enforce CSP `form-action` across the entire HTTP redirect chain
+  // following a form POST (W3C CSP3 issue #8). OAuth clients routinely relay their
+  // registered redirect_uri across origins (e.g. chatgpt.com -> platform.openai.com,
+  // oauth-redirect.googleusercontent.com -> gemini.google.com). Keep `form-action 'self'`
+  // strict when no OAuth redirect is active (e.g. /auth/magic), and permit `'self'`,
+  // the validated redirect_uri origin (including loopback http://127.0.0.1:<port>),
+  // plus downstream `https:` redirect hops on /oauth/authorize.
+  const formAction = safeOrigin ? `'self' ${safeOrigin} https:` : "'self'";
   if (!hasValidGa4Id(ga4MeasurementId)) {
     return `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action ${formAction}; frame-ancestors 'none'; base-uri 'none'`;
   }
