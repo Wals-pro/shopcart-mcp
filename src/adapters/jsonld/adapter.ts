@@ -1,3 +1,4 @@
+import { isSameStoreSite } from "../../security/sanitize.js";
 import {
   safeFetch,
   SsrfError,
@@ -138,6 +139,8 @@ function buildSearchUrlFromTemplate(
   return sanitizeUniversalProductUrl(replaced, origin);
 }
 
+const MAX_CACHED_ORIGINS = 1000;
+
 export class UniversalJsonLdAdapter implements StoreAdapter {
   readonly platform = "jsonld";
   private readonly fetcher: JsonLdFetcherFn;
@@ -158,6 +161,33 @@ export class UniversalJsonLdAdapter implements StoreAdapter {
   clearCache(): void {
     this.siteCache.clear();
     this.variantCache.clear();
+  }
+
+  private setSiteCacheEntry(key: string, entry: CachedSiteHints, now: number): void {
+    if (this.siteCache.size >= MAX_CACHED_ORIGINS && !this.siteCache.has(key)) {
+      for (const [k, v] of this.siteCache) {
+        if (v.expiresAt <= now) this.siteCache.delete(k);
+      }
+      while (this.siteCache.size >= MAX_CACHED_ORIGINS) {
+        const oldest = this.siteCache.keys().next().value;
+        if (oldest === undefined) break;
+        this.siteCache.delete(oldest);
+      }
+    }
+    this.siteCache.set(key, entry);
+  }
+
+  private getOrCreateVariantMap(originKey: string): Map<string, CachedVariantPointer> {
+    const existing = this.variantCache.get(originKey);
+    if (existing) return existing;
+    while (this.variantCache.size >= MAX_CACHED_ORIGINS) {
+      const oldest = this.variantCache.keys().next().value;
+      if (oldest === undefined) break;
+      this.variantCache.delete(oldest);
+    }
+    const created = new Map<string, CachedVariantPointer>();
+    this.variantCache.set(originKey, created);
+    return created;
   }
 
   private resolveTargetProductUrl(origin: string, handleOrUrl: string): string {
@@ -205,7 +235,19 @@ export class UniversalJsonLdAdapter implements StoreAdapter {
         concurrencyKey
       });
       if (res.status >= 200 && res.status < 300 && res.bodyText) {
-        return parseSitemapsFromRobotsTxt(res.bodyText, res.url || origin);
+        let robotsBase = origin;
+        if (res.url) {
+          try {
+            const finalOrigin = validateExternalUrl(res.url).origin;
+            if (!isSameStoreSite(origin, finalOrigin)) {
+              return [];
+            }
+            robotsBase = res.url;
+          } catch {
+            return [];
+          }
+        }
+        return parseSitemapsFromRobotsTxt(res.bodyText, robotsBase);
       }
       return [];
     } catch (err) {
@@ -248,7 +290,9 @@ export class UniversalJsonLdAdapter implements StoreAdapter {
     let finalOrigin = normalizedOrigin;
     try {
       const finalParsed = validateExternalUrl(res.url || normalizedOrigin);
-      finalOrigin = finalParsed.origin;
+      if (isSameStoreSite(normalizedOrigin, finalParsed.origin)) {
+        finalOrigin = finalParsed.origin;
+      }
     } catch {
       finalOrigin = normalizedOrigin;
     }
@@ -261,19 +305,35 @@ export class UniversalJsonLdAdapter implements StoreAdapter {
       return null;
     }
 
+    const sameSiteResponseUrl = (() => {
+      try {
+        if (res.url && isSameStoreSite(normalizedOrigin, validateExternalUrl(res.url).origin)) {
+          return res.url;
+        }
+      } catch {
+        // fall back to finalOrigin
+      }
+      return finalOrigin;
+    })();
+
     const meta =
       res.status >= 200 && res.status < 300 && !isSoftWaf
-        ? parseSiteMetadataFromHtml(res.bodyText, res.url || finalOrigin)
+        ? parseSiteMetadataFromHtml(res.bodyText, sameSiteResponseUrl)
         : null;
 
     const sitemaps = opts.includeSitemaps
       ? await this.fetchRobotsSitemaps(finalOrigin, opts.concurrencyKey)
       : [];
 
+    const candidateCanonical = meta?.canonicalOrigin ?? finalOrigin;
+    const safeCanonicalOrigin = isSameStoreSite(normalizedOrigin, candidateCanonical)
+      ? candidateCanonical
+      : finalOrigin;
+
     const hints: CachedSiteHints = {
-      origin: meta?.canonicalOrigin ?? finalOrigin,
+      origin: safeCanonicalOrigin,
       name: meta?.name ?? null,
-      currency: meta?.currency ?? inferCurrencyFromUrl(finalOrigin),
+      currency: meta?.currency ?? inferCurrencyFromUrl(safeCanonicalOrigin),
       country: meta?.country ?? null,
       wafRestricted: isWafStatus || isSoftWaf,
       searchActionTemplate: meta?.searchActionTemplate ?? null,
@@ -281,9 +341,9 @@ export class UniversalJsonLdAdapter implements StoreAdapter {
       expiresAt: now + CACHE_TTL_MS
     };
 
-    this.siteCache.set(normalizedOrigin, hints);
-    if (hints.origin !== normalizedOrigin) {
-      this.siteCache.set(hints.origin, hints);
+    this.setSiteCacheEntry(normalizedOrigin, hints, now);
+    if (hints.origin !== normalizedOrigin && isSameStoreSite(normalizedOrigin, hints.origin)) {
+      this.setSiteCacheEntry(hints.origin, hints, now);
     }
 
     return hints;
@@ -291,40 +351,43 @@ export class UniversalJsonLdAdapter implements StoreAdapter {
 
   private rememberProductVariants(origin: string, result: GetProductResult): void {
     const now = Date.now();
-    const map = this.variantCache.get(origin) ?? new Map<string, CachedVariantPointer>();
     const canonicalProductUrl = result.product.url;
 
-    for (const v of result.product.variants) {
-      const pointer: CachedVariantPointer = {
-        productUrl: canonicalProductUrl,
-        variantUrl: v.url ?? canonicalProductUrl,
-        title:
-          v.title && v.title !== "Default"
-            ? `${result.product.title} — ${v.title}`
-            : result.product.title,
-        available: v.available,
-        price: v.price,
-        expiresAt: now + CACHE_TTL_MS
-      };
+    const writeToOriginMap = (originKey: string): void => {
+      const map = this.getOrCreateVariantMap(originKey);
+      for (const v of result.product.variants) {
+        const pointer: CachedVariantPointer = {
+          productUrl: canonicalProductUrl,
+          variantUrl: v.url ?? canonicalProductUrl,
+          title:
+            v.title && v.title !== "Default"
+              ? `${result.product.title} — ${v.title}`
+              : result.product.title,
+          available: v.available,
+          price: v.price,
+          expiresAt: now + CACHE_TTL_MS
+        };
 
-      const keys = [v.id, v.sku, v.gtin, v.ean, v.url, canonicalProductUrl].filter(
-        (k): k is string => Boolean(k)
-      );
-      for (const key of keys) {
-        map.set(key, pointer);
+        const keys = [v.id, v.sku, v.gtin, v.ean, v.url, canonicalProductUrl].filter(
+          (k): k is string => Boolean(k)
+        );
+        for (const key of keys) {
+          map.set(key, pointer);
+        }
       }
-    }
 
-    // Evict oldest keys if cache grows large
-    while (map.size > MAX_CACHED_VARIANTS_PER_ORIGIN) {
-      const firstKey = map.keys().next().value;
-      if (firstKey === undefined) break;
-      map.delete(firstKey);
-    }
+      // Evict oldest keys if cache grows large
+      while (map.size > MAX_CACHED_VARIANTS_PER_ORIGIN) {
+        const firstKey = map.keys().next().value;
+        if (firstKey === undefined) break;
+        map.delete(firstKey);
+      }
+    };
 
-    this.variantCache.set(origin, map);
-    if (result.store_origin !== origin) {
-      this.variantCache.set(result.store_origin, map);
+    writeToOriginMap(origin);
+    // Never share the same Map reference across origins; only mirror into a separate map if apex <-> www same site
+    if (result.store_origin !== origin && isSameStoreSite(origin, result.store_origin)) {
+      writeToOriginMap(result.store_origin);
     }
   }
 
@@ -459,7 +522,15 @@ export class UniversalJsonLdAdapter implements StoreAdapter {
       );
     }
 
+    const parsedOrigin = validateExternalUrl(origin);
     const finalUrl = res.url || targetUrl;
+    const finalParsed = validateExternalUrl(finalUrl);
+    if (!isSameStoreHost(finalParsed.hostname, parsedOrigin.hostname)) {
+      throw new Error(
+        `Product page redirected to unrelated host '${finalParsed.hostname}' (expected '${parsedOrigin.hostname}').`
+      );
+    }
+
     const parsed = parseProductFromHtml(res.bodyText, finalUrl, {
       currencyHint: opts.currencyHint
     });
@@ -475,11 +546,14 @@ export class UniversalJsonLdAdapter implements StoreAdapter {
       );
     }
 
-    let effectiveOrigin: string;
+    let effectiveOrigin = finalParsed.origin;
     try {
-      effectiveOrigin = validateExternalUrl(parsed.product.url).origin;
+      const productOrigin = validateExternalUrl(parsed.product.url).origin;
+      if (isSameStoreSite(finalParsed.origin, productOrigin)) {
+        effectiveOrigin = productOrigin;
+      }
     } catch {
-      effectiveOrigin = validateExternalUrl(finalUrl).origin;
+      effectiveOrigin = finalParsed.origin;
     }
 
     const result: GetProductResult = {
@@ -488,7 +562,7 @@ export class UniversalJsonLdAdapter implements StoreAdapter {
       product: parsed.product
     };
 
-    this.rememberProductVariants(validateExternalUrl(origin).origin, result);
+    this.rememberProductVariants(parsedOrigin.origin, result);
     return result;
   }
 

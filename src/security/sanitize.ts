@@ -43,7 +43,8 @@ const DANGEROUS_HTML_TAGS = [
   "noscript",
   "svg",
   "object",
-  "embed"
+  "embed",
+  "template"
 ] as const;
 
 const HIDDEN_STYLE_TAGS = new Set(["div", "span", "p", "section"]);
@@ -349,8 +350,37 @@ const SHARED_PLATFORM_SUFFIXES = [
   "netlify.app",
   "shopware.store",
   "herokuapp.com",
-  "github.io"
+  "github.io",
+  "co.uk",
+  "org.uk",
+  "ac.uk",
+  "com.au",
+  "co.jp",
+  "co.nz",
+  "co.za",
+  "com.br",
+  "com.mx",
+  "com.tr",
+  "com.be"
 ];
+
+export function isSameStoreSiteOrSubdomain(storeOrigin: string, candidateOrigin: string): boolean {
+  if (isSameStoreSite(storeOrigin, candidateOrigin)) return true;
+  try {
+    const a = new URL(storeOrigin);
+    const b = new URL(candidateOrigin);
+    if (a.protocol !== b.protocol) return false;
+    const baseDomain = a.hostname.toLowerCase().replace(/^www\./, "");
+    const candidateHost = b.hostname.toLowerCase();
+    const isSharedSuffix = SHARED_PLATFORM_SUFFIXES.some(
+      (suffix) => baseDomain === suffix || baseDomain.endsWith(`.${suffix}`)
+    );
+    if (isSharedSuffix || !baseDomain.includes(".")) return false;
+    return candidateHost.endsWith(`.${baseDomain}`);
+  } catch {
+    return false;
+  }
+}
 
 export function sanitizeSafeUrl(
   rawUrl: string | null | undefined,
@@ -404,8 +434,7 @@ export function sanitizeSafeUrl(
     (host === "cdn.shopify.com" || host.endsWith(".shopifycdn.com") || host.endsWith(".myshopify.com"));
 
   const hostMatchesBigCommerceCdn =
-    Boolean(options.allowBigCommerceCdn) &&
-    (/^cdn\d*\.bigcommerce\.com$/.test(host) || host.endsWith(".bigcommerce.com"));
+    Boolean(options.allowBigCommerceCdn) && /^cdn\d*\.bigcommerce\.com$/.test(host);
 
   const hostMatchesExplicit =
     Array.isArray(options.allowedHosts) &&

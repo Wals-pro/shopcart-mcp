@@ -427,6 +427,7 @@ export class ShopifyAdapter implements StoreAdapter {
       );
       if (res.status === 200 && Array.isArray(res.data?.result?.tools)) {
         const tools = res.data.result.tools
+          .slice(0, 50)
           .map((t) => sanitizeOptionalText(t.name, 80))
           .filter((t): t is string => Boolean(t));
         return { supported: true, tools };

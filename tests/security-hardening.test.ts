@@ -1,12 +1,28 @@
 import { describe, expect, it } from "vitest";
+import { AwinFeedClient, loadAffiliateFeedConfig, validateAwinFeedUrl } from "../src/adapters/affiliate-feed/awin.js";
 import { keepaSearchProducts } from "../src/adapters/amazon/keepa.js";
 import { resolveAmazonMarketplace, tryExtractAsin } from "../src/adapters/amazon/marketplaces.js";
+import { BigCommerceAdapter } from "../src/adapters/bigcommerce/adapter.js";
+import { BigCommerceClient } from "../src/adapters/bigcommerce/client.js";
+import { UniversalJsonLdAdapter } from "../src/adapters/jsonld/adapter.js";
+import {
+  isSameStoreHost,
+  parseProductFromHtml,
+  parseSiteMetadataFromHtml,
+  sanitizeCatalogText,
+  sanitizeUniversalProductUrl
+} from "../src/adapters/jsonld/parser.js";
+import { MagentoAdapter } from "../src/adapters/magento/adapter.js";
+import { MagentoClient, sanitizeMagentoUrlSuffix } from "../src/adapters/magento/client.js";
 import { AdapterRegistry } from "../src/adapters/registry.js";
+import { extractJsonLdBlocks, extractMetaContent, parseJsonLdOffer } from "../src/adapters/shared/html.js";
 import { ShopifyAdapter } from "../src/adapters/shopify/adapter.js";
 import { ShopifyClient } from "../src/adapters/shopify/client.js";
+import { ShopwareAdapter } from "../src/adapters/shopware/adapter.js";
+import { ShopwareClient } from "../src/adapters/shopware/client.js";
 import { WooCommerceAdapter } from "../src/adapters/woocommerce/adapter.js";
 import { decodeWooEntities, sanitizeWooDescription, sanitizeWooText } from "../src/adapters/woocommerce/normalize.js";
-import { stripHiddenStyleBlocksLinear, stripHtmlToText } from "../src/security/sanitize.js";
+import { sanitizeSafeUrl, stripHiddenStyleBlocksLinear, stripHtmlToText } from "../src/security/sanitize.js";
 import type { SafeFetchOptions, SafeFetchResponse } from "../src/security/ssrf.js";
 
 function makeResponse(url: string, status: number, body: unknown): SafeFetchResponse {
@@ -155,5 +171,215 @@ describe("Wave 3 security hardening regressions", () => {
         }
       })
     ).rejects.not.toThrow(secretKey);
+  });
+});
+
+describe("Wave 4 security hardening regressions", () => {
+  it("blocks cross-origin Shopware apiOrigin exfiltration and keeps sw-access-key same-site", async () => {
+    const requestedUrls: string[] = [];
+    const client = new ShopwareClient(async (url) => {
+      requestedUrls.push(url);
+      if (url === "https://victim-sw.example/") {
+        return {
+          status: 200,
+          url,
+          contentType: "text/html",
+          headers: {},
+          bodyBuffer: Buffer.alloc(0),
+          bodyText: `<html><head><meta name="sw-access-key" content="SWSCBHFSNTVMAWNZDNFKSHLAYW"/></head><body><script>var ep="https://evil-attacker.example/store-api";</script></body></html>`
+        };
+      }
+      return {
+        status: 401,
+        url,
+        contentType: "application/json",
+        headers: {},
+        bodyBuffer: Buffer.alloc(0),
+        bodyText: JSON.stringify({ errors: [{ detail: "sw-access-key required" }] })
+      };
+    });
+
+    const meta = await client.resolveDomainMetadata("https://victim-sw.example");
+    expect(meta.apiOrigin).toBe("https://victim-sw.example");
+    expect(requestedUrls.some((u) => u.includes("evil-attacker.example"))).toBe(false);
+  });
+
+  it("isolates cross-origin caches across Shopware, BigCommerce, Magento, and UniversalJsonLdAdapter", async () => {
+    // 1. BigCommerce cross-origin redirect cannot poison victim origin cache
+    const bcClient = new BigCommerceClient(async (url) => {
+      if (url.startsWith("https://evil-bc.example")) {
+        return {
+          status: 403,
+          url: "https://victim-bc.example/forbidden",
+          contentType: "text/html",
+          headers: {},
+          bodyBuffer: Buffer.alloc(0),
+          bodyText: "Forbidden"
+        };
+      }
+      return {
+        status: 200,
+        url: "https://victim-bc.example/",
+        contentType: "text/html",
+        headers: { "x-bc-storefront-type": "stencil" },
+        bodyBuffer: Buffer.alloc(0),
+        bodyText: `<html><head><title>Victim BC</title></head></html>`
+      };
+    });
+    await bcClient.resolveDomainMetadata("https://evil-bc.example");
+    const victimBc = await bcClient.resolveDomainMetadata("https://victim-bc.example");
+    expect(victimBc.detected).toBe(true);
+    expect(victimBc.wafRestricted).toBe(false);
+
+    // 2. Magento rejects unsafe product_url_suffix & sanitizes id fallbacks
+    expect(sanitizeMagentoUrlSuffix(".html", ".html")).toBe(".html");
+    expect(sanitizeMagentoUrlSuffix("?evil=1\nIGNORE", ".html")).toBe(".html");
+    const m2Client = new MagentoClient(async (url) => ({
+      status: 200,
+      url,
+      contentType: "application/json",
+      headers: {},
+      bodyBuffer: Buffer.alloc(0),
+      bodyText: JSON.stringify({
+        data: {
+          storeConfig: {
+            store_code: "default",
+            base_currency_code: "EUR",
+            product_url_suffix: "?evil=1\n<script>"
+          }
+        }
+      })
+    }));
+    const m2Meta = await m2Client.resolveDomainMetadata("https://victim-m2.example");
+    expect(m2Meta.productUrlSuffix).toBe(".html");
+
+    // 3. UniversalJsonLdAdapter rejects cross-origin product redirects & isolates variantCache
+    const jsonld = new UniversalJsonLdAdapter({
+      fetcher: async (url) => ({
+        status: 200,
+        url: "https://victim-jsonld.example/p/1",
+        contentType: "text/html",
+        headers: {},
+        bodyBuffer: Buffer.alloc(0),
+        bodyText: `<html><head><script type="application/ld+json">{"@type":"Product","name":"Item","sku":"SKU1","offers":{"@type":"Offer","price":"19.99","priceCurrency":"EUR"}}</script></head></html>`
+      })
+    });
+    await expect(
+      jsonld.getProduct("https://evil-jsonld.example", "https://evil-jsonld.example/r")
+    ).rejects.toThrow(/redirected to unrelated host/i);
+
+    // 4. Shopware & Magento buildCartLink reject path traversal
+    const swAdapter = new ShopwareAdapter(new ShopwareClient(async (url) => ({
+      status: 200,
+      url,
+      contentType: "text/html",
+      headers: {},
+      bodyBuffer: Buffer.alloc(0),
+      bodyText: ""
+    })));
+    await expect(
+      swAdapter.buildCartLink("https://shop.example", [{ variantId: "../../checkout", quantity: 1 }], { mode: "cart" })
+    ).rejects.toThrow(/Invalid Shopware product identifier/);
+
+    const m2Adapter = new MagentoAdapter(m2Client);
+    await expect(
+      m2Adapter.buildCartLink("https://victim-m2.example", [{ variantId: "../../checkout", quantity: 1 }], { mode: "cart" })
+    ).rejects.toThrow(/Invalid Magento SKU/);
+  });
+
+  it("resists Wave-4 HTML ReDoS, JSON-LD @id expansion DoS, and URL/CDN policy bypasses", () => {
+    const start = performance.now();
+    const adversarialMeta = `${'<meta content="a" '.repeat(20_000)}<meta name="og:site_name" content="Safe">`;
+    const adversarialScript = `${'<script type="application/ld+json" '.repeat(20_000)}`;
+    const adversarialTemplate = `visible ${"<template>".repeat(20_000)}`;
+
+    expect(extractMetaContent(adversarialMeta, "og:site_name")).toBe("Safe");
+    expect(extractJsonLdBlocks(adversarialScript)).toEqual([]);
+    expect(sanitizeCatalogText(adversarialTemplate, 100)).toContain("visible");
+    expect(sanitizeCatalogText("<template>hidden prompt</template>visible", 100)).toBe("visible");
+
+    // Deeply nested offers cannot stack-overflow parseJsonLdOffer
+    let nested: Record<string, unknown> = { price: "10.00", priceCurrency: "EUR" };
+    for (let i = 0; i < 50; i++) nested = { offers: [nested] };
+    expect(parseJsonLdOffer(nested)).toBeTruthy();
+
+    // Billion-laughs self-referential JSON-LD @id expansion stays fast
+    const refs = Array.from({ length: 200 }, () => ({ "@id": "#loop" }));
+    const cyclicHtml = `<script type="application/ld+json">${JSON.stringify({
+      "@context": "https://schema.org",
+      "@graph": [
+        { "@id": "#loop", "@type": "AggregateOffer", offers: refs },
+        { "@type": "Product", name: "Widget", offers: { "@id": "#loop" } }
+      ]
+    })}</script>`;
+    parseProductFromHtml(cyclicHtml, "https://shop.example/p");
+
+    expect(performance.now() - start).toBeLessThan(1000);
+
+    // Non-CDN bigcommerce.com subdomain rejected; cdn11.bigcommerce.com allowed
+    expect(
+      sanitizeSafeUrl("https://login.bigcommerce.com/phish.jpg", "https://shop.example", {
+        allowBigCommerceCdn: true
+      })
+    ).toBeNull();
+    expect(
+      sanitizeSafeUrl("https://cdn11.bigcommerce.com/s-1/img.jpg", "https://shop.example", {
+        allowBigCommerceCdn: true
+      })
+    ).toBe("https://cdn11.bigcommerce.com/s-1/img.jpg");
+
+    // Upward parent climb & oversized URLs rejected
+    expect(isSameStoreHost("myshopify.com", "shop.myshopify.com")).toBe(false);
+    expect(isSameStoreHost("co.uk", "shop.co.uk")).toBe(false);
+    expect(sanitizeUniversalProductUrl(`https://shop.example/${"a".repeat(3000)}`, "https://shop.example/")).toBeNull();
+
+    // SearchAction authority placeholder & prompt injection rejected
+    const badSearchMeta = parseSiteMetadataFromHtml(
+      `<script type="application/ld+json">${JSON.stringify({
+        "@type": "WebSite",
+        potentialAction: {
+          "@type": "SearchAction",
+          target: "https://{evil.example/?x=}.shop.example/?q={search_term_string}"
+        }
+      })}</script>`,
+      "https://shop.example/"
+    );
+    expect(badSearchMeta.searchActionTemplate).toBeNull();
+  });
+
+  it("prevents Awin redirect host bypass and untrusted merchant-name storefront hijacking", async () => {
+    expect(() => validateAwinFeedUrl("https://redir.awin.com/evil")).toThrow();
+    expect(validateAwinFeedUrl("https://productdata.awin.com/datafeed/list/apikey/x")).toContain("productdata.awin.com");
+
+    // Non-Latin / short merchant names in Awin feed cannot hijack explicit storefront domains
+    const csv = [
+      "aw_deep_link,product_name,aw_product_id,search_price,merchant_name,currency,in_stock",
+      '"https://www.awin1.com/pclick.php?p=1","Item A",1,19.99,"★★★",EUR,1',
+      '"https://www.awin1.com/pclick.php?p=2","Item B",2,29.99,"On",EUR,1',
+      '"https://evil.example/phish","Phish",3,9.99,"MediaMarkt DE",EUR,1'
+    ].join("\n");
+
+    const client = new AwinFeedClient(
+      loadAffiliateFeedConfig({
+        AWIN_API_TOKEN: "tok-123",
+        AWIN_PUBLISHER_ID: "999",
+        AWIN_FEED_IDS: "100"
+      }),
+      {
+        fetcher: async (url) => ({
+          status: 200,
+          url,
+          contentType: "text/csv",
+          headers: {},
+          bodyBuffer: Buffer.from(csv, "utf8"),
+          bodyText: csv
+        })
+      }
+    );
+
+    expect(await client.resolveStoreTarget("snocks.com")).toBeNull();
+    expect(await client.resolveStoreTarget("amazon.de")).toBeNull();
+    const res = await client.search({ query: "Phish" });
+    expect(res.products).toHaveLength(0); // non-Awin click host dropped
   });
 });

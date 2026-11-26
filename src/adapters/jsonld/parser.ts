@@ -1,8 +1,11 @@
 import {
+  isSameStoreSite,
+  isSameStoreSiteOrSubdomain,
   sanitizeOptionalText,
   sanitizeText,
   stripControlAndInvisible,
-  stripHtmlToText
+  stripHtmlToText,
+  stripTagBlocksLinear
 } from "../../security/sanitize.js";
 import { validateExternalUrl } from "../../security/ssrf.js";
 import { formatMoney, normalizeCurrency } from "../shopify/normalize.js";
@@ -13,7 +16,9 @@ const MAX_JSONLD_BLOCKS = 32;
 const MAX_JSONLD_NODES = 600;
 const MAX_GRAPH_DEPTH = 16;
 const MAX_VARIANTS = 100;
+const MAX_OFFER_VISITS = 500;
 const MAX_IMAGES = 10;
+const MAX_SAFE_URL_LENGTH = 2048;
 
 const TRACKING_PARAMS = new Set([
   "utm_source",
@@ -123,7 +128,10 @@ function stripPromptInjectionTokens(input: string): string {
 
 export function sanitizeCatalogText(input: string | null | undefined, maxLen: number): string {
   if (!input) return "";
-  const noTemplates = String(input).replace(/<template\b[^>]*>[\s\S]*?<\/template>/gi, " ");
+  const raw = String(input);
+  const maxRaw = Math.max(maxLen * 16, 65_536);
+  const bounded = raw.length > maxRaw ? raw.slice(0, maxRaw) : raw;
+  const noTemplates = stripTagBlocksLinear(bounded, ["template"]);
   const stripped = stripPromptInjectionTokens(stripHtmlToText(noTemplates, maxLen + 64));
   return sanitizeText(stripped, maxLen);
 }
@@ -141,7 +149,10 @@ export function sanitizeCatalogDescription(
   maxLen = 1500
 ): string {
   if (!input) return "";
-  const noTemplates = String(input).replace(/<template\b[^>]*>[\s\S]*?<\/template>/gi, " ");
+  const raw = String(input);
+  const maxRaw = Math.max(maxLen * 16, 65_536);
+  const bounded = raw.length > maxRaw ? raw.slice(0, maxRaw) : raw;
+  const noTemplates = stripTagBlocksLinear(bounded, ["template"]);
   const stripped = stripPromptInjectionTokens(stripHtmlToText(noTemplates, maxLen + 64));
   const cleaned = stripControlAndInvisible(stripped)
     .replace(/\r/g, "")
@@ -686,11 +697,8 @@ export function normalizeSchemaAvailability(
 export function isSameStoreHost(candidateHost: string, storeHost: string): boolean {
   const a = candidateHost.toLowerCase().replace(/\.$/, "");
   const b = storeHost.toLowerCase().replace(/\.$/, "");
-  if (a === b) return true;
-  const baseA = a.startsWith("www.") ? a.slice(4) : a;
-  const baseB = b.startsWith("www.") ? b.slice(4) : b;
-  if (baseA === baseB) return true;
-  return baseA.endsWith(`.${baseB}`) || baseB.endsWith(`.${baseA}`);
+  if (!a || !b) return false;
+  return isSameStoreSiteOrSubdomain(`https://${b}`, `https://${a}`);
 }
 
 export function sanitizeUniversalProductUrl(
@@ -699,7 +707,7 @@ export function sanitizeUniversalProductUrl(
 ): string | null {
   if (typeof rawUrl !== "string") return null;
   const cleaned = stripControlAndInvisible(rawUrl).trim();
-  if (!cleaned) return null;
+  if (!cleaned || cleaned.length > MAX_SAFE_URL_LENGTH) return null;
 
   let resolved: string;
   try {
@@ -707,6 +715,7 @@ export function sanitizeUniversalProductUrl(
   } catch {
     return null;
   }
+  if (resolved.length > MAX_SAFE_URL_LENGTH) return null;
 
   let parsed: URL;
   try {
@@ -730,7 +739,8 @@ export function sanitizeUniversalProductUrl(
     }
   }
   parsed.hash = "";
-  return parsed.toString();
+  const finalUrl = parsed.toString();
+  return finalUrl.length <= MAX_SAFE_URL_LENGTH ? finalUrl : null;
 }
 
 export function sanitizeUniversalImageUrl(rawUrl: unknown, pageUrl: string): string | null {
@@ -744,7 +754,7 @@ export function sanitizeUniversalImageUrl(rawUrl: unknown, pageUrl: string): str
   if (!candidate) return null;
 
   let trimmed = stripControlAndInvisible(candidate).trim();
-  if (!trimmed) return null;
+  if (!trimmed || trimmed.length > MAX_SAFE_URL_LENGTH) return null;
   if (trimmed.startsWith("//")) {
     trimmed = `https:${trimmed}`;
   }
@@ -755,10 +765,12 @@ export function sanitizeUniversalImageUrl(rawUrl: unknown, pageUrl: string): str
   } catch {
     return null;
   }
+  if (resolved.length > MAX_SAFE_URL_LENGTH) return null;
 
   try {
     const parsed = validateExternalUrl(resolved);
-    return parsed.toString();
+    const finalUrl = parsed.toString();
+    return finalUrl.length <= MAX_SAFE_URL_LENGTH ? finalUrl : null;
   } catch {
     return null;
   }
@@ -979,15 +991,23 @@ function extractOffersFromField(
   fallbackAvailability?: { status: ProductAvailability; available: boolean }
 ): ExtractedOffer[] {
   const results: ExtractedOffer[] = [];
+  const visited = new Set<JsonObject>();
+  let totalVisits = 0;
 
   const processOfferNode = (rawNode: unknown, depth: number): void => {
-    if (depth > 4 || results.length >= MAX_VARIANTS) return;
+    if (depth > 4 || results.length >= MAX_VARIANTS || totalVisits >= MAX_OFFER_VISITS) return;
+    totalVisits++;
     const resolved = resolveRef(rawNode, idMap);
     if (Array.isArray(resolved)) {
-      for (const item of resolved) processOfferNode(item, depth + 1);
+      for (const item of resolved) {
+        if (results.length >= MAX_VARIANTS || totalVisits >= MAX_OFFER_VISITS) break;
+        processOfferNode(item, depth + 1);
+      }
       return;
     }
     if (!isObject(resolved)) return;
+    if (visited.has(resolved)) return;
+    visited.add(resolved);
 
     const types = getSchemaTypes(resolved);
     const isAggregate = types.includes("aggregateoffer");
@@ -1230,10 +1250,16 @@ function buildFromProductGroup(
     ? normalizeSchemaAvailability(hints.ogAvailability)
     : undefined;
 
-  const rawVariants = asArray(group["hasVariant"])
-    .map((v) => resolveRef(v, idMap))
-    .filter(isObject)
-    .slice(0, MAX_VARIANTS);
+  const seenVariantNodes = new Set<JsonObject>();
+  const rawVariants: JsonObject[] = [];
+  for (const v of asArray(group["hasVariant"])) {
+    if (rawVariants.length >= MAX_VARIANTS) break;
+    const resolved = resolveRef(v, idMap);
+    if (isObject(resolved) && !seenVariantNodes.has(resolved)) {
+      seenVariantNodes.add(resolved);
+      rawVariants.push(resolved);
+    }
+  }
 
   for (let i = 0; i < rawVariants.length; i++) {
     const vNode = rawVariants[i]!;
@@ -1770,11 +1796,31 @@ function extractSearchActionTemplate(
 
       const cleaned = stripControlAndInvisible(template).trim();
       if (!cleaned || cleaned.length > 500) continue;
+      if (/[\r\n\t#]/.test(cleaned)) continue;
+      if (LLM_CONTROL_TOKEN_RE.test(cleaned)) continue;
+      if (!cleaned.startsWith("https://") && !cleaned.startsWith("/")) continue;
+
+      // Forbid placeholders inside scheme/authority (must appear only in path or query)
+      if (cleaned.startsWith("https://")) {
+        const afterScheme = cleaned.slice("https://".length);
+        const pathOrQueryIdx = afterScheme.search(/[/?]/);
+        const braceIdx = afterScheme.indexOf("{");
+        if (braceIdx !== -1 && (pathOrQueryIdx === -1 || braceIdx < pathOrQueryIdx)) {
+          continue;
+        }
+      }
 
       // Validate the base URL (replacing placeholder token with "test")
       const probeUrl = cleaned.replace(/\{[^}]{1,64}\}/g, "test");
       const safeProbe = sanitizeUniversalProductUrl(probeUrl, pageUrl);
       if (safeProbe) {
+        try {
+          const pageOrigin = new URL(pageUrl).origin;
+          const probeOrigin = new URL(safeProbe).origin;
+          if (!isSameStoreSite(pageOrigin, probeOrigin)) continue;
+        } catch {
+          continue;
+        }
         return cleaned;
       }
     }
@@ -1826,7 +1872,9 @@ export function parseSiteMetadataFromHtml(
   const canonical = sanitizeUniversalProductUrl(hints.canonicalUrl ?? pageUrl, pageUrl);
   if (canonical) {
     try {
-      canonicalOrigin = new URL(canonical).origin;
+      const candidateOrigin = new URL(canonical).origin;
+      const pageOrigin = new URL(pageUrl).origin;
+      canonicalOrigin = isSameStoreSite(pageOrigin, candidateOrigin) ? candidateOrigin : pageOrigin;
     } catch {
       canonicalOrigin = null;
     }

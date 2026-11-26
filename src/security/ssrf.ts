@@ -39,6 +39,7 @@ export interface SafeFetchOptions {
   concurrencyKey?: string;
   maxConcurrency?: number;
   lookupFn?: DnsLookupFn;
+  validateRedirectUrl?: (url: URL) => void;
   fetchImpl?: (url: string, init: UndiciRequestInit) => Promise<{
     status: number;
     headers: { get(name: string): string | null };
@@ -381,6 +382,9 @@ export async function safeFetch(
           }
           const nextUrl = new URL(location, currentUrl).toString();
           currentUrl = validateExternalUrl(nextUrl);
+          if (options.validateRedirectUrl) {
+            options.validateRedirectUrl(currentUrl);
+          }
           if (res.status === 303) {
             method = "GET";
             body = undefined;

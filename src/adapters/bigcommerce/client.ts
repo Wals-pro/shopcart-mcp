@@ -4,10 +4,12 @@ import {
   type SafeFetchOptions,
   type SafeFetchResponse
 } from "../../security/ssrf.js";
+import { isSameStoreSite } from "../../security/sanitize.js";
 import { normalizeCurrency } from "../shopify/normalize.js";
 import {
   extractHtmlTitle,
   extractJsonLdBlocks,
+  extractMetaContent,
   findBestProductJsonLd,
   parseJsonLdOffer,
   rethrowIfHardSsrfError
@@ -27,6 +29,7 @@ export type FetcherFn = (url: string, opts?: SafeFetchOptions) => Promise<SafeFe
 
 const DEFAULT_UA = "Mozilla/5.0 (compatible; shopcart-mcp/0.1; +https://shopcart.wals.pro)";
 const META_CACHE_TTL_MS = 15 * 60 * 1000;
+const MAX_CACHE_ENTRIES = 2000;
 const MAX_HTML_BYTES = 1_572_864; // 1.5 MiB bounded cap for Stencil storefront HTML
 
 function extractCanonicalOrigin(rawUrl: string | null | undefined): string | null {
@@ -67,9 +70,11 @@ export function extractCurrencyFromHtml(html: string): string | null {
   const ldCurrency = html.match(/"priceCurrency"\s*:\s*"([A-Z]{3})"/i);
   if (ldCurrency?.[1]) return normalizeCurrency(ldCurrency[1]);
 
-  // 3. Common currency selector / meta
-  const metaCurrency = html.match(/property=["']product:price:currency["'][^>]+content=["']([A-Z]{3})["']/i);
-  if (metaCurrency?.[1]) return normalizeCurrency(metaCurrency[1]);
+  // 3. Common currency selector / meta (linear scan)
+  const metaCurrency = extractMetaContent(html, "product:price:currency");
+  if (metaCurrency && /^[A-Za-z]{3}$/.test(metaCurrency)) {
+    return normalizeCurrency(metaCurrency);
+  }
 
   return null;
 }
@@ -84,6 +89,20 @@ export class BigCommerceClient {
 
   clearCache(): void {
     this.cache.clear();
+  }
+
+  private setCacheEntry(key: string, entry: BigCommerceDomainMetadata, now: number): void {
+    if (this.cache.size >= MAX_CACHE_ENTRIES && !this.cache.has(key)) {
+      for (const [k, v] of this.cache) {
+        if (v.expiresAt <= now) this.cache.delete(k);
+      }
+      while (this.cache.size >= MAX_CACHE_ENTRIES) {
+        const oldest = this.cache.keys().next().value;
+        if (oldest === undefined) break;
+        this.cache.delete(oldest);
+      }
+    }
+    this.cache.set(key, entry);
   }
 
   getCanonicalOrigin(origin: string): string {
@@ -168,7 +187,7 @@ export class BigCommerceClient {
         } else if (
           cartRes.status === 200 &&
           (hasBigCommerceMarkers(cartRes.html, cartRes.headers) ||
-            /data-cart-page|class=["'][^"']*cart-status|page-type=["']cart["']/i.test(cartRes.html))
+            /data-cart-page|cart-status|page-type=["']cart["']/i.test(cartRes.html))
         ) {
           detected = true;
           const redirected = extractCanonicalOrigin(cartRes.url);
@@ -191,9 +210,9 @@ export class BigCommerceClient {
       expiresAt: now + META_CACHE_TTL_MS
     };
 
-    this.cache.set(origin, meta);
-    if (canonicalOrigin !== origin) {
-      this.cache.set(canonicalOrigin, meta);
+    this.setCacheEntry(origin, meta, now);
+    if (canonicalOrigin !== origin && isSameStoreSite(origin, canonicalOrigin)) {
+      this.setCacheEntry(canonicalOrigin, meta, now);
     }
     return meta;
   }

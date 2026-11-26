@@ -27,11 +27,15 @@ import {
   extractJsonLdImages,
   extractMetaContent,
   extractSafePathOnOrigin,
+  extractSectionSlicesLinear,
+  extractTagBlocksLinear,
+  extractTextByClassLinear,
   findBestProductJsonLd,
   hasJsonLdType,
   parseJsonLdOffer,
   parseLocalizedPrice,
-  rethrowIfHardSsrfError
+  rethrowIfHardSsrfError,
+  scanOpeningTagsLinear
 } from "../shared/html.js";
 import { BigCommerceClient, extractCurrencyFromHtml } from "./client.js";
 
@@ -130,14 +134,22 @@ function handleFromProductUrl(url: string): string {
 }
 
 function extractBigCommerceProductIdFromHtml(html: string): string | null {
-  const patterns = [
-    /<input\b[^>]*name=["']product_id["'][^>]*value=["'](\d{1,20})["']/i,
-    /<input\b[^>]*value=["'](\d{1,20})["'][^>]*name=["']product_id["']/i,
+  const inputs = scanOpeningTagsLinear(html, "input", { maxTags: 200 });
+  for (const inp of inputs) {
+    if (
+      (inp.attrs["name"] ?? "").toLowerCase() === "product_id" &&
+      inp.attrs["value"] &&
+      /^\d{1,20}$/.test(inp.attrs["value"].trim())
+    ) {
+      return inp.attrs["value"].trim();
+    }
+  }
+  const simplePatterns = [
     /\bdata-entity-id=["'](\d{1,20})["']/i,
     /\bdata-product-id=["'](\d{1,20})["']/i,
     /"productId"\s*:\s*(\d{1,20})/
   ];
-  for (const re of patterns) {
+  for (const re of simplePatterns) {
     const m = html.match(re);
     if (m?.[1]) return m[1];
   }
@@ -146,14 +158,21 @@ function extractBigCommerceProductIdFromHtml(html: string): string | null {
 
 function extractBigCommerceOptions(html: string): Array<{ name: string; values: string[] }> {
   const options: Array<{ name: string; values: string[] }> = [];
-  const blockRe =
-    /<div\b[^>]*data-product-attribute[^>]*>([\s\S]*?)(?=<div\b[^>]*data-product-attribute|<\/form>|<\/div>)/gi;
-  let match: RegExpExecArray | null;
-  while ((match = blockRe.exec(html)) !== null && options.length < 10) {
-    const block = match[1] ?? "";
-    const labelMatch = block.match(/<label\b[^>]*class=["'][^"']*form-label[^"']*["'][^>]*>([\s\S]*?)<\/label>/i);
-    const rawName = labelMatch?.[1]
-      ? stripHtmlToText(labelMatch[1], 80)
+  const sections = extractSectionSlicesLinear(
+    html,
+    "div",
+    (attrs) => Object.hasOwn(attrs, "data-product-attribute"),
+    { maxSections: 10, maxChunkLen: 8192, stopMarkers: ["</form>"] }
+  );
+  for (const sec of sections) {
+    const block = sec.body;
+    const labels = extractTagBlocksLinear(block, "label", {
+      maxBlocks: 3,
+      maxBodyLen: 512,
+      attrFilter: (attrs) => (attrs["class"] ?? "").toLowerCase().includes("form-label")
+    });
+    const rawName = labels[0]?.body
+      ? stripHtmlToText(labels[0].body, 80)
           .replace(/\s*Required$/i, "")
           .replace(/:\s*$/, "")
           .trim()
@@ -161,16 +180,25 @@ function extractBigCommerceOptions(html: string): Array<{ name: string; values: 
     if (!rawName) continue;
 
     const vals = new Set<string>();
-    const optRe = /<option\b[^>]*value=["'][^"']+["'][^>]*>([\s\S]*?)<\/option>/gi;
-    let om: RegExpExecArray | null;
-    while ((om = optRe.exec(block)) !== null && vals.size < 50) {
-      const text = stripHtmlToText(om[1], 80);
+    const optBlocks = extractTagBlocksLinear(block, "option", {
+      maxBlocks: 50,
+      maxBodyLen: 256,
+      attrFilter: (attrs) => Boolean((attrs["value"] ?? "").trim())
+    });
+    for (const ob of optBlocks) {
+      if (vals.size >= 50) break;
+      const text = stripHtmlToText(ob.body, 80);
       if (text && !/^(choose|select|pick)\b/i.test(text)) vals.add(text);
     }
 
-    const radioLabelRe = /<span\b[^>]*class=["'][^"']*form-option-variant[^"']*["'][^>]*>([\s\S]*?)<\/span>/gi;
-    while ((om = radioLabelRe.exec(block)) !== null && vals.size < 50) {
-      const text = stripHtmlToText(om[1], 80);
+    const spanBlocks = extractTagBlocksLinear(block, "span", {
+      maxBlocks: 50,
+      maxBodyLen: 256,
+      attrFilter: (attrs) => (attrs["class"] ?? "").toLowerCase().includes("form-option-variant")
+    });
+    for (const sb of spanBlocks) {
+      if (vals.size >= 50) break;
+      const text = stripHtmlToText(sb.body, 80);
       if (text) vals.add(text);
     }
 
@@ -312,49 +340,89 @@ export class BigCommerceAdapter implements StoreAdapter {
     const products: ProductSummary[] = [];
     const seenUrls = new Set<string>();
 
-    // Primary: BigCommerce Stencil <article class="card ..."> blocks
-    const articleRe = /<article\b([^>]*)>([\s\S]*?)<\/article>/gi;
-    let match: RegExpExecArray | null;
-    while ((match = articleRe.exec(html)) !== null && products.length < 40) {
-      const openAttrs = match[1] ?? "";
-      const body = match[2] ?? "";
-      const className = extractAttr(openAttrs, "class") ?? "";
+    // Primary: BigCommerce Stencil <article class="card ..."> blocks (linear-time O(N) scan)
+    const articles = extractTagBlocksLinear(html, "article", {
+      maxBlocks: 40,
+      maxBodyLen: 12_288
+    });
+    for (const art of articles) {
+      if (products.length >= 40) break;
+      const openAttrs = art.openAttrs;
+      const body = art.body;
+      const className = art.attrs["class"] ?? "";
+      const rawEntityAttr =
+        art.attrs["data-entity-id"] ??
+        art.attrs["data-product-id"] ??
+        art.attrs["data-test"]?.match(/^card-(\d{1,20})$/i)?.[1] ??
+        null;
+      const numericEntityAttr =
+        rawEntityAttr && /^\d{1,20}$/.test(rawEntityAttr.trim()) ? rawEntityAttr.trim() : null;
       const entityId =
-        extractAttr(openAttrs, "data-entity-id") ??
-        extractAttr(openAttrs, "data-product-id") ??
-        extractAttr(openAttrs, "data-test")?.match(/^card-(\d+)$/i)?.[1] ??
-        body.match(/data-product-id=["'](\d{1,20})["']/i)?.[1] ??
+        numericEntityAttr ??
+        body.match(/\bdata-product-id=["'](\d{1,20})["']/i)?.[1] ??
         body.match(/cart\.php\?action=add&(?:amp;)?product_id=(\d{1,20})/i)?.[1] ??
         null;
 
       if (!entityId && !/\bcard\b/i.test(className)) continue;
 
-      const linkMatch =
-        body.match(/<a\b[^>]*class=["'][^"']*card-figure__link[^"']*["'][^>]*href=["']([^"']+)["']/i) ??
-        body.match(/<a\b[^>]*href=["']([^"']+)["'][^>]*class=["'][^"']*card-figure__link[^"']*["']/i) ??
-        body.match(/<h[2-5]\b[^>]*class=["'][^"']*card-title[^"']*["'][^>]*>[\s\S]*?<a\b[^>]*href=["']([^"']+)["']/i) ??
-        body.match(/<a\b[^>]*href=["']([^"']+)["']/i);
-      const safeUrl = sanitizeSafeUrl(linkMatch?.[1], origin, { stripTracking: true });
+      const anchors = scanOpeningTagsLinear(body, "a", { maxTags: 30 });
+      const cardFigureLink = anchors.find((a) =>
+        (a.attrs["class"] ?? "").toLowerCase().includes("card-figure__link") && a.attrs["href"]
+      );
+      let headingLink: string | null = null;
+      let headingTitle: string | null = null;
+      for (const hTag of ["h2", "h3", "h4", "h5"]) {
+        const hBlocks = extractTagBlocksLinear(body, hTag, {
+          maxBlocks: 2,
+          maxBodyLen: 1024,
+          attrFilter: (attrs) => (attrs["class"] ?? "").toLowerCase().includes("card-title")
+        });
+        if (hBlocks[0]) {
+          headingTitle = hBlocks[0].body;
+          const innerAnchors = scanOpeningTagsLinear(hBlocks[0].body, "a", { maxTags: 3 });
+          headingLink = innerAnchors.find((a) => a.attrs["href"])?.attrs["href"] ?? null;
+          break;
+        }
+      }
+      const rawHref =
+        cardFigureLink?.attrs["href"] ??
+        headingLink ??
+        anchors.find((a) => a.attrs["href"])?.attrs["href"] ??
+        null;
+      const safeUrl = sanitizeSafeUrl(
+        rawHref ? decodeHtmlEntitiesBasic(rawHref) : null,
+        origin,
+        { stripTracking: true }
+      );
       if (!safeUrl || seenUrls.has(safeUrl)) continue;
 
+      const imgs = scanOpeningTagsLinear(body, "img", { maxTags: 10 });
+      const imgAlt = imgs.find((im) => im.attrs["alt"])?.attrs["alt"] ?? null;
       const titleRaw =
-        extractAttr(openAttrs, "data-name") ??
-        body.match(/<h[2-5]\b[^>]*class=["'][^"']*card-title[^"']*["'][^>]*>([\s\S]*?)<\/h[2-5]>/i)?.[1] ??
-        body.match(/<img\b[^>]*alt=["']([^"']+)["']/i)?.[1] ??
-        null;
+        (art.attrs["data-name"] ? decodeHtmlEntitiesBasic(art.attrs["data-name"]) : null) ??
+        headingTitle ??
+        (imgAlt ? decodeHtmlEntitiesBasic(imgAlt) : null);
       const title = titleRaw ? stripHtmlToText(titleRaw, 200) : "";
       if (!title) continue;
 
       const vendorRaw =
-        extractAttr(openAttrs, "data-product-brand") ??
-        body.match(/class=["'][^"']*card-text--brand[^"']*["'][^>]*>([\s\S]*?)<\//i)?.[1] ??
+        (art.attrs["data-product-brand"]
+          ? decodeHtmlEntitiesBasic(art.attrs["data-product-brand"])
+          : null) ??
+        extractTextByClassLinear(body, "card-text--brand", { maxBodyLen: 256 }) ??
         null;
-      const categoryRaw = extractAttr(openAttrs, "data-product-category");
+      const categoryRaw = art.attrs["data-product-category"]
+        ? decodeHtmlEntitiesBasic(art.attrs["data-product-category"])
+        : null;
 
-      const priceAttr = extractAttr(openAttrs, "data-product-price");
+      const priceAttr = art.attrs["data-product-price"]
+        ? decodeHtmlEntitiesBasic(art.attrs["data-product-price"])
+        : null;
       const priceSpan =
-        body.match(/data-product-price-(?:without|with)-tax[^>]*>([\s\S]*?)<\//i)?.[1] ??
-        body.match(/class=["'][^"']*price--(?:withoutTax|withTax|main)[^"']*["'][^>]*>([\s\S]*?)<\//i)?.[1] ??
+        body.match(/data-product-price-(?:without|with)-tax\b[^<>]{0,200}>([^<]{1,80})<\//i)?.[1] ??
+        extractTextByClassLinear(body, "price--withouttax", { maxBodyLen: 128 }) ??
+        extractTextByClassLinear(body, "price--withtax", { maxBodyLen: 128 }) ??
+        extractTextByClassLinear(body, "price--main", { maxBodyLen: 128 }) ??
         null;
       const parsedPrice =
         parseLocalizedPrice(priceSpan) ??
@@ -364,9 +432,10 @@ export class BigCommerceAdapter implements StoreAdapter {
       const priceMoney = formatMoney(parsedPrice?.amount ?? 0, currency);
 
       const compareSpan =
-        body.match(/data-product-rrp-(?:without|with)-tax[^>]*>([\s\S]*?)<\//i)?.[1] ??
-        body.match(/data-product-non-sale-price-(?:without|with)-tax[^>]*>([\s\S]*?)<\//i)?.[1] ??
-        body.match(/class=["'][^"']*price--(?:rrp|non-sale)[^"']*["'][^>]*>([\s\S]*?)<\//i)?.[1] ??
+        body.match(/data-product-rrp-(?:without|with)-tax\b[^<>]{0,200}>([^<]{1,80})<\//i)?.[1] ??
+        body.match(/data-product-non-sale-price-(?:without|with)-tax\b[^<>]{0,200}>([^<]{1,80})<\//i)?.[1] ??
+        extractTextByClassLinear(body, "price--rrp", { maxBodyLen: 128 }) ??
+        extractTextByClassLinear(body, "price--non-sale", { maxBodyLen: 128 }) ??
         null;
       const parsedCompare = parseLocalizedPrice(compareSpan);
       const compareMoney =
@@ -374,16 +443,24 @@ export class BigCommerceAdapter implements StoreAdapter {
           ? formatMoney(parsedCompare.amount, currency)
           : null;
 
-      const imgMatch =
-        body.match(/<img\b[^>]*data-src=["']([^"']+)["']/i) ??
-        body.match(/<img\b[^>]*src=["']([^"']+)["']/i);
-      const imageUrl = sanitizeSafeUrl(imgMatch?.[1], origin, {
-        allowBigCommerceCdn: true,
-        allowStoreSubdomains: true
-      });
+      const rawImgSrc =
+        imgs.find((im) => im.attrs["data-src"])?.attrs["data-src"] ??
+        imgs.find((im) => im.attrs["src"])?.attrs["src"] ??
+        null;
+      const imageUrl = sanitizeSafeUrl(
+        rawImgSrc ? decodeHtmlEntitiesBasic(rawImgSrc) : null,
+        origin,
+        {
+          allowBigCommerceCdn: true,
+          allowStoreSubdomains: true
+        }
+      );
 
+      const lowerBody = body.toLowerCase();
       const outOfStock =
-        /data-out-of-stock=["']true["']|class=["'][^"']*(?:sold-out|out-of-stock)[^"']*["']/i.test(body) ||
+        /data-out-of-stock=["']true["']/i.test(body) ||
+        lowerBody.includes("sold-out") ||
+        lowerBody.includes("out-of-stock") ||
         />\s*(?:out of stock|sold out|ausverkauft)\s*</i.test(body);
 
       const handle = handleFromProductUrl(safeUrl);
@@ -539,20 +616,25 @@ export class BigCommerceAdapter implements StoreAdapter {
       80
     );
 
+    const h1Blocks = extractTagBlocksLinear(html, "h1", { maxBlocks: 5, maxBodyLen: 512 });
     const titleFromHtml =
-      html.match(/<h1\b[^>]*class=["'][^"']*productView-title[^"']*["'][^>]*>([\s\S]*?)<\/h1>/i)?.[1] ??
-      html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ??
+      h1Blocks.find((b) => (b.attrs["class"] ?? "").toLowerCase().includes("productview-title"))?.body ??
+      h1Blocks[0]?.body ??
       null;
     const title =
       sanitizeText(typeof productLd?.name === "string" ? productLd.name : "", 200) ||
       (titleFromHtml ? stripHtmlToText(titleFromHtml, 200) : "") ||
       handleFromProductUrl(res.url || productUrl);
 
-    const descriptionRaw =
+    const descBlock =
       typeof productLd?.description === "string"
         ? productLd.description
-        : html.match(/<div\b[^>]*id=["']tab-description["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] ?? "";
-    const descriptionText = stripHtmlToText(descriptionRaw, 1500);
+        : extractTagBlocksLinear(html, "div", {
+            maxBlocks: 1,
+            maxBodyLen: 16_384,
+            attrFilter: (attrs) => (attrs["id"] ?? "").toLowerCase() === "tab-description"
+          })[0]?.body ?? "";
+    const descriptionText = stripHtmlToText(descBlock, 1500);
 
     const available =
       typeof attrs?.instock === "boolean" && typeof attrs?.purchasable === "boolean"

@@ -4,7 +4,11 @@ import {
   type SafeFetchOptions,
   type SafeFetchResponse
 } from "../../security/ssrf.js";
-import { sanitizeOptionalText } from "../../security/sanitize.js";
+import {
+  isSameStoreSite,
+  isSameStoreSiteOrSubdomain,
+  sanitizeOptionalText
+} from "../../security/sanitize.js";
 import { normalizeCurrency } from "../shopify/normalize.js";
 import {
   extractHtmlTitle,
@@ -38,6 +42,7 @@ export type FetcherFn = (url: string, opts?: SafeFetchOptions) => Promise<SafeFe
 
 const DEFAULT_UA = "Mozilla/5.0 (compatible; shopcart-mcp/0.1; +https://shopcart.wals.pro)";
 const META_CACHE_TTL_MS = 15 * 60 * 1000;
+const MAX_CACHE_ENTRIES = 2000;
 const MAX_HTML_BYTES = 1_572_864;
 
 function extractCanonicalOrigin(rawUrl: string | null | undefined): string | null {
@@ -89,11 +94,12 @@ export function extractPublicShopwareAccessKey(html: string): {
 }
 
 export function hasShopwareHtmlMarkers(html: string): boolean {
-  if (/meta[^>]+name=["']sw-access-key["']/i.test(html)) return true;
+  if (extractMetaContent(html, "sw-access-key")) return true;
   if (/\/bundles\/storefront\//i.test(html)) return true;
   if (/frontend\.search\.suggest|frontend\.checkout\.line-item\.add/i.test(html)) return true;
   if (/data-shopware|sw-csrf-mode|shopware-pwa|shopware-frontends/i.test(html)) return true;
-  if (/<meta[^>]+name=["']generator["'][^>]+content=["'][^"']*Shopware/i.test(html)) return true;
+  const generator = extractMetaContent(html, "generator");
+  if (generator && /shopware/i.test(generator)) return true;
   if (/\bSWSC[A-Z0-9]{22}\b/.test(html) && /store-api|shopware/i.test(html)) return true;
   return false;
 }
@@ -133,6 +139,20 @@ export class ShopwareClient {
 
   clearCache(): void {
     this.cache.clear();
+  }
+
+  private setCacheEntry(key: string, entry: ShopwareDomainMetadata, now: number): void {
+    if (this.cache.size >= MAX_CACHE_ENTRIES && !this.cache.has(key)) {
+      for (const [k, v] of this.cache) {
+        if (v.expiresAt <= now) this.cache.delete(k);
+      }
+      while (this.cache.size >= MAX_CACHE_ENTRIES) {
+        const oldest = this.cache.keys().next().value;
+        if (oldest === undefined) break;
+        this.cache.delete(oldest);
+      }
+    }
+    this.cache.set(key, entry);
   }
 
   getCanonicalOrigin(origin: string): string {
@@ -279,7 +299,10 @@ export class ShopwareClient {
           accessKey = extracted.accessKey;
           detected = true;
         }
-        if (extracted.apiOrigin) {
+        if (
+          extracted.apiOrigin &&
+          isSameStoreSiteOrSubdomain(canonicalOrigin, extracted.apiOrigin)
+        ) {
           apiOrigin = extracted.apiOrigin;
         }
         name = extractHtmlTitle(homeRes.html);
@@ -290,7 +313,9 @@ export class ShopwareClient {
     }
 
     if (ctxRes) {
-      if (isShopwareContextResponse(ctxRes.status, ctxRes.rawText, ctxRes.headers)) {
+      const ctxOrigin = extractCanonicalOrigin(ctxRes.url) ?? origin;
+      const ctxSameSite = isSameStoreSiteOrSubdomain(canonicalOrigin, ctxOrigin);
+      if (ctxSameSite && isShopwareContextResponse(ctxRes.status, ctxRes.rawText, ctxRes.headers)) {
         detected = true;
         if (ctxRes.status === 200 && ctxRes.data) {
           storeApiAvailable = true;
@@ -305,7 +330,7 @@ export class ShopwareClient {
           const iso = sanitizeOptionalText(ctxRes.data.shippingLocation?.country?.iso, 16);
           if (iso) country = iso;
         }
-      } else if (ctxRes.status === 403) {
+      } else if (ctxSameSite && ctxRes.status === 403) {
         wafRestricted = true;
       }
     }
@@ -378,9 +403,9 @@ export class ShopwareClient {
       expiresAt: now + META_CACHE_TTL_MS
     };
 
-    this.cache.set(origin, meta);
-    if (canonicalOrigin !== origin) {
-      this.cache.set(canonicalOrigin, meta);
+    this.setCacheEntry(origin, meta, now);
+    if (canonicalOrigin !== origin && isSameStoreSite(origin, canonicalOrigin)) {
+      this.setCacheEntry(canonicalOrigin, meta, now);
     }
     return meta;
   }

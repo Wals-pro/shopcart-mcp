@@ -27,10 +27,14 @@ import {
   extractJsonLdImages,
   extractMetaContent,
   extractSafePathOnOrigin,
+  extractSectionSlicesLinear,
+  extractTagBlocksLinear,
+  extractTextByClassLinear,
   findBestProductJsonLd,
   parseJsonLdOffer,
   parseLocalizedPrice,
-  rethrowIfHardSsrfError
+  rethrowIfHardSsrfError,
+  scanOpeningTagsLinear
 } from "../shared/html.js";
 import { ShopwareClient } from "./client.js";
 
@@ -353,32 +357,52 @@ export class ShopwareAdapter implements StoreAdapter {
     const products: ProductSummary[] = [];
     const seen = new Set<string>();
 
-    const itemRe = /<li\b[^>]*class=["'][^"']*search-suggest-(?:product|item)[^"']*["'][^>]*>([\s\S]*?)<\/li>/gi;
-    let match: RegExpExecArray | null;
-    while ((match = itemRe.exec(html)) !== null && products.length < 30) {
-      const block = match[1] ?? "";
-      const linkMatch = block.match(/<a\b([^>]*)href=["']([^"']+)["']([^>]*)>/i);
-      const safeUrl = sanitizeSafeUrl(linkMatch?.[2], origin, { stripTracking: true });
+    const liBlocks = extractTagBlocksLinear(html, "li", {
+      maxBlocks: 30,
+      maxBodyLen: 6144,
+      attrFilter: (attrs) => {
+        const cls = (attrs["class"] ?? "").toLowerCase();
+        return cls.includes("search-suggest-product") || cls.includes("search-suggest-item");
+      }
+    });
+    for (const item of liBlocks) {
+      if (products.length >= 30) break;
+      const block = item.body;
+      const anchors = scanOpeningTagsLinear(block, "a", { maxTags: 10 });
+      const firstAnchor = anchors.find((a) => a.attrs["href"]);
+      const safeUrl = sanitizeSafeUrl(
+        firstAnchor?.attrs["href"] ? decodeHtmlEntitiesBasic(firstAnchor.attrs["href"]) : null,
+        origin,
+        { stripTracking: true }
+      );
       if (!safeUrl || seen.has(safeUrl)) continue;
 
-      const anchorTag = linkMatch?.[0] ?? "";
-      const titleAttr = anchorTag.match(/\btitle=["']([^"']+)["']/i)?.[1];
-      const nameSpan = block.match(/class=["'][^"']*search-suggest-product-name[^"']*["'][^>]*>([\s\S]*?)<\//i)?.[1];
+      const titleAttr = firstAnchor?.attrs["title"]
+        ? decodeHtmlEntitiesBasic(firstAnchor.attrs["title"])
+        : null;
+      const nameSpan = extractTextByClassLinear(block, "search-suggest-product-name", {
+        maxBodyLen: 512
+      });
       const title = stripHtmlToText(titleAttr ?? nameSpan ?? "", 200);
       if (!title) continue;
 
       const priceSpan =
-        block.match(/class=["'][^"']*search-suggest-product-price[^"']*["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] ??
-        block.match(/class=["'][^"']*product-price[^"']*["'][^>]*>([\s\S]*?)<\//i)?.[1] ??
+        extractTextByClassLinear(block, "search-suggest-product-price", {
+          closingTag: "div",
+          maxBodyLen: 256
+        }) ??
+        extractTextByClassLinear(block, "product-price", { maxBodyLen: 256 }) ??
         null;
       const parsedPrice = parseLocalizedPrice(priceSpan ? stripHtmlToText(priceSpan, 60) : null);
       const currency = normalizeCurrency(parsedPrice?.currencyHint ?? defaultCurrency);
       const priceMoney = formatMoney(parsedPrice?.amount ?? 0, currency);
 
-      const imgMatch =
-        block.match(/<img\b[^>]*data-src=["']([^"']+)["']/i) ??
-        block.match(/<img\b[^>]*src=["']([^"']+)["']/i);
-      const imageUrl = sanitizeSafeUrl(imgMatch?.[1], origin, {
+      const imgs = scanOpeningTagsLinear(block, "img", { maxTags: 5 });
+      const rawImg =
+        imgs.find((im) => im.attrs["data-src"])?.attrs["data-src"] ??
+        imgs.find((im) => im.attrs["src"])?.attrs["src"] ??
+        null;
+      const imageUrl = sanitizeSafeUrl(rawImg ? decodeHtmlEntitiesBasic(rawImg) : null, origin, {
         allowStoreSubdomains: true
       });
 
@@ -412,24 +436,39 @@ export class ShopwareAdapter implements StoreAdapter {
     const products: ProductSummary[] = [];
     const seen = new Set<string>();
 
-    // Standard Shopware 6 .product-box cards
-    const cardRe = /<div\b[^>]*class=["'][^"']*\bproduct-box\b[^"']*["'][^>]*>([\s\S]*?)(?=<div\b[^>]*class=["'][^"']*\bproduct-box\b|<\/section>|<\/main>|$)/gi;
-    let match: RegExpExecArray | null;
-    while ((match = cardRe.exec(html)) !== null && products.length < 30) {
-      const chunk = (match[1] ?? "").slice(0, 6000);
+    // Standard Shopware 6 .product-box cards (linear-time O(N) scan)
+    const cards = extractSectionSlicesLinear(
+      html,
+      "div",
+      (attrs) => /\bproduct-box\b/i.test(attrs["class"] ?? ""),
+      { maxSections: 30, maxChunkLen: 6000, stopMarkers: ["</section>", "</main>"] }
+    );
+    for (const card of cards) {
+      if (products.length >= 30) break;
+      const chunk = card.body;
       const info = extractProductInfoAttr(chunk);
-      const linkMatch =
-        chunk.match(/<a\b[^>]*class=["'][^"']*product-(?:name|image-link)[^"']*["'][^>]*href=["']([^"']+)["']/i) ??
-        chunk.match(/<a\b[^>]*href=["']([^"']+)["'][^>]*class=["'][^"']*product-(?:name|image-link)[^"']*["']/i) ??
-        chunk.match(/<a\b[^>]*href=["']([^"']+)["']/i);
-      const safeUrl = sanitizeSafeUrl(linkMatch?.[1], origin, { stripTracking: true });
+      const anchors = scanOpeningTagsLinear(chunk, "a", { maxTags: 20 });
+      const preferredAnchor =
+        anchors.find((a) => {
+          const cls = (a.attrs["class"] ?? "").toLowerCase();
+          return (cls.includes("product-name") || cls.includes("product-image-link")) && a.attrs["href"];
+        }) ?? anchors.find((a) => a.attrs["href"]);
+      const safeUrl = sanitizeSafeUrl(
+        preferredAnchor?.attrs["href"] ? decodeHtmlEntitiesBasic(preferredAnchor.attrs["href"]) : null,
+        origin,
+        { stripTracking: true }
+      );
       if (!safeUrl || seen.has(safeUrl)) continue;
 
-      const nameMatch = chunk.match(/<a\b[^>]*class=["'][^"']*product-name[^"']*["'][^>]*>([\s\S]*?)<\/a>/i)?.[1];
-      const title = sanitizeText(info?.name ?? (nameMatch ? stripHtmlToText(nameMatch, 200) : ""), 200);
+      const nameBlock = extractTagBlocksLinear(chunk, "a", {
+        maxBlocks: 1,
+        maxBodyLen: 512,
+        attrFilter: (attrs) => (attrs["class"] ?? "").toLowerCase().includes("product-name")
+      })[0]?.body;
+      const title = sanitizeText(info?.name ?? (nameBlock ? stripHtmlToText(nameBlock, 200) : ""), 200);
       if (!title) continue;
 
-      const priceSpan = chunk.match(/class=["'][^"']*product-price[^"']*["'][^>]*>([\s\S]*?)<\//i)?.[1];
+      const priceSpan = extractTextByClassLinear(chunk, "product-price", { maxBodyLen: 256 });
       const parsedPrice = parseLocalizedPrice(priceSpan ? stripHtmlToText(priceSpan, 60) : null);
       const currency = normalizeCurrency(parsedPrice?.currencyHint ?? defaultCurrency);
       const amount = typeof info?.price === "number" && Number.isFinite(info.price)
@@ -437,17 +476,21 @@ export class ShopwareAdapter implements StoreAdapter {
         : (parsedPrice?.amount ?? 0);
       const priceMoney = formatMoney(amount, currency);
 
-      const listPriceSpan = chunk.match(/class=["'][^"']*list-price-price[^"']*["'][^>]*>([\s\S]*?)<\//i)?.[1];
+      const listPriceSpan = extractTextByClassLinear(chunk, "list-price-price", { maxBodyLen: 256 });
       const parsedList = parseLocalizedPrice(listPriceSpan ? stripHtmlToText(listPriceSpan, 60) : null);
       const compareMoney =
         parsedList && parsedList.amount > priceMoney.amount
           ? formatMoney(parsedList.amount, currency)
           : null;
 
-      const imgMatch =
-        chunk.match(/<img\b[^>]*data-src=["']([^"']+)["']/i) ??
-        chunk.match(/<img\b[^>]*src=["']([^"']+)["']/i);
-      const imageUrl = sanitizeSafeUrl(imgMatch?.[1], origin, { allowStoreSubdomains: true });
+      const imgs = scanOpeningTagsLinear(chunk, "img", { maxTags: 5 });
+      const rawImg =
+        imgs.find((im) => im.attrs["data-src"])?.attrs["data-src"] ??
+        imgs.find((im) => im.attrs["src"])?.attrs["src"] ??
+        null;
+      const imageUrl = sanitizeSafeUrl(rawImg ? decodeHtmlEntitiesBasic(rawImg) : null, origin, {
+        allowStoreSubdomains: true
+      });
 
       const handle = handleFromUrl(safeUrl);
       seen.add(safeUrl);
@@ -683,12 +726,12 @@ export class ShopwareAdapter implements StoreAdapter {
       offer.price ??
       (typeof infoAttr?.price === "number" && Number.isFinite(infoAttr.price) ? infoAttr.price : null) ??
       parseLocalizedPrice(
-        html.match(/class=["'][^"']*product-detail-price[^"']*["'][^>]*>([\s\S]*?)<\//i)?.[1]
+        extractTextByClassLinear(html, "product-detail-price", { maxBodyLen: 256 })
       )?.amount ??
       0;
     const priceMoney = formatMoney(priceVal, resolvedCurrency);
 
-    const listPriceMatch = html.match(/class=["'][^"']*list-price-price[^"']*["'][^>]*>([\s\S]*?)<\//i)?.[1];
+    const listPriceMatch = extractTextByClassLinear(html, "list-price-price", { maxBodyLen: 256 });
     const parsedList = parseLocalizedPrice(listPriceMatch ? stripHtmlToText(listPriceMatch, 60) : null);
     const compareMoney =
       parsedList && parsedList.amount > priceMoney.amount
@@ -697,8 +740,10 @@ export class ShopwareAdapter implements StoreAdapter {
           ? formatMoney(offer.highPrice, resolvedCurrency)
           : null;
 
-    const h1 = html.match(/<h1\b[^>]*class=["'][^"']*product-detail-name[^"']*["'][^>]*>([\s\S]*?)<\/h1>/i)?.[1] ??
-      html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ??
+    const h1Blocks = extractTagBlocksLinear(html, "h1", { maxBlocks: 5, maxBodyLen: 512 });
+    const h1 =
+      h1Blocks.find((b) => (b.attrs["class"] ?? "").toLowerCase().includes("product-detail-name"))?.body ??
+      h1Blocks[0]?.body ??
       null;
     const title =
       sanitizeText(typeof productLd?.name === "string" ? productLd.name : "", 200) ||
@@ -710,14 +755,17 @@ export class ShopwareAdapter implements StoreAdapter {
       (typeof productLd?.sku === "string" ? productLd.sku : null) ??
         offer.sku ??
         infoAttr?.sku ??
-        html.match(/class=["'][^"']*product-detail-ordernumber[^"']*["'][^>]*>([\s\S]*?)<\//i)?.[1],
+        extractTextByClassLinear(html, "product-detail-ordernumber", { maxBodyLen: 128 }),
       80
     );
 
     const descriptionRaw =
       typeof productLd?.description === "string"
         ? productLd.description
-        : html.match(/class=["'][^"']*product-detail-description-text[^"']*["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] ?? "";
+        : extractTextByClassLinear(html, "product-detail-description-text", {
+            closingTag: "div",
+            maxBodyLen: 16_384
+          }) ?? "";
     const descriptionText = stripHtmlToText(descriptionRaw, 1500);
 
     const available =
@@ -744,20 +792,31 @@ export class ShopwareAdapter implements StoreAdapter {
       )
     ).slice(0, 10);
 
-    // Extract Shopware 6 variant configurator groups if present
+    // Extract Shopware 6 variant configurator groups if present (linear-time O(N) scan)
     const options: Array<{ name: string; values: string[] }> = [];
-    const groupRe = /<div\b[^>]*class=["'][^"']*product-detail-configurator-group[^"']*["'][^>]*>([\s\S]*?)<\/div>\s*(?=<div\b[^>]*class=["'][^"']*product-detail-configurator-group|<\/form>)/gi;
-    let gm: RegExpExecArray | null;
-    while ((gm = groupRe.exec(html)) !== null && options.length < 10) {
-      const grpBlock = gm[1] ?? "";
-      const grpTitle = grpBlock.match(/class=["'][^"']*product-detail-configurator-group-title[^"']*["'][^>]*>([\s\S]*?)<\//i)?.[1];
+    const groups = extractSectionSlicesLinear(
+      html,
+      "div",
+      (attrs) => (attrs["class"] ?? "").toLowerCase().includes("product-detail-configurator-group"),
+      { maxSections: 10, maxChunkLen: 8192, stopMarkers: ["</form>"] }
+    );
+    for (const grp of groups) {
+      const grpBlock = grp.body;
+      const grpTitle = extractTextByClassLinear(grpBlock, "product-detail-configurator-group-title", {
+        maxBodyLen: 256
+      });
       const name = grpTitle ? stripHtmlToText(grpTitle, 80) : "";
       if (!name) continue;
       const vals = new Set<string>();
-      const optLabelRe = /<label\b[^>]*class=["'][^"']*product-detail-configurator-option-label[^"']*["'][^>]*>([\s\S]*?)<\/label>/gi;
-      let om: RegExpExecArray | null;
-      while ((om = optLabelRe.exec(grpBlock)) !== null && vals.size < 50) {
-        const t = stripHtmlToText(om[1], 80);
+      const optLabels = extractTagBlocksLinear(grpBlock, "label", {
+        maxBlocks: 50,
+        maxBodyLen: 256,
+        attrFilter: (attrs) =>
+          (attrs["class"] ?? "").toLowerCase().includes("product-detail-configurator-option-label")
+      });
+      for (const lbl of optLabels) {
+        if (vals.size >= 50) break;
+        const t = stripHtmlToText(lbl.body, 80);
         if (t) vals.add(t);
       }
       if (vals.size > 0) {
@@ -816,7 +875,7 @@ export class ShopwareAdapter implements StoreAdapter {
     }
 
     for (const item of items) {
-      if (!/^[A-Za-z0-9._:/-]{1,128}$/.test(item.variantId)) {
+      if (!/^[A-Za-z0-9._/-]{1,128}$/.test(item.variantId) || item.variantId.includes("..")) {
         throw new Error(`Invalid Shopware product identifier: ${item.variantId}`);
       }
       if (!Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 99) {
@@ -893,9 +952,11 @@ export class ShopwareAdapter implements StoreAdapter {
           cart_url: found.url
         });
       } else {
-        const fallbackUrl = SHOPWARE_UUID_RE.test(item.variantId)
+        const rawFallback = SHOPWARE_UUID_RE.test(item.variantId)
           ? `${effectiveOrigin}/detail/${encodeURIComponent(item.variantId)}`
           : `${effectiveOrigin}/${item.variantId.replace(/^\/+/, "")}`;
+        const fallbackUrl =
+          sanitizeSafeUrl(rawFallback, effectiveOrigin, { stripTracking: true }) ?? effectiveOrigin;
         resultItems.push({
           variant_id: item.variantId,
           quantity: item.quantity,

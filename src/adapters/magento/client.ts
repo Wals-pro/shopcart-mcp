@@ -4,7 +4,7 @@ import {
   type SafeFetchOptions,
   type SafeFetchResponse
 } from "../../security/ssrf.js";
-import { sanitizeOptionalText } from "../../security/sanitize.js";
+import { isSameStoreSite, sanitizeOptionalText } from "../../security/sanitize.js";
 import { normalizeCurrency } from "../shopify/normalize.js";
 import { rethrowIfHardSsrfError } from "../shared/html.js";
 
@@ -38,6 +38,14 @@ export type FetcherFn = (url: string, opts?: SafeFetchOptions) => Promise<SafeFe
 
 const DEFAULT_UA = "Mozilla/5.0 (compatible; shopcart-mcp/0.1; +https://shopcart.wals.pro)";
 const META_CACHE_TTL_MS = 15 * 60 * 1000;
+const MAX_CACHE_ENTRIES = 2000;
+const SAFE_PRODUCT_URL_SUFFIX_RE = /^(?:\/|\.[a-z0-9]{1,10})?$/i;
+
+export function sanitizeMagentoUrlSuffix(raw: string | null | undefined, fallback = ""): string {
+  if (typeof raw !== "string") return fallback;
+  const trimmed = raw.trim();
+  return SAFE_PRODUCT_URL_SUFFIX_RE.test(trimmed) ? trimmed : fallback;
+}
 
 const STORE_CONFIG_QUERY = `{
   storeConfig {
@@ -70,6 +78,20 @@ export class MagentoClient {
 
   clearCache(): void {
     this.cache.clear();
+  }
+
+  private setCacheEntry(key: string, entry: MagentoDomainMetadata, now: number): void {
+    if (this.cache.size >= MAX_CACHE_ENTRIES && !this.cache.has(key)) {
+      for (const [k, v] of this.cache) {
+        if (v.expiresAt <= now) this.cache.delete(k);
+      }
+      while (this.cache.size >= MAX_CACHE_ENTRIES) {
+        const oldest = this.cache.keys().next().value;
+        if (oldest === undefined) break;
+        this.cache.delete(oldest);
+      }
+    }
+    this.cache.set(key, entry);
   }
 
   getCanonicalOrigin(origin: string): string {
@@ -165,7 +187,7 @@ export class MagentoClient {
           );
           storeCode = sanitizeOptionalText(cfg.store_code, 64);
           if (typeof cfg.product_url_suffix === "string") {
-            productUrlSuffix = cfg.product_url_suffix;
+            productUrlSuffix = sanitizeMagentoUrlSuffix(cfg.product_url_suffix, ".html");
           }
         }
       }
@@ -185,9 +207,9 @@ export class MagentoClient {
       expiresAt: now + META_CACHE_TTL_MS
     };
 
-    this.cache.set(origin, meta);
-    if (canonicalOrigin !== origin) {
-      this.cache.set(canonicalOrigin, meta);
+    this.setCacheEntry(origin, meta, now);
+    if (canonicalOrigin !== origin && isSameStoreSite(origin, canonicalOrigin)) {
+      this.setCacheEntry(canonicalOrigin, meta, now);
     }
     return meta;
   }

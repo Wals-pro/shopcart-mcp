@@ -20,7 +20,7 @@ import type {
 } from "../types.js";
 import { formatMoney, normalizeCurrency } from "../shopify/normalize.js";
 import { computeDiscountPercent, rethrowIfHardSsrfError } from "../shared/html.js";
-import { MagentoClient } from "./client.js";
+import { MagentoClient, sanitizeMagentoUrlSuffix } from "./client.js";
 
 interface MagentoMoneyRaw {
   value?: number;
@@ -315,13 +315,24 @@ function buildMagentoProductUrl(
   urlSuffix: string | null | undefined,
   defaultSuffix: string
 ): string {
-  const cleanedKey = urlKey.replace(/^\/+|\/+$/g, "");
-  const suffix = urlSuffix ?? defaultSuffix ?? "";
-  if (!cleanedKey) return origin;
-  if (suffix === "/") {
-    return `${origin}/${cleanedKey}/`;
-  }
-  return `${origin}/${cleanedKey}${suffix}`;
+  const safeKey = sanitizeText(urlKey, 200).replace(/^\/+|\/+$/g, "");
+  if (!safeKey) return origin;
+  const segments = safeKey
+    .split("/")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && s !== "." && s !== "..")
+    .map((s) => encodeURIComponent(s));
+  if (segments.length === 0) return origin;
+  const safeDefault = sanitizeMagentoUrlSuffix(defaultSuffix, "");
+  const suffix =
+    typeof urlSuffix === "string"
+      ? sanitizeMagentoUrlSuffix(urlSuffix, safeDefault)
+      : safeDefault;
+  const candidate =
+    suffix === "/"
+      ? `${origin}/${segments.join("/")}/`
+      : `${origin}/${segments.join("/")}${suffix}`;
+  return sanitizeSafeUrl(candidate, origin, { stripTracking: true }) ?? origin;
 }
 
 function extractUrlKeyCandidate(handleOrUrl: string, defaultSuffix: string): string {
@@ -459,7 +470,10 @@ export class MagentoAdapter implements StoreAdapter {
     defaultSuffix: string,
     raw: MagentoProductRaw
   ): { currency: string; product: ProductDetail } {
-    const sku = sanitizeText(raw.sku, 80) || String(raw.id ?? "product");
+    const sku =
+      sanitizeText(raw.sku, 80) ||
+      sanitizeText(raw.id !== undefined && raw.id !== null ? String(raw.id) : "", 80) ||
+      "product";
     const title = sanitizeText(raw.name, 200) || sku;
     const urlKey = sanitizeText(raw.url_key, 200) || sku;
     const url = buildMagentoProductUrl(origin, urlKey, raw.url_suffix, defaultSuffix);
@@ -480,7 +494,12 @@ export class MagentoAdapter implements StoreAdapter {
     if (Array.isArray(raw.variants) && raw.variants.length > 0) {
       for (const v of raw.variants.slice(0, 100)) {
         if (!v.product) continue;
-        const vSku = sanitizeText(v.product.sku, 80) || String(v.product.id ?? "");
+        const vSku =
+          sanitizeText(v.product.sku, 80) ||
+          sanitizeText(
+            v.product.id !== undefined && v.product.id !== null ? String(v.product.id) : "",
+            80
+          );
         if (!vSku) continue;
         const vTier = parsePriceTier(
           v.product.price_range?.minimum_price ?? raw.price_range?.minimum_price,
@@ -731,7 +750,7 @@ export class MagentoAdapter implements StoreAdapter {
     }
 
     for (const item of items) {
-      if (!/^[A-Za-z0-9._:/-]{1,128}$/.test(item.variantId)) {
+      if (!/^[A-Za-z0-9._/-]{1,128}$/.test(item.variantId) || item.variantId.includes("..")) {
         throw new Error(`Invalid Magento SKU or url_key: ${item.variantId}`);
       }
       if (!Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 99) {

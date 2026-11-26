@@ -1,7 +1,12 @@
-import { sanitizeOptionalText, sanitizeText } from "../../security/sanitize.js";
+import { asciiLowerCase, sanitizeOptionalText, sanitizeText } from "../../security/sanitize.js";
 import { SsrfError } from "../../security/ssrf.js";
 
 const HARD_SSRF_CODES = new Set(["INVALID_URL", "BLOCKED_HOST", "BLOCKED_IP", "CONCURRENCY_LIMIT"]);
+const MAX_JSONLD_DEPTH = 8;
+const MAX_JSONLD_NODES = 200;
+const MAX_JSONLD_OFFERS = 100;
+const MAX_JSONLD_IMAGES = 20;
+const MAX_ATTR_WINDOW = 2048;
 
 export function rethrowIfHardSsrfError(err: unknown): void {
   if (err instanceof SsrfError && HARD_SSRF_CODES.has(err.code)) {
@@ -14,11 +19,15 @@ export function decodeHtmlEntitiesBasic(input: string): string {
     const lower = ent.toLowerCase();
     if (lower.startsWith("#x")) {
       const code = Number.parseInt(lower.slice(2), 16);
-      return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : full;
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff)
+        ? String.fromCodePoint(code)
+        : full;
     }
     if (lower.startsWith("#")) {
       const code = Number.parseInt(lower.slice(1), 10);
-      return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : full;
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff)
+        ? String.fromCodePoint(code)
+        : full;
     }
     switch (lower) {
       case "quot":
@@ -45,12 +54,344 @@ export function decodeHtmlEntitiesBasic(input: string): string {
   });
 }
 
+function isTagNameBoundary(ch: string | undefined): boolean {
+  return ch === undefined || ch === ">" || ch === "/" || ch === " " || ch === "\t" || ch === "\n" || ch === "\r";
+}
+
+/**
+ * Linear-time O(N) HTML attribute parser on a bounded single-tag slice.
+ */
+export function parseTagAttributesLinear(attrSlice: string): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  const len = Math.min(attrSlice.length, MAX_ATTR_WINDOW);
+  let i = 0;
+
+  while (i < len) {
+    while (i < len && (attrSlice[i] === " " || attrSlice[i] === "\t" || attrSlice[i] === "\n" || attrSlice[i] === "\r" || attrSlice[i] === "/")) {
+      i++;
+    }
+    if (i >= len) break;
+
+    const nameStart = i;
+    while (i < len) {
+      const ch = attrSlice[i]!;
+      if (ch === "=" || ch === " " || ch === "\t" || ch === "\n" || ch === "\r" || ch === "/" || ch === ">") break;
+      i++;
+    }
+    const name = attrSlice.slice(nameStart, i).toLowerCase();
+    if (!name) {
+      i++;
+      continue;
+    }
+
+    while (i < len && (attrSlice[i] === " " || attrSlice[i] === "\t" || attrSlice[i] === "\n" || attrSlice[i] === "\r")) {
+      i++;
+    }
+
+    if (attrSlice[i] !== "=") {
+      attrs[name] = "";
+      continue;
+    }
+    i++; // skip '='
+
+    while (i < len && (attrSlice[i] === " " || attrSlice[i] === "\t" || attrSlice[i] === "\n" || attrSlice[i] === "\r")) {
+      i++;
+    }
+    if (i >= len) {
+      attrs[name] = "";
+      break;
+    }
+
+    const quote = attrSlice[i];
+    if (quote === '"' || quote === "'") {
+      i++;
+      const valStart = i;
+      const closeIdx = attrSlice.indexOf(quote, valStart);
+      if (closeIdx === -1 || closeIdx >= len) {
+        attrs[name] = attrSlice.slice(valStart, len);
+        break;
+      }
+      attrs[name] = attrSlice.slice(valStart, closeIdx);
+      i = closeIdx + 1;
+    } else {
+      const valStart = i;
+      while (i < len && attrSlice[i] !== " " && attrSlice[i] !== "\t" && attrSlice[i] !== "\n" && attrSlice[i] !== "\r" && attrSlice[i] !== ">") {
+        i++;
+      }
+      attrs[name] = attrSlice.slice(valStart, i);
+    }
+  }
+
+  return attrs;
+}
+
+/**
+ * Finds the end '>' of an opening tag starting at `attrStart`, bounded to `maxAttrLen`
+ * and never crossing another `<` outside quotes (O(1) bounded window).
+ */
+function findOpenTagEndLinear(html: string, attrStart: number, maxAttrLen = MAX_ATTR_WINDOW): number {
+  const limit = Math.min(html.length, attrStart + maxAttrLen);
+  let quote: string | null = null;
+  for (let i = attrStart; i < limit; i++) {
+    const ch = html[i]!;
+    if (quote) {
+      if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (ch === ">") {
+      return i;
+    } else if (ch === "<") {
+      return -1;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Linear-time O(N) scanner for opening tags of `tagName` (e.g. "meta", "input", "a", "img").
+ */
+export function scanOpeningTagsLinear(
+  html: string,
+  tagName: string,
+  opts: { maxTags?: number; maxAttrLen?: number } = {}
+): Array<{ openAttrs: string; attrs: Record<string, string>; start: number; end: number }> {
+  const results: Array<{ openAttrs: string; attrs: Record<string, string>; start: number; end: number }> = [];
+  if (!html || !html.includes("<")) return results;
+  const maxTags = opts.maxTags ?? 200;
+  const maxAttrLen = opts.maxAttrLen ?? MAX_ATTR_WINDOW;
+  const target = tagName.toLowerCase();
+  const needle = `<${target}`;
+  const lower = asciiLowerCase(html);
+  let pos = 0;
+
+  while (pos < lower.length && results.length < maxTags) {
+    const idx = lower.indexOf(needle, pos);
+    if (idx === -1) break;
+    const afterName = idx + needle.length;
+    if (!isTagNameBoundary(lower[afterName])) {
+      pos = afterName;
+      continue;
+    }
+    const openEnd = findOpenTagEndLinear(html, afterName, maxAttrLen);
+    if (openEnd === -1) {
+      pos = afterName;
+      continue;
+    }
+    const openAttrs = html.slice(afterName, openEnd);
+    results.push({
+      openAttrs,
+      attrs: parseTagAttributesLinear(openAttrs),
+      start: idx,
+      end: openEnd + 1
+    });
+    pos = openEnd + 1;
+  }
+
+  return results;
+}
+
+/**
+ * Linear-time O(N) extractor for paired `<tagName ...>body</tagName>` blocks with
+ * bounded attribute windows, bounded body slices, and memoized missing-close-tag protection.
+ */
+export function extractTagBlocksLinear(
+  html: string,
+  tagName: string,
+  opts: {
+    maxBlocks?: number;
+    maxAttrLen?: number;
+    maxBodyLen?: number;
+    attrFilter?: (attrs: Record<string, string>, openAttrs: string) => boolean;
+  } = {}
+): Array<{ openAttrs: string; attrs: Record<string, string>; body: string; start: number; end: number }> {
+  const results: Array<{ openAttrs: string; attrs: Record<string, string>; body: string; start: number; end: number }> = [];
+  if (!html || !html.includes("<")) return results;
+  const maxBlocks = opts.maxBlocks ?? 40;
+  const maxAttrLen = opts.maxAttrLen ?? MAX_ATTR_WINDOW;
+  const maxBodyLen = opts.maxBodyLen ?? 16_384;
+  const target = tagName.toLowerCase();
+  const openNeedle = `<${target}`;
+  const closeNeedle = `</${target}`;
+  const lower = asciiLowerCase(html);
+  let pos = 0;
+  let noMoreClose = false;
+
+  while (pos < lower.length && results.length < maxBlocks) {
+    const idx = lower.indexOf(openNeedle, pos);
+    if (idx === -1) break;
+    const afterName = idx + openNeedle.length;
+    if (!isTagNameBoundary(lower[afterName])) {
+      pos = afterName;
+      continue;
+    }
+    const openEnd = findOpenTagEndLinear(html, afterName, maxAttrLen);
+    if (openEnd === -1) {
+      pos = afterName;
+      continue;
+    }
+    const openAttrs = html.slice(afterName, openEnd);
+    const attrs = parseTagAttributesLinear(openAttrs);
+    if (opts.attrFilter && !opts.attrFilter(attrs, openAttrs)) {
+      pos = openEnd + 1;
+      continue;
+    }
+    if (noMoreClose) break;
+
+    let closeIdx = lower.indexOf(closeNeedle, openEnd + 1);
+    while (closeIdx !== -1 && !isTagNameBoundary(lower[closeIdx + closeNeedle.length])) {
+      closeIdx = lower.indexOf(closeNeedle, closeIdx + closeNeedle.length);
+    }
+    if (closeIdx === -1) {
+      noMoreClose = true;
+      break;
+    }
+    const closeEnd = lower.indexOf(">", closeIdx + closeNeedle.length);
+    const endPos = closeEnd === -1 ? html.length : closeEnd + 1;
+    const bodyEnd = Math.min(closeIdx, openEnd + 1 + maxBodyLen);
+    results.push({
+      openAttrs,
+      attrs,
+      body: html.slice(openEnd + 1, bodyEnd),
+      start: idx,
+      end: endPos
+    });
+    pos = endPos;
+  }
+
+  return results;
+}
+
+/**
+ * Linear-time O(N) extractor for repeated marker `<tagName ...>` sections whose end is delimited
+ * by the next matching sibling marker or a bounded maxChunkLen window (e.g. `.product-box`,
+ * `data-product-attribute`, `product-detail-configurator-group`).
+ */
+export function extractSectionSlicesLinear(
+  html: string,
+  tagName: string,
+  attrFilter: (attrs: Record<string, string>, openAttrs: string) => boolean,
+  opts: {
+    maxSections?: number;
+    maxChunkLen?: number;
+    stopMarkers?: readonly string[];
+  } = {}
+): Array<{ openAttrs: string; attrs: Record<string, string>; body: string }> {
+  const matches: Array<{ openAttrs: string; attrs: Record<string, string>; start: number; bodyStart: number }> = [];
+  if (!html || !html.includes("<")) return [];
+  const maxSections = opts.maxSections ?? 40;
+  const maxChunkLen = opts.maxChunkLen ?? 8192;
+  const stopMarkers = (opts.stopMarkers ?? []).map((m) => m.toLowerCase());
+  const target = tagName.toLowerCase();
+  const openNeedle = `<${target}`;
+  const lower = asciiLowerCase(html);
+  let pos = 0;
+
+  while (pos < lower.length && matches.length <= maxSections) {
+    const idx = lower.indexOf(openNeedle, pos);
+    if (idx === -1) break;
+    const afterName = idx + openNeedle.length;
+    if (!isTagNameBoundary(lower[afterName])) {
+      pos = afterName;
+      continue;
+    }
+    const openEnd = findOpenTagEndLinear(html, afterName, MAX_ATTR_WINDOW);
+    if (openEnd === -1) {
+      pos = afterName;
+      continue;
+    }
+    const openAttrs = html.slice(afterName, openEnd);
+    const attrs = parseTagAttributesLinear(openAttrs);
+    if (attrFilter(attrs, openAttrs)) {
+      matches.push({ openAttrs, attrs, start: idx, bodyStart: openEnd + 1 });
+    }
+    pos = openEnd + 1;
+  }
+
+  const results: Array<{ openAttrs: string; attrs: Record<string, string>; body: string }> = [];
+  const count = Math.min(matches.length, maxSections);
+  for (let i = 0; i < count; i++) {
+    const cur = matches[i]!;
+    const nextStart = i + 1 < matches.length ? matches[i + 1]!.start : html.length;
+    let sliceEnd = Math.min(nextStart, cur.bodyStart + maxChunkLen);
+    if (stopMarkers.length > 0) {
+      const lowerSlice = lower.slice(cur.bodyStart, sliceEnd);
+      for (const marker of stopMarkers) {
+        const stopIdx = lowerSlice.indexOf(marker);
+        if (stopIdx !== -1 && cur.bodyStart + stopIdx < sliceEnd) {
+          sliceEnd = cur.bodyStart + stopIdx;
+        }
+      }
+    }
+    results.push({
+      openAttrs: cur.openAttrs,
+      attrs: cur.attrs,
+      body: html.slice(cur.bodyStart, sliceEnd)
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Linear-time O(N) helper to extract text inside the first element whose `class` attribute
+ * contains `classFragment` (e.g. `product-detail-price`, `list-price-price`).
+ */
+export function extractTextByClassLinear(
+  html: string,
+  classFragment: string,
+  opts: { closingTag?: string; maxBodyLen?: number } = {}
+): string | null {
+  if (!html || !html.includes("<")) return null;
+  const maxBodyLen = opts.maxBodyLen ?? 4096;
+  const needle = classFragment.toLowerCase();
+  const lower = asciiLowerCase(html);
+  let pos = 0;
+
+  while (pos < lower.length) {
+    const idx = lower.indexOf(needle, pos);
+    if (idx === -1) return null;
+
+    // Walk back at most MAX_ATTR_WINDOW to find enclosing '<'
+    const searchStart = Math.max(0, idx - MAX_ATTR_WINDOW);
+    const lt = lower.lastIndexOf("<", idx);
+    if (lt === -1 || lt < searchStart) {
+      pos = idx + needle.length;
+      continue;
+    }
+    const openEnd = findOpenTagEndLinear(html, lt + 1, MAX_ATTR_WINDOW);
+    if (openEnd === -1 || openEnd < idx) {
+      pos = idx + needle.length;
+      continue;
+    }
+    // Verify the class attribute actually contains needle
+    let nameEnd = lt + 1;
+    while (nameEnd < openEnd && !isTagNameBoundary(lower[nameEnd])) {
+      nameEnd++;
+    }
+    const attrs = parseTagAttributesLinear(html.slice(nameEnd, openEnd));
+    const cls = (attrs["class"] ?? "").toLowerCase();
+    if (!cls.includes(needle)) {
+      pos = openEnd + 1;
+      continue;
+    }
+
+    const bodyStart = openEnd + 1;
+    const bodyLimit = Math.min(html.length, bodyStart + maxBodyLen);
+    const closeNeedle = opts.closingTag ? `</${opts.closingTag.toLowerCase()}` : "</";
+    const closeIdx = lower.indexOf(closeNeedle, bodyStart);
+    const bodyEnd = closeIdx !== -1 && closeIdx < bodyLimit ? closeIdx : bodyLimit;
+    return html.slice(bodyStart, bodyEnd);
+  }
+  return null;
+}
+
 export function extractHtmlTitle(html: string): string | null {
   const ogSite = extractMetaContent(html, "og:site_name");
   if (ogSite) return sanitizeOptionalText(ogSite, 120);
-  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  if (!titleMatch?.[1]) return null;
-  const decoded = decodeHtmlEntitiesBasic(titleMatch[1]);
+  const blocks = extractTagBlocksLinear(html, "title", { maxBlocks: 1, maxBodyLen: 512 });
+  const rawTitle = blocks[0]?.body;
+  if (!rawTitle) return null;
+  const decoded = decodeHtmlEntitiesBasic(rawTitle);
   const cleaned = sanitizeOptionalText(decoded, 120);
   if (!cleaned) return null;
   const parts = cleaned.split(/\s+[|\-–—]\s+/);
@@ -58,21 +399,12 @@ export function extractHtmlTitle(html: string): string | null {
 }
 
 export function extractMetaContent(html: string, nameOrProp: string): string | null {
-  const escaped = nameOrProp.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const patterns = [
-    new RegExp(
-      `<meta[^>]+(?:name|property)=["']${escaped}["'][^>]+content=["']([^"']+)["']`,
-      "i"
-    ),
-    new RegExp(
-      `<meta[^>]+content=["']([^"']+)["'][^>]+(?:name|property)=["']${escaped}["']`,
-      "i"
-    )
-  ];
-  for (const re of patterns) {
-    const m = html.match(re);
-    if (m?.[1]) {
-      return decodeHtmlEntitiesBasic(m[1]).trim();
+  const target = nameOrProp.toLowerCase();
+  const tags = scanOpeningTagsLinear(html, "meta", { maxTags: 300 });
+  for (const tag of tags) {
+    const key = (tag.attrs["name"] ?? tag.attrs["property"] ?? "").trim().toLowerCase();
+    if (key === target && tag.attrs["content"]) {
+      return decodeHtmlEntitiesBasic(tag.attrs["content"]).trim();
     }
   }
   return null;
@@ -80,20 +412,24 @@ export function extractMetaContent(html: string, nameOrProp: string): string | n
 
 export function extractJsonLdBlocks(html: string): unknown[] {
   const results: unknown[] = [];
-  const regex = /<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(html)) !== null) {
-    const raw = match[1]?.trim();
+  const blocks = extractTagBlocksLinear(html, "script", {
+    maxBlocks: 40,
+    maxBodyLen: 524_288,
+    attrFilter: (attrs) => (attrs["type"] ?? "").trim().toLowerCase().startsWith("application/ld+json")
+  });
+  for (const block of blocks) {
+    if (results.length >= MAX_JSONLD_NODES) break;
+    const raw = block.body.trim();
     if (!raw) continue;
     try {
       const parsed = JSON.parse(raw) as unknown;
-      collectJsonLdNodes(parsed, results);
+      collectJsonLdNodes(parsed, results, 0);
     } catch {
       // Some storefronts emit unescaped control characters inside JSON-LD strings; retry once after stripping raw control chars
       try {
         const cleaned = raw.replace(/[\x00-\x1f]/g, " ");
         const parsed = JSON.parse(cleaned) as unknown;
-        collectJsonLdNodes(parsed, results);
+        collectJsonLdNodes(parsed, results, 0);
       } catch {
         // Ignore malformed JSON-LD blocks
       }
@@ -102,16 +438,23 @@ export function extractJsonLdBlocks(html: string): unknown[] {
   return results;
 }
 
-function collectJsonLdNodes(node: unknown, out: unknown[]): void {
+function collectJsonLdNodes(node: unknown, out: unknown[], depth: number): void {
+  if (depth > MAX_JSONLD_DEPTH || out.length >= MAX_JSONLD_NODES) return;
   if (!node || typeof node !== "object") return;
   if (Array.isArray(node)) {
-    for (const item of node) collectJsonLdNodes(item, out);
+    for (const item of node) {
+      if (out.length >= MAX_JSONLD_NODES) break;
+      collectJsonLdNodes(item, out, depth + 1);
+    }
     return;
   }
   out.push(node);
   const record = node as Record<string, unknown>;
   if (Array.isArray(record["@graph"])) {
-    for (const item of record["@graph"]) collectJsonLdNodes(item, out);
+    for (const item of record["@graph"]) {
+      if (out.length >= MAX_JSONLD_NODES) break;
+      collectJsonLdNodes(item, out, depth + 1);
+    }
   }
 }
 
@@ -158,7 +501,7 @@ export interface ParsedOfferInfo {
   url: string | null;
 }
 
-export function parseJsonLdOffer(rawOffer: unknown): ParsedOfferInfo {
+export function parseJsonLdOffer(rawOffer: unknown, depth = 0): ParsedOfferInfo {
   const empty: ParsedOfferInfo = {
     price: null,
     highPrice: null,
@@ -167,9 +510,9 @@ export function parseJsonLdOffer(rawOffer: unknown): ParsedOfferInfo {
     sku: null,
     url: null
   };
-  if (!rawOffer || typeof rawOffer !== "object") return empty;
+  if (depth > MAX_JSONLD_DEPTH || !rawOffer || typeof rawOffer !== "object") return empty;
 
-  const offers = Array.isArray(rawOffer) ? rawOffer : [rawOffer];
+  const offers = (Array.isArray(rawOffer) ? rawOffer : [rawOffer]).slice(0, MAX_JSONLD_OFFERS);
   let bestPrice: number | null = null;
   let highPrice: number | null = null;
   let currency: string | null = null;
@@ -206,9 +549,9 @@ export function parseJsonLdOffer(rawOffer: unknown): ParsedOfferInfo {
         if (anyInStock === null) anyInStock = false;
       }
     }
-    // Nested AggregateOffer.offers
-    if (Array.isArray(o.offers)) {
-      const nested = parseJsonLdOffer(o.offers);
+    // Nested AggregateOffer.offers (depth-capped)
+    if (Array.isArray(o.offers) && depth < MAX_JSONLD_DEPTH) {
+      const nested = parseJsonLdOffer(o.offers, depth + 1);
       if (nested.price !== null && (bestPrice === null || nested.price < bestPrice)) {
         bestPrice = nested.price;
       }
@@ -232,7 +575,7 @@ export function parseLocalizedPrice(
   raw: string | null | undefined
 ): { amount: number; currencyHint: string | null } | null {
   if (!raw || typeof raw !== "string") return null;
-  const text = decodeHtmlEntitiesBasic(raw).trim();
+  const text = decodeHtmlEntitiesBasic(raw.slice(0, 256)).trim();
   if (!text) return null;
 
   let currencyHint: string | null = null;
@@ -296,6 +639,7 @@ export function extractJsonLdImages(raw: unknown): string[] {
   if (Array.isArray(raw)) {
     const out: string[] = [];
     for (const item of raw) {
+      if (out.length >= MAX_JSONLD_IMAGES) break;
       if (typeof item === "string") out.push(item);
       else if (item && typeof item === "object") {
         const url = (item as Record<string, unknown>).url ?? (item as Record<string, unknown>).contentUrl;
