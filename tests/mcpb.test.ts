@@ -14,6 +14,7 @@ const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const MCPB_PATH = path.join(ROOT_DIR, "public", "downloads", "shopcart-mcp.mcpb");
 
 const EXPECTED_TOOLS = [
+  "discover_stores",
   "inspect_store",
   "list_collections",
   "search_products",

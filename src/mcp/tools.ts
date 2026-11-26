@@ -41,6 +41,8 @@ import {
   SOURCE_NOTICE_PRODUCT
 } from "../security/sanitize.js";
 import { normalizeStoreOrigin, SsrfError } from "../security/ssrf.js";
+import { discoverStores } from "../stores/directory.js";
+import { STORE_CATEGORY_IDS } from "../stores/types.js";
 import { runMatchVisualProduct } from "./visual-match.js";
 
 const SOURCE_NOTICE_POLICY =
@@ -161,6 +163,111 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
   const affiliateFeed = ctx.affiliateFeed;
   const awinPromotions = ctx.awinPromotions ?? createAwinPromotionsProvider();
   const comparisonConfig = ctx.comparison ?? loadComparisonConfig();
+
+  server.registerTool(
+    "discover_stores",
+    {
+      title: "Discover Verified Online Stores",
+      description:
+        "Search ShopCart's curated, live-verified global online store directory (0 ms in-memory lookup, zero scraping) when the user has not named a specific store or domain. Filter by free-text query (German or English keywords), category, country (DE, AT, CH, DACH, US, UK, EU), platform (shopify, woocommerce, shopware, bigcommerce, magento, ucp, other), and cart_only.",
+      inputSchema: {
+        query: z
+          .string()
+          .trim()
+          .max(200)
+          .optional()
+          .describe(
+            "Free-text search matching store name, domain, bilingual DE/EN tags, categories, and descriptions (e.g. 'running shorts', 'matcha set', 'nachhaltige sneaker', 'refurbished laptop')."
+          ),
+        category: z
+          .string()
+          .trim()
+          .max(80)
+          .optional()
+          .describe(
+            `Optional canonical category slug (${STORE_CATEGORY_IDS.join(", ")}) or common DE/EN alias (e.g. 'coffee', 'running', 'skincare', 'refurbished').`
+          ),
+        country: z
+          .string()
+          .trim()
+          .max(32)
+          .optional()
+          .describe(
+            "Optional country or region filter (case-insensitive): 'DE', 'AT', 'CH', 'US', 'UK', 'EU', or 'DACH' (matches DE, AT, and CH)."
+          ),
+        platform: z
+          .string()
+          .trim()
+          .max(40)
+          .optional()
+          .describe(
+            "Optional e-commerce platform filter: 'shopify', 'woocommerce', 'shopware', 'bigcommerce', 'magento', 'ucp', or 'other'."
+          ),
+        cart_only: z
+          .boolean()
+          .optional()
+          .describe(
+            "If true, return only stores where ShopCart can generate direct cart/add-to-cart links (cart_supported: true)."
+          ),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(30)
+          .default(10)
+          .optional()
+          .describe("Maximum number of matching stores to return (1-30, default 10).")
+      },
+      annotations: {
+        title: "Discover Verified Online Stores",
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      }
+    },
+    async ({ query, category, country, platform, cart_only, limit }) =>
+      runGuardedTool(ctx, "discover_stores", async () => {
+        const result = discoverStores(
+          {
+            query,
+            category,
+            country,
+            platform,
+            cart_only,
+            limit,
+            lang: "en"
+          },
+          { defaultLimit: 10, maxLimit: 30 }
+        );
+
+        return {
+          total_matches: result.total_matches,
+          returned: result.returned,
+          directory_size: result.directory_size,
+          applied_filters: result.applied_filters,
+          available_categories: result.available_categories,
+          stores: result.stores.map((store) => ({
+            name: store.name,
+            domain: store.domain,
+            url: store.url,
+            platform: store.platform,
+            countries: store.countries,
+            categories: store.categories,
+            tags: store.tags,
+            language: store.language,
+            description: store.description,
+            cart_supported: store.cart_supported,
+            discounts_supported: store.discounts_supported
+          })),
+          ...(result.notices.length > 0 ? { notices: result.notices } : {}),
+          hint:
+            result.stores.length > 0
+              ? "Call search_products(store_url=...) or inspect_store(store_url=...) on the top matching store url(s) to check live products, variants, prices, and stock, then call create_cart_link for a ready-to-review cart link."
+              : "No stores matched those exact filters. Broaden or remove one filter (e.g. drop platform or try a shorter keyword or country='DACH'/'EU') and call discover_stores again."
+        };
+      })
+  );
 
   server.registerTool(
     "inspect_store",

@@ -641,6 +641,7 @@ describe("CLI process E2E (one-shot flags + zero-arg stdio MCP backward compatib
       expect(toolsRes.error).toBeUndefined();
       const toolNames = (toolsRes.result as { tools: Array<{ name: string }> }).tools.map((t) => t.name);
       expect(toolNames).toEqual([
+        "discover_stores",
         "inspect_store",
         "list_collections",
         "search_products",

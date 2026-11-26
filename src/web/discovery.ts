@@ -92,6 +92,7 @@ Users arrive from ${origin} with a prompt like "Connect ShopCart (${mcpUrl}) for
 - Pricing: ${pricingLine(config)}.
 
 ## Tools (Recommended Order)
+0. \`discover_stores(query?, category?, country?, platform?, cart_only?, limit?)\` — Search ShopCart's live-verified global online store directory (0 ms in-memory, zero scraping) whenever the user has not named a specific store or domain; supports 12 categories, DACH/DE/AT/CH/US/UK/EU filters, and returns verified store URLs for \`search_products\`.
 1. \`inspect_store(store_url)\` — Detect the platform (Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2, or Universal JSON-LD), currency, country, and WAF rules.
 2. \`list_collections(store_url, limit?, deals_only?)\` — Shopify only: list collections and highlight sale, Black Friday, outlet, bestseller, bundle, and Advent calendar collections.
 3. \`search_products(store_url, query?, collection?, sort_by?, limit?, available_only?, min_price?, max_price?)\` — Search the public catalog with normalized prices, \`discount_percent\`, and \`savings\`. \`sort_by: "discount_desc"\` and \`collection\` work on Shopify. Stores without an open search return \`agent_guidance\` and search hints instead.
@@ -112,6 +113,7 @@ Users arrive from ${origin} with a prompt like "Connect ShopCart (${mcpUrl}) for
 ## Documentation & Answer Guides
 - [Full Agent Reference](${origin}/llms-full.txt): Supported store types, DE/EN shopping use cases, all guide summaries, security & read-only architecture.
 - [Homepage & Setup](${origin}): Consumer overview, connect buttons, AI start links, and pricing.
+- [Global Store Directory (DE / EN)](${origin}/stores): Searchable directory of live-verified DACH and global online stores ([English](${origin}/en/stores), JSON API \`${origin}/api/stores\`).
 - [Shopping Guides Hub](${origin}/guides): Answer-first guides in German and English.
 ${GUIDE_DEFINITIONS.map((g) => `  - [${g.title}](${origin}${g.path}) (${g.lang}): ${g.cardSummary}`).join("\n")}
 - [For Merchants — Agentic Storefront Readiness (DE)](${origin}/for-merchants) | [(EN)](${origin}/en/for-merchants): Free storefront self-check and optional B2B readiness services by wals.pro (100% independent, zero pay-to-rank).
@@ -330,6 +332,8 @@ export const SITEMAP_PATHS: readonly string[] = [
   "/?lang=en",
   "/for-merchants",
   "/en/for-merchants",
+  "/stores",
+  "/en/stores",
   "/guides",
   ...GUIDE_DEFINITIONS.map((g) => g.path),
   "/billing",
@@ -358,6 +362,8 @@ export function renderSitemapXml(config: AppConfig): string {
     "/?lang=en": "0.9",
     "/for-merchants": "0.8",
     "/en/for-merchants": "0.8",
+    "/stores": "0.9",
+    "/en/stores": "0.9",
     "/guides": "0.9",
     ...Object.fromEntries(GUIDE_DEFINITIONS.map((g) => [g.path, "0.8"]))
   };
@@ -375,6 +381,13 @@ export function renderSitemapXml(config: AppConfig): string {
         { hreflang: "de", href: `${origin}/for-merchants` },
         { hreflang: "en", href: `${origin}/en/for-merchants` },
         { hreflang: "x-default", href: `${origin}/en/for-merchants` }
+      ];
+    }
+    if (p === "/stores" || p === "/en/stores") {
+      return [
+        { hreflang: "de", href: `${origin}/stores` },
+        { hreflang: "en", href: `${origin}/en/stores` },
+        { hreflang: "x-default", href: `${origin}/stores` }
       ];
     }
     if (p === "/guides") {
