@@ -95,13 +95,13 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Inspect Store",
       description:
-        "Check whether an HTTPS online store URL is a supported public Shopify storefront and return its currency, country, WAF restrictions, and available catalog endpoints.",
+        "Check whether an HTTPS online store URL is a supported public storefront (Shopify, BigCommerce, Shopware 6, or Magento 2 / Adobe Commerce) and return its platform, currency, country, WAF restrictions, and available catalog endpoints.",
       inputSchema: {
         store_url: z
           .string()
           .min(3)
           .max(256)
-          .describe("Store domain or HTTPS URL, e.g. 'snocks.com' or 'https://ridge.com'")
+          .describe("Store domain or HTTPS URL, e.g. 'snocks.com', 'ridge.com', or 'coxandcox.co.uk'")
       },
       annotations: makeAnnotations("Inspect Store")
     },
@@ -111,14 +111,28 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
         const { store } = await ctx.registry.resolve(origin, ctx.concurrencyKey);
         if (!store) {
           throw new Error(
-            `Store '${origin}' could not be detected as a supported Shopify storefront.`
+            `Store '${origin}' could not be detected as a supported storefront (Shopify, Magento 2, Shopware 6, BigCommerce).`
           );
         }
         const notices: string[] = [];
         if (store.wafRestricted) {
-          notices.push(
-            "Store uses WAF rules that restrict /meta.json or /products.json; keyword search (/search/suggest.json), product detail (/products/<handle>.js), and cart permalinks remain available."
-          );
+          if (store.platform === "shopify") {
+            notices.push(
+              "Store uses WAF rules that restrict /meta.json or /products.json; keyword search (/search/suggest.json), product detail (/products/<handle>.js), and cart permalinks remain available."
+            );
+          } else if (store.platform === "bigcommerce") {
+            notices.push(
+              "Store uses WAF rules that may restrict catalog pages; direct product URLs and /cart.php?action=add permalinks remain available when you know the product_id or SKU."
+            );
+          } else if (store.platform === "shopware") {
+            notices.push(
+              "Store restricts Store API or storefront endpoints via WAF/auth; ShopCart stays strictly read-only and never bypasses access controls."
+            );
+          } else {
+            notices.push(
+              "Store restricts GraphQL/catalog endpoints via WAF/auth; ShopCart stays strictly read-only and never bypasses access controls."
+            );
+          }
         }
         return { store, notices };
       })
@@ -129,7 +143,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Search Store Products",
       description:
-        "Search a Shopify storefront's public catalog by keyword (or browse top items when query is omitted) with optional availability and min/max price filters.",
+        "Search a supported storefront's public catalog (Shopify, BigCommerce, Shopware 6, or Magento 2) by keyword (or browse top items when query is omitted) with optional availability and min/max price filters.",
       inputSchema: {
         store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
         query: z
@@ -167,7 +181,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     async ({ store_url, query, limit, available_only, min_price, max_price }) =>
       runGuardedTool(ctx, "search_products", async () => {
         const origin = normalizeStoreOrigin(store_url);
-        const adapter = ctx.registry.getDefault();
+        const adapter = await ctx.registry.resolveAdapter(origin, ctx.concurrencyKey);
         const result = await adapter.searchProducts(origin, {
           query,
           limit: limit ?? 10,
@@ -192,21 +206,21 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Get Product Details & Variants",
       description:
-        "Retrieve product details, sanitized description text, options, images, and exact numeric variant IDs, prices, and availability for a Shopify product handle or URL.",
+        "Retrieve product details, sanitized description text, options, images, and exact variant/SKU IDs, prices, discounts, and availability for a supported store product handle, SKU, ID, or URL.",
       inputSchema: {
         store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
         handle_or_url: z
           .string()
           .min(1)
           .max(300)
-          .describe("Product handle (e.g. 'rolltop-2-0') or full product URL")
+          .describe("Product handle/slug/url_key, SKU, Shopware UUID, or full product URL")
       },
       annotations: makeAnnotations("Get Product Details & Variants")
     },
     async ({ store_url, handle_or_url }) =>
       runGuardedTool(ctx, "get_product", async () => {
         const origin = normalizeStoreOrigin(store_url);
-        const adapter = ctx.registry.getDefault();
+        const adapter = await ctx.registry.resolveAdapter(origin, ctx.concurrencyKey);
         const result = await adapter.getProduct(origin, handle_or_url, {
           concurrencyKey: ctx.concurrencyKey
         });
@@ -224,7 +238,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Create Store Cart Link",
       description:
-        "Generate a read-only Shopify browser cart or checkout permalink from exact numeric variant IDs and quantities, optionally verifying live availability via verify_handles.",
+        "Generate a read-only browser cart permalink (Shopify /cart/<id>:<qty>, BigCommerce /cart.php?action=add&product_id=<id>&qty=<qty>) or verified direct product link(s) (Shopware 6, Magento 2) without mutating server-side carts.",
       inputSchema: {
         store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
         items: z
@@ -232,19 +246,22 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
             z.object({
               variant_id: z
                 .string()
-                .regex(/^\d{1,20}$/, "variant_id must be a numeric Shopify variant ID"),
+                .regex(
+                  /^[A-Za-z0-9._:/-]{1,128}$/,
+                  "variant_id must be a valid numeric variant/product ID, SKU, or platform product identifier"
+                ),
               quantity: z.number().int().min(1).max(99)
             })
           )
           .min(1)
           .max(20)
-          .describe("Line items with numeric variant_id from get_product and quantity (1..99)"),
+          .describe("Line items with variant_id/product_id/SKU from get_product and quantity (1..99)"),
         mode: z
           .enum(["cart", "checkout"])
           .default("cart")
           .optional()
           .describe(
-            "'cart' opens merchant storefront cart (?storefront=true, default); 'checkout' goes directly to checkout."
+            "'cart' opens merchant storefront cart (default); 'checkout' goes directly to checkout where supported."
           ),
         discount_code: z
           .string()
@@ -256,7 +273,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           .max(10)
           .optional()
           .describe(
-            "Recommended: product handles whose variants should be verified for stock and price via /products/<handle>.js"
+            "Recommended: product handles/paths/SKUs whose variants should be verified for stock and price."
           )
       },
       annotations: makeAnnotations("Create Store Cart Link")
@@ -264,7 +281,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     async ({ store_url, items, mode, discount_code, verify_handles }) =>
       runGuardedTool(ctx, "create_cart_link", async () => {
         const origin = normalizeStoreOrigin(store_url);
-        const adapter = ctx.registry.getDefault();
+        const adapter = await ctx.registry.resolveAdapter(origin, ctx.concurrencyKey);
         return adapter.buildCartLink(
           origin,
           items.map((i) => ({ variantId: i.variant_id, quantity: i.quantity })),

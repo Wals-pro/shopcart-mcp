@@ -122,13 +122,15 @@ export class ShopifyAdapter implements StoreAdapter {
     });
     const effectiveOrigin = meta.origin;
 
-    const [suggestProbe, productsProbe, mcpProbe] = await Promise.all([
+    const [suggestProbe, productsProbe, mcpProbe, ucpProbe] = await Promise.all([
       this.probePredictiveSearch(effectiveOrigin, concurrencyKey),
       this.probeProductsJson(effectiveOrigin, concurrencyKey),
-      this.probeStorefrontMcp(effectiveOrigin, concurrencyKey)
+      this.probeStorefrontMcp(effectiveOrigin, concurrencyKey),
+      this.probeStorefrontUcp(effectiveOrigin, concurrencyKey)
     ]);
 
-    const isShopify = meta.detectedShopify || suggestProbe || productsProbe.available;
+    const isShopify =
+      meta.detectedShopify || suggestProbe || productsProbe.available || ucpProbe.supported;
     if (!isShopify) {
       return null;
     }
@@ -136,6 +138,9 @@ export class ShopifyAdapter implements StoreAdapter {
     if (productsProbe.blocked) {
       this.client.markProductCatalogBlocked(origin);
     }
+
+    const storefrontMcpSupported = mcpProbe.supported || ucpProbe.supported;
+    const storefrontMcpTools = mcpProbe.supported ? mcpProbe.tools : ucpProbe.tools;
 
     return {
       platform: "shopify",
@@ -148,8 +153,12 @@ export class ShopifyAdapter implements StoreAdapter {
       capabilities: {
         predictiveSearch: suggestProbe,
         productCatalogJson: productsProbe.available,
-        storefrontMcp: mcpProbe.supported,
-        storefrontMcpTools: mcpProbe.tools
+        storefrontMcp: storefrontMcpSupported,
+        storefrontMcpTools,
+        storefrontMcpEndpoint: mcpProbe.supported ? `${effectiveOrigin}/api/mcp` : null,
+        storefrontUcp: ucpProbe.supported,
+        storefrontUcpTools: ucpProbe.tools,
+        storefrontUcpEndpoint: ucpProbe.supported ? `${effectiveOrigin}/api/ucp/mcp` : null
       }
     };
   }
@@ -189,15 +198,15 @@ export class ShopifyAdapter implements StoreAdapter {
     }
   }
 
-  private async probeStorefrontMcp(
-    origin: string,
+  private async probeJsonRpcToolsEndpoint(
+    endpointUrl: string,
     concurrencyKey?: string
   ): Promise<{ supported: boolean; tools: string[] }> {
     try {
       const res = await this.client.postJson<{
         result?: { tools?: Array<{ name?: string }> };
       }>(
-        `${origin}/api/mcp`,
+        endpointUrl,
         { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
         { timeoutMs: 2500, concurrencyKey }
       );
@@ -211,6 +220,20 @@ export class ShopifyAdapter implements StoreAdapter {
     } catch {
       return { supported: false, tools: [] };
     }
+  }
+
+  private async probeStorefrontMcp(
+    origin: string,
+    concurrencyKey?: string
+  ): Promise<{ supported: boolean; tools: string[] }> {
+    return this.probeJsonRpcToolsEndpoint(`${origin}/api/mcp`, concurrencyKey);
+  }
+
+  private async probeStorefrontUcp(
+    origin: string,
+    concurrencyKey?: string
+  ): Promise<{ supported: boolean; tools: string[] }> {
+    return this.probeJsonRpcToolsEndpoint(`${origin}/api/ucp/mcp`, concurrencyKey);
   }
 
   private async queryPredictiveSearch(
