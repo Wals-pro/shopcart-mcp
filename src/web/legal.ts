@@ -1,11 +1,26 @@
 import type { AppConfig } from "../config.js";
 import { escapeHtml, type Lang } from "../auth/pages.js";
+import {
+  renderAnalyticsHead,
+  renderConsentBanner,
+  renderCookieSettingsFooterLink
+} from "./analytics.js";
 import { renderFaviconHeadLinks, renderShopCartWordmark, renderSparkCartSvg } from "./brand.js";
 import { getTrademarkDisclaimer } from "./platforms.js";
 
-function renderLegalShell(lang: Lang, title: string, path: string, bodyHtml: string): string {
+function renderLegalShell(
+  lang: Lang,
+  title: string,
+  path: string,
+  bodyHtml: string,
+  config?: AppConfig
+): string {
   const de = lang === "de";
   const otherLang = de ? "en" : "de";
+  const version = encodeURIComponent(config?.version ?? "0.6.0");
+  const analyticsHead = config ? renderAnalyticsHead(config, { lang, pageType: "legal" }) : "";
+  const cookieSettings = config ? renderCookieSettingsFooterLink(config, lang, { separator: " · " }) : "";
+  const consentBanner = config ? renderConsentBanner(config, lang) : "";
   return `<!doctype html>
 <html lang="${lang}">
 <head>
@@ -15,38 +30,8 @@ function renderLegalShell(lang: Lang, title: string, path: string, bodyHtml: str
 <meta name="theme-color" content="#141414">
 ${renderFaviconHeadLinks()}
 <title>${escapeHtml(title)} — ShopCart MCP</title>
-<style>
-:root{
-  color-scheme:dark;
-  --walspro-accent:#ff1f4d;--walspro-bg:#141414;--walspro-bg-2:#0d0d0d;--walspro-bg-deep:#090909;
-  --walspro-surface:#1a1a1a;--walspro-border:#2a2a2a;--walspro-divider:#242424;--walspro-border-strong:#3a3a3a;
-  --walspro-ink:#e0e0e0;--walspro-muted:#a7adb4;--walspro-hint:#7e848e;
-}
-*{box-sizing:border-box}
-body{margin:0;min-height:100dvh;font-family:"WALSPRO Body","Inter","Avenir Next",system-ui,sans-serif;background:radial-gradient(58% 36% at 85% 0%,rgba(255,31,77,.09),transparent 60%),var(--walspro-bg);color:var(--walspro-ink);line-height:1.65;-webkit-font-smoothing:antialiased}
-.wrap{max-width:780px;margin:0 auto;padding:28px 22px 56px}
-.top{display:flex;justify-content:space-between;align-items:center;padding-bottom:18px;border-bottom:1px solid var(--walspro-divider);margin-bottom:28px;gap:14px;flex-wrap:wrap}
-.brand{font-family:"WALSPRO Display","Inter",system-ui,sans-serif;font-weight:750;text-decoration:none;color:#fff;display:inline-flex;align-items:center;gap:10px;font-size:16px}
-.brand img,.brand svg{width:26px;height:26px;display:block;flex-shrink:0}
-.brand-accent{color:#ff2d59}
-.nav{display:flex;gap:16px;font-size:13px;color:var(--walspro-muted);align-items:center;flex-wrap:wrap}
-.nav a{text-decoration:none;color:inherit}
-.nav a:hover{color:#fff}
-.card{background:var(--walspro-surface);border:1px solid var(--walspro-border);border-radius:16px;padding:30px;box-shadow:0 16px 48px rgba(0,0,0,.4)}
-h1{margin:0 0 6px;font-family:"WALSPRO Display","Inter",system-ui,sans-serif;font-size:26px;letter-spacing:-.025em;color:#fff}
-.updated{font-size:13px;color:var(--walspro-muted);margin:0 0 22px}
-h2{margin:24px 0 8px;font-family:"WALSPRO Display","Inter",system-ui,sans-serif;font-size:17px;letter-spacing:-.01em;color:#fff}
-p,li{font-size:14.5px;color:var(--walspro-ink)}
-ul{padding-left:20px}
-li{margin:6px 0}
-code{font-family:"SFMono-Regular","Cascadia Code",monospace;background:var(--walspro-bg-deep);border:1px solid var(--walspro-border);padding:1px 6px;border-radius:6px;font-size:13px}
-.disclaimer{margin-top:24px;padding:12px 14px;background:var(--walspro-bg-2);border:1px solid var(--walspro-border);border-radius:12px;font-size:13px;color:var(--walspro-muted)}
-a{color:#ff6b7a}
-a:hover{color:#fff}
-.foot-note{margin-top:20px;font-size:12.5px;color:var(--walspro-muted);text-align:center}
-.foot-note a{color:var(--walspro-muted)}
-.foot-note a:hover{color:#fff}
-</style>
+<link rel="stylesheet" href="/assets/legal.css?v=${version}">
+${analyticsHead}
 </head>
 <body>
 <div class="wrap">
@@ -63,8 +48,9 @@ a:hover{color:#fff}
   <main class="card">
     ${bodyHtml}
   </main>
-  <p class="foot-note">ShopCart MCP · by <a href="https://wals.pro" target="_blank" rel="noopener noreferrer">wals.pro</a></p>
+  <p class="foot-note">ShopCart MCP · by <a href="https://wals.pro" target="_blank" rel="noopener noreferrer">wals.pro</a>${cookieSettings}</p>
 </div>
+${consentBanner}
 </body>
 </html>`;
 }
@@ -92,6 +78,7 @@ Support &amp; Datenschutzanfragen: <a href="mailto:support@wals.pro">support@wal
 <ul>
   <li><strong>Google Cloud Platform (Region <code>europe-west1</code>, EU):</strong> Hosting (Cloud Run) und Datenbank (Cloud Firestore).</li>
   <li><strong>Stripe Payments Europe Ltd.:</strong> Zahlungs- und Abo-Verwaltung (nur bei aktivem Pro-Upgrade).</li>
+  <li><strong>Google Ireland Limited (nur nach Einwilligung):</strong> Webanalyse via Google Analytics 4 ausschließlich nach deiner ausdrücklichen Zustimmung im Cookie-Banner (siehe Abschnitt 7).</li>
   <li><strong>Angefragter Online-Shop:</strong> Ausschließlich öffentliche HTTPS-Abfragen an die vom Nutzer ausdrücklich genannte Shop-Domain (geschützt durch DNS-gepinnten SSRF-Blocker).</li>
 </ul>
 
@@ -110,6 +97,15 @@ Support &amp; Datenschutzanfragen: <a href="mailto:support@wals.pro">support@wal
 
 <h2>6. UTM-Attribution &amp; Affiliate-/Partner-Links (Transparenzhinweis)</h2>
 <p>Von ShopCart erzeugte Produkt- und Warenkorb-Links enthalten im gehosteten Modus standardmäßig nicht-personenbezogene UTM-Parameter (<code>utm_source=shopcart.wals.pro</code>, <code>utm_medium=ai_mcp</code>, <code>utm_campaign=shopcart_mcp</code>), damit Händler KI-vermittelte Besuche in ihren Shop-Analysen zuordnen können (in der lokalen OSS-CLI optional abschaltbar via <code>SHOPCART_DISABLE_UTM=1</code>). Für teilnehmende Partner-Shops oder Produkt-Feeds (z. B. über Affiliate-Netzwerke wie Awin, Impact, Sovrn Commerce, Direktpartnerprogramme oder das Amazon-PartnerNet) können Links zusätzlich Partner- oder Affiliate-Parameter enthalten. Solche monetarisierten Links werden in jeder MCP-Antwort ausdrücklich mit <code>affiliate_disclosure: true</code> gekennzeichnet (§ 5a UWG, § 6 DDG, ECG, FTC 16 CFR Part 255). Beim Klick auf einen Affiliate-Link können das jeweilige Netzwerk oder der Händler eigene Zuordnungs-Cookies gemäß deren Datenschutzerklärung setzen; Wals Professional Services GmbH erhält keine persönlichen Bestell- oder Zahlungsdaten. <strong>Amazon-PartnerNet-Hinweis:</strong> Als Amazon-Partner verdient Wals Professional Services GmbH an qualifizierten Verkäufen — für dich entstehen dadurch keine Mehrkosten.</p>
+
+<h2>7. Webanalyse mit Google Analytics 4 (nur nach Einwilligung)</h2>
+<p>Auf der Website von ShopCart MCP setzen wir <strong>Google Analytics 4</strong> ein, einen Webanalysedienst der <strong>Google Ireland Limited</strong> (Gordon House, Barrow Street, Dublin 4, Irland; Muttergesellschaft: Google LLC, USA, zertifiziert unter dem EU-US Data Privacy Framework). Die Nutzung erfolgt streng nach dem <strong>Zero-Pre-Consent-Prinzip</strong> und dem <strong>Google Consent Mode v2</strong>:</p>
+<ul>
+  <li><strong>Rechtsgrundlage:</strong> Ausschließlich deine vorherige, ausdrückliche Einwilligung gemäß <strong>Art. 6 Abs. 1 lit. a DSGVO</strong> und <strong>§ 165 Abs. 3 TKG 2021</strong>. Solange du nicht aktiv auf „Alle akzeptieren“ geklickt hast, werden keinerlei Anfragen an <code>googletagmanager.com</code> oder <code>google-analytics.com</code> gesendet und keine <code>_ga*</code>-Cookies gesetzt.</li>
+  <li><strong>Erhobene Daten (0 PII):</strong> Nach deiner Zustimmung messen wir ausschließlich pseudonyme Nutzungs- und Interaktionsereignisse auf unseren Webseiten (bereinigte Seitenaufrufe ohne Query-Parameter, Klicks auf KI-Verbindungs- und Setup-Buttons, Tab-Auswahl, Kopieren von Setup-Snippets sowie anonymisierte Aktivierungs- und Upgrade-Schritte). Es werden <strong>niemals</strong> E-Mail-Adressen, Einmal-Codes, OAuth-Tokens, Zahlungsdaten, Suchbegriffe oder Warenkorbinhalte an Google Analytics übermittelt. Die lokale Open-Source-CLI (<code>npx -y shopcart-mcp</code>) enthält keinerlei Webanalyse oder Telemetrie.</li>
+  <li><strong>Datenschutz-Härtung:</strong> IP-Anonymisierung ist aktiv (<code>anonymize_ip: true</code>), Google Signals und Werbepersonalisierung sind dauerhaft deaktiviert (<code>allow_google_signals: false</code>, <code>allow_ad_personalization_signals: false</code>) und URL-Query-Strings werden vor der Übermittlung entfernt.</li>
+  <li><strong>Speicherung &amp; jederzeitiger Widerruf:</strong> Deine Entscheidung wird lokal in deinem Browser unter <code>localStorage</code> (<code>shopcart_consent_v1</code>) gespeichert. Du kannst deine Einwilligung jederzeit mit Wirkung für die Zukunft über <strong>„Cookie-Einstellungen“</strong> im Footer jeder Seite widerrufen („Nur notwendige“ wählen). Beim Widerruf wird Google Analytics sofort deaktiviert und alle gesetzten <code>_ga*</code>-Cookies werden gelöscht.</li>
+</ul>
 
 <div class="disclaimer">${escapeHtml(getTrademarkDisclaimer("de"))}</div>
 `
@@ -133,6 +129,7 @@ Support &amp; privacy requests: <a href="mailto:support@wals.pro">support@wals.p
 <ul>
   <li><strong>Google Cloud Platform (Region <code>europe-west1</code>, EU):</strong> Application hosting (Cloud Run) and database storage (Cloud Firestore).</li>
   <li><strong>Stripe Payments Europe Ltd.:</strong> Subscription checkout and billing portal (only when upgrading to Pro).</li>
+  <li><strong>Google Ireland Limited (consent only):</strong> Web analytics via Google Analytics 4 strictly after your explicit opt-in via the cookie banner (see Section 7).</li>
   <li><strong>Requested Public Storefront:</strong> Public read-only HTTPS catalog queries to the store domain explicitly requested by the user (protected by DNS-pinned SSRF controls).</li>
 </ul>
 
@@ -152,10 +149,19 @@ Support &amp; privacy requests: <a href="mailto:support@wals.pro">support@wals.p
 <h2>6. UTM Attribution &amp; Affiliate / Partner Links Disclosure</h2>
 <p>Product and cart links generated in hosted mode include non-personal UTM attribution parameters by default (<code>utm_source=shopcart.wals.pro</code>, <code>utm_medium=ai_mcp</code>, <code>utm_campaign=shopcart_mcp</code>) so merchants can recognize AI-assisted referrals in storefront analytics (optional opt-out in the local OSS CLI via <code>SHOPCART_DISABLE_UTM=1</code>). For participating merchants or partner product feeds (such as Awin, Impact, Sovrn Commerce, direct merchant referral programs, or Amazon Associates / PartnerNet), links may include affiliate tracking tags or deeplinks. Whenever a monetized affiliate link is returned, MCP tool outputs explicitly set <code>affiliate_disclosure: true</code> in compliance with EU/DACH transparency laws and US FTC Endorsement Guides (16 CFR Part 255). Clicking an affiliate link may allow the respective affiliate network or merchant to set attribution cookies under its own privacy policy; Wals Professional Services GmbH never receives personal shopper checkout details. <strong>Amazon Associates Disclosure:</strong> As an Amazon Associate, Wals Professional Services GmbH earns from qualifying purchases at no additional cost to you.</p>
 
+<h2>7. Web Analytics with Google Analytics 4 (Consent Only)</h2>
+<p>On the ShopCart MCP website, we use <strong>Google Analytics 4</strong>, a web analytics service provided by <strong>Google Ireland Limited</strong> (Gordon House, Barrow Street, Dublin 4, Ireland; parent company: Google LLC, USA, certified under the EU-US Data Privacy Framework). Analytics operates strictly under a <strong>zero-pre-consent</strong> standard and <strong>Google Consent Mode v2</strong>:</p>
+<ul>
+  <li><strong>Legal basis:</strong> Solely your prior explicit consent pursuant to <strong>Art. 6(1)(a) GDPR</strong> and <strong>§ 165(3) Austrian TKG 2021</strong>. Until you actively click “Accept all”, zero requests are made to <code>googletagmanager.com</code> or <code>google-analytics.com</code> and no <code>_ga*</code> cookies are set.</li>
+  <li><strong>Data collected (zero PII):</strong> Only after opt-in do we collect pseudonymous website usage and interaction events (sanitized page views without query strings, setup/connect button clicks, setup tab switches, snippet copies, and anonymized activation or upgrade funnel steps). We <strong>never</strong> transmit email addresses, one-time codes, OAuth tokens, payment details, store queries, or cart contents to Google Analytics. The local open-source CLI (<code>npx -y shopcart-mcp</code>) contains zero analytics or telemetry.</li>
+  <li><strong>Privacy safeguards:</strong> IP anonymization is enabled (<code>anonymize_ip: true</code>), Google Signals and ad personalization signals are disabled (<code>allow_google_signals: false</code>, <code>allow_ad_personalization_signals: false</code>), and URL query strings are stripped before transmission.</li>
+  <li><strong>Storage &amp; withdrawal at any time:</strong> Your preference is stored locally in your browser via <code>localStorage</code> (<code>shopcart_consent_v1</code>). You can withdraw your consent at any time with future effect via <strong>“Cookie settings”</strong> in the footer of every page (select “Essential only”). Upon withdrawal, Google Analytics is immediately disabled and all <code>_ga*</code> cookies are deleted.</li>
+</ul>
+
 <div class="disclaimer">${escapeHtml(getTrademarkDisclaimer("en"))}</div>
 `;
 
-  return renderLegalShell(lang, de ? "Datenschutz" : "Privacy Policy", "/privacy", body);
+  return renderLegalShell(lang, de ? "Datenschutz" : "Privacy Policy", "/privacy", body, config);
 }
 
 export function renderTermsPage(config: AppConfig, lang: Lang): string {
@@ -218,10 +224,10 @@ export function renderTermsPage(config: AppConfig, lang: Lang): string {
 <div class="disclaimer">${escapeHtml(getTrademarkDisclaimer("en"))}</div>
 `;
 
-  return renderLegalShell(lang, de ? "Nutzungsbedingungen" : "Terms of Service", "/terms", body);
+  return renderLegalShell(lang, de ? "Nutzungsbedingungen" : "Terms of Service", "/terms", body, config);
 }
 
-export function renderNotFoundPage(lang: Lang): string {
+export function renderNotFoundPage(lang: Lang, config?: AppConfig): string {
   const de = lang === "de";
   const body = de
     ? `
@@ -234,7 +240,7 @@ export function renderNotFoundPage(lang: Lang): string {
 <p class="updated">The requested page does not exist or has been moved.</p>
 <p><a href="/?lang=en">Back to homepage</a> · <a href="/guides?lang=en">Browse Shopping Guides</a> · <a href="/billing?lang=en">Account &amp; Billing</a></p>
 `;
-  return renderLegalShell(lang, de ? "Seite nicht gefunden (404)" : "Page not found (404)", "/", body);
+  return renderLegalShell(lang, de ? "Seite nicht gefunden (404)" : "Page not found (404)", "/", body, config);
 }
 
 export function renderSecurityTxt(config: AppConfig): string {

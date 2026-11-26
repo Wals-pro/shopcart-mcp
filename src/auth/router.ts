@@ -2,6 +2,7 @@ import express, { type Request, type Response, type Router } from "express";
 import type { AppConfig } from "../config.js";
 import type { ClientAuthMethod, OAuthClientRecord, StorageBackend } from "../store/types.js";
 import { isPromoFreeProActive } from "../billing/quota.js";
+import { buildOAuthCsp } from "../web/analytics.js";
 import { CimdResolver, isCimdClientId, type ResolvedOAuthClient } from "./cimd.js";
 import {
   createCsrfPair,
@@ -66,12 +67,19 @@ function getClientIp(req: Request): string {
 
 function setSecurityHeadersForHtml(
   res: Response,
-  opts?: { formActionOrigin?: string; referrerPolicy?: "same-origin" | "no-referrer" }
+  config: AppConfig,
+  opts?: {
+    formActionOrigin?: string;
+    referrerPolicy?: "same-origin" | "no-referrer";
+    allowAnalytics?: boolean;
+  }
 ): void {
-  const formAction = opts?.formActionOrigin ? `'self' ${opts.formActionOrigin}` : "'self'";
   res.setHeader(
     "Content-Security-Policy",
-    `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action ${formAction}; frame-ancestors 'none'; base-uri 'none'`
+    buildOAuthCsp(
+      opts?.allowAnalytics === false ? undefined : config.ga4MeasurementId,
+      opts?.formActionOrigin
+    )
   );
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
@@ -406,7 +414,7 @@ export function createOAuthRouter(
       "Set-Cookie",
       formatCookie(CSRF_COOKIE, csrf.cookieValue, { maxAge: 1800, secure: isHttps })
     );
-    setSecurityHeadersForHtml(res, {
+    setSecurityHeadersForHtml(res, config, {
       formActionOrigin: redirectUrl.origin,
       referrerPolicy: "same-origin"
     });
@@ -426,7 +434,8 @@ export function createOAuthRouter(
         state,
         csrfToken: csrf.token,
         promoActive: isPromoFreeProActive(config),
-        step: "email"
+        step: "email",
+        config
       })
     );
   });
@@ -484,7 +493,7 @@ export function createOAuthRouter(
         ];
         const redirectUrl = new URL(redirectUri);
         res.setHeader("Set-Cookie", cookiesToSet);
-        setSecurityHeadersForHtml(res, {
+        setSecurityHeadersForHtml(res, config, {
           formActionOrigin: redirectUrl.origin,
           referrerPolicy: "same-origin"
         });
@@ -506,7 +515,8 @@ export function createOAuthRouter(
             challengeId: opts.challengeId,
             email,
             error: opts.error,
-            info: opts.info
+            info: opts.info,
+            config
           })
         );
       };
@@ -722,7 +732,12 @@ export function createOAuthRouter(
   });
 
   router.get("/auth/magic", async (req, res) => {
-    setSecurityHeadersForHtml(res, { referrerPolicy: "no-referrer" });
+    // Keep /auth/magic strictly zero-script so an unconsumed magic-link token in
+    // window.location.search (browser_mismatch HTTP 200) is never exposed to third-party scripts.
+    setSecurityHeadersForHtml(res, config, {
+      referrerPolicy: "no-referrer",
+      allowAnalytics: false
+    });
     const rawToken = typeof req.query.token === "string" ? req.query.token : undefined;
     const cookies = parseCookies(req.headers.cookie);
     const fallbackLang = detectLang(req.query.lang, req.headers["accept-language"]);

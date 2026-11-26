@@ -1,6 +1,11 @@
 import type { AppConfig } from "../config.js";
 import { escapeHtml, type Lang } from "../auth/pages.js";
 import { isPromoFreeProActive } from "../billing/quota.js";
+import {
+  renderAnalyticsHead,
+  renderConsentBanner,
+  renderCookieSettingsFooterLink
+} from "./analytics.js";
 import { renderFaviconHeadLinks, renderShopCartWordmark, renderSparkCartSvg } from "./brand.js";
 import {
   AI_LINK_BASES,
@@ -382,6 +387,8 @@ function renderLauncher(config: AppConfig, lang: Lang, slot: "hero" | "demo"): s
     ? "Kopieren hat nicht geklappt – bitte den Link unten manuell kopieren."
     : "Copying didn't work – please copy the link below manually.";
 
+  const trackLocation = slot === "hero" ? "hero" : "one_click";
+
   return `<div
     class="launcher launcher-${slot}"
     ${slot === "hero" ? 'id="start"' : ""}
@@ -400,13 +407,13 @@ function renderLauncher(config: AppConfig, lang: Lang, slot: "hero" | "demo"): s
         <span class="launch-step-title">${de ? "Einmalig verbinden" : "Connect once"}</span>
       </div>
       <div class="launch-grid launch-grid-3">
-        <a class="btn-launch btn-launch-primary" data-connect="claude" data-connect-url="${escapeHtml(mcpUrl)}" data-connect-hint="${escapeHtml(connectHintClaude)}" data-connect-failed="${escapeHtml(connectHintFailed)}" href="${CONNECT_SETTINGS_URLS.claude}" target="_blank" rel="noopener">
+        <a class="btn-launch btn-launch-primary" data-connect="claude" data-connect-url="${escapeHtml(mcpUrl)}" data-connect-hint="${escapeHtml(connectHintClaude)}" data-connect-failed="${escapeHtml(connectHintFailed)}" data-track-event="connect_ai_click" data-track-client="claude" data-track-location="${trackLocation}" href="${CONNECT_SETTINGS_URLS.claude}" target="_blank" rel="noopener">
           <span>${de ? "Mit Claude verbinden" : "Connect to Claude"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
         </a>
-        <a class="btn-launch btn-launch-primary" data-connect="chatgpt" data-connect-url="${escapeHtml(mcpUrl)}" data-connect-hint="${escapeHtml(connectHintChatgpt)}" data-connect-failed="${escapeHtml(connectHintFailed)}" href="${CONNECT_SETTINGS_URLS.chatgpt}" target="_blank" rel="noopener">
+        <a class="btn-launch btn-launch-primary" data-connect="chatgpt" data-connect-url="${escapeHtml(mcpUrl)}" data-connect-hint="${escapeHtml(connectHintChatgpt)}" data-connect-failed="${escapeHtml(connectHintFailed)}" data-track-event="connect_ai_click" data-track-client="chatgpt" data-track-location="${trackLocation}" href="${CONNECT_SETTINGS_URLS.chatgpt}" target="_blank" rel="noopener">
           <span>${de ? "Mit ChatGPT verbinden" : "Connect to ChatGPT"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
         </a>
-        <a class="btn-launch btn-launch-primary" data-connect="gemini" data-connect-url="${escapeHtml(mcpUrl)}" data-connect-hint="${escapeHtml(connectHintGemini)}" data-connect-failed="${escapeHtml(connectHintFailed)}" href="${CONNECT_SETTINGS_URLS.gemini}" target="_blank" rel="noopener">
+        <a class="btn-launch btn-launch-primary" data-connect="gemini" data-connect-url="${escapeHtml(mcpUrl)}" data-connect-hint="${escapeHtml(connectHintGemini)}" data-connect-failed="${escapeHtml(connectHintFailed)}" data-track-event="connect_ai_click" data-track-client="gemini" data-track-location="${trackLocation}" href="${CONNECT_SETTINGS_URLS.gemini}" target="_blank" rel="noopener">
           <span>${de ? "Mit Gemini verbinden" : "Connect to Gemini"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
         </a>
       </div>
@@ -418,10 +425,10 @@ function renderLauncher(config: AppConfig, lang: Lang, slot: "hero" | "demo"): s
       <div class="url-copy">
         <span class="url-copy-label">${de ? "Dein Link:" : "Your link:"}</span>
         <code class="url-copy-value" id="mcp-url-${slot}">${escapeHtml(mcpUrl)}</code>
-        <button type="button" class="copy-mini" data-copy-target="mcp-url-${slot}" data-copied-label="${copied}">${
+        <button type="button" class="copy-mini" data-copy-target="mcp-url-${slot}" data-copied-label="${copied}" data-track-event="copy_setup_snippet" data-track-client="generic" data-track-snippet-type="mcp_url">${
           de ? "URL kopieren" : "Copy URL"
         }</button>
-        <a class="desktop-link" href="/downloads/shopcart-mcp.mcpb" download>${
+        <a class="desktop-link" href="/downloads/shopcart-mcp.mcpb" download data-track-event="download_mcpb" data-track-source="${trackLocation}">${
           de ? "Claude Desktop? 1-Klick-Erweiterung laden" : "Claude Desktop? Get the 1-click extension"
         } <span aria-hidden="true">↓</span></a>
       </div>
@@ -436,24 +443,24 @@ function renderLauncher(config: AppConfig, lang: Lang, slot: "hero" | "demo"): s
       <div class="wish-chips" role="group" aria-label="${de ? "Wunsch auswählen (optional)" : "Pick a wish (optional)"}">
         ${wishes
           .map(
-            (w) =>
-              `<button type="button" class="wish-chip" data-wish-tail="${escapeHtml(w.tail)}" aria-pressed="false">${escapeHtml(w.label)}</button>`
+            (w, idx) =>
+              `<button type="button" class="wish-chip" data-wish-tail="${escapeHtml(w.tail)}" data-track-event="try_prompt_click" data-track-prompt-id="${slot}_wish_${idx + 1}" aria-pressed="false">${escapeHtml(w.label)}</button>`
           )
           .join("\n        ")}
       </div>
       <div class="launch-grid">
-        <a class="btn-launch btn-launch-start" data-ai-link="claude" data-ai-base="${AI_LINK_BASES.claude}" href="${escapeHtml(links.claude)}" target="_blank" rel="noopener">
+        <a class="btn-launch btn-launch-start" data-ai-link="claude" data-ai-base="${AI_LINK_BASES.claude}" data-track-event="connect_ai_click" data-track-client="claude" data-track-location="${trackLocation}" href="${escapeHtml(links.claude)}" target="_blank" rel="noopener">
           <span>${de ? "In Claude starten" : "Start in Claude"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
         </a>
-        <a class="btn-launch btn-launch-start" data-ai-link="chatgpt" data-ai-base="${AI_LINK_BASES.chatgpt}" href="${escapeHtml(links.chatgpt)}" target="_blank" rel="noopener">
+        <a class="btn-launch btn-launch-start" data-ai-link="chatgpt" data-ai-base="${AI_LINK_BASES.chatgpt}" data-track-event="connect_ai_click" data-track-client="chatgpt" data-track-location="${trackLocation}" href="${escapeHtml(links.chatgpt)}" target="_blank" rel="noopener">
           <span>${de ? "In ChatGPT starten" : "Start in ChatGPT"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
         </a>
       </div>
       <div class="launch-more">
-        <a class="btn-launch btn-launch-ghost" data-ai-link="perplexity" data-ai-base="${AI_LINK_BASES.perplexity}" href="${escapeHtml(links.perplexity)}" target="_blank" rel="noopener">
+        <a class="btn-launch btn-launch-ghost" data-ai-link="perplexity" data-ai-base="${AI_LINK_BASES.perplexity}" data-track-event="connect_ai_click" data-track-client="perplexity" data-track-location="${trackLocation}" href="${escapeHtml(links.perplexity)}" target="_blank" rel="noopener">
           <span>${de ? "In Perplexity starten" : "Start in Perplexity"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
         </a>
-        <button type="button" class="btn-launch btn-launch-ghost" data-copy-prompt data-copied-label="${copied}">
+        <button type="button" class="btn-launch btn-launch-ghost" data-copy-prompt data-copied-label="${copied}" data-track-event="copy_setup_snippet" data-track-client="generic" data-track-snippet-type="prompt">
           <span>${de ? "Startprompt für jede andere KI kopieren" : "Copy start prompt for any other AI"}</span>
         </button>
       </div>
@@ -664,7 +671,7 @@ export function renderLandingPage(config: AppConfig, lang: Lang): string {
       </div>`;
 
   const useCasesHtml = useCases
-    .map((uc) => {
+    .map((uc, idx) => {
       const links = buildAiLinks(`${promptHead} ${taskTail(lang, uc.ask)}`);
       return `<article class="card usecase-card">
           <span class="usecase-kicker">${escapeHtml(uc.kicker)}</span>
@@ -672,10 +679,10 @@ export function renderLandingPage(config: AppConfig, lang: Lang): string {
           <p>${escapeHtml(uc.text)}</p>
           <blockquote class="usecase-ask">${de ? "„" : "“"}${escapeHtml(uc.ask)}${de ? "“" : "”"}</blockquote>
           <div class="usecase-actions">
-            <a class="link-go" href="${escapeHtml(links.claude)}" target="_blank" rel="noopener">${
+            <a class="link-go" data-track-event="try_prompt_click" data-track-prompt-id="usecase_${idx + 1}_claude" href="${escapeHtml(links.claude)}" target="_blank" rel="noopener">${
               de ? "In Claude testen" : "Try in Claude"
             } <span aria-hidden="true">↗</span></a>
-            <a class="link-go" href="${escapeHtml(links.chatgpt)}" target="_blank" rel="noopener">${
+            <a class="link-go" data-track-event="try_prompt_click" data-track-prompt-id="usecase_${idx + 1}_chatgpt" href="${escapeHtml(links.chatgpt)}" target="_blank" rel="noopener">${
               de ? "In ChatGPT testen" : "Try in ChatGPT"
             } <span aria-hidden="true">↗</span></a>
           </div>
@@ -754,6 +761,7 @@ ${renderFaviconHeadLinks()}
 <meta name="twitter:card" content="summary">
 <link rel="stylesheet" href="/assets/landing.css?v=${assetVersion}">
 <script defer src="/assets/hero-flow.js?v=${assetVersion}"></script>
+${renderAnalyticsHead(config, { lang, pageType: "landing", promoActive })}
 <script type="application/ld+json">${serializeJsonLd(buildJsonLd(config, lang))}</script>
 </head>
 <body>
@@ -1145,9 +1153,9 @@ ${
 
       <div class="install-row">
         <span class="install-label">${de ? "1-Klick-Install:" : "1-click install:"}</span>
-        <a class="btn-install" href="${escapeHtml(installLinks.cursor)}">${de ? "In Cursor installieren" : "Install in Cursor"}</a>
-        <a class="btn-install" href="${escapeHtml(installLinks.vscode)}">${de ? "In VS Code installieren" : "Install in VS Code"}</a>
-        <a class="btn-install" href="/downloads/shopcart-mcp.mcpb" download>${
+        <a class="btn-install" data-track-event="connect_ai_click" data-track-client="cursor" data-track-location="one_click" href="${escapeHtml(installLinks.cursor)}">${de ? "In Cursor installieren" : "Install in Cursor"}</a>
+        <a class="btn-install" data-track-event="connect_ai_click" data-track-client="vscode" data-track-location="one_click" href="${escapeHtml(installLinks.vscode)}">${de ? "In VS Code installieren" : "Install in VS Code"}</a>
+        <a class="btn-install" href="/downloads/shopcart-mcp.mcpb" download data-track-event="download_mcpb" data-track-source="one_click">${
           de ? "Claude Desktop (.mcpb, Mac/Windows)" : "Claude Desktop (.mcpb, Mac/Windows)"
         }</a>
         <span class="install-note">${
@@ -1159,22 +1167,22 @@ ${
 
       <div class="tabs-card" id="setup" data-tabs-root>
         <div class="tablist" role="tablist" aria-label="${de ? "MCP-Clients" : "MCP clients"}">
-          <button type="button" role="tab" id="tab-claude-ai" class="tab-btn" aria-selected="true" tabindex="0">
+          <button type="button" role="tab" id="tab-claude-ai" class="tab-btn" data-track-event="setup_tab_select" data-track-client="claude" aria-selected="true" tabindex="0">
             <span>Claude.ai</span><span class="tab-tag">OAuth 2.1</span>
           </button>
-          <button type="button" role="tab" id="tab-chatgpt" class="tab-btn" aria-selected="false" tabindex="-1">
+          <button type="button" role="tab" id="tab-chatgpt" class="tab-btn" data-track-event="setup_tab_select" data-track-client="chatgpt" aria-selected="false" tabindex="-1">
             <span>ChatGPT</span><span class="tab-tag">Connectors</span>
           </button>
-          <button type="button" role="tab" id="tab-gemini" class="tab-btn" aria-selected="false" tabindex="-1">
+          <button type="button" role="tab" id="tab-gemini" class="tab-btn" data-track-event="setup_tab_select" data-track-client="gemini" aria-selected="false" tabindex="-1">
             <span>Google Gemini</span><span class="tab-tag">Web · CLI</span>
           </button>
-          <button type="button" role="tab" id="tab-claude-code" class="tab-btn" aria-selected="false" tabindex="-1">
+          <button type="button" role="tab" id="tab-claude-code" class="tab-btn" data-track-event="setup_tab_select" data-track-client="claude_code" aria-selected="false" tabindex="-1">
             <span>Claude Code</span><span class="tab-tag">CLI</span>
           </button>
-          <button type="button" role="tab" id="tab-cursor" class="tab-btn" aria-selected="false" tabindex="-1">
+          <button type="button" role="tab" id="tab-cursor" class="tab-btn" data-track-event="setup_tab_select" data-track-client="cursor" aria-selected="false" tabindex="-1">
             <span>Cursor</span><span class="tab-tag">mcp.json</span>
           </button>
-          <button type="button" role="tab" id="tab-local" class="tab-btn" aria-selected="false" tabindex="-1">
+          <button type="button" role="tab" id="tab-local" class="tab-btn" data-track-event="setup_tab_select" data-track-client="local" aria-selected="false" tabindex="-1">
             <span>OpenClaw / Local npx</span><span class="tab-tag">MIT · stdio</span>
           </button>
           <button type="button" role="tab" id="tab-instinct" class="tab-btn" aria-selected="false" tabindex="-1">
@@ -1202,7 +1210,7 @@ ${
               <div class="code-card">
                 <div class="code-head">
                   <span>Remote MCP (Streamable HTTP)</span>
-                  <button type="button" class="copy-mini" data-copy-target="code-claude-ai" data-copied-label="${copiedLabel}">${copyLabel}</button>
+                  <button type="button" class="copy-mini" data-copy-target="code-claude-ai" data-copied-label="${copiedLabel}" data-track-event="copy_setup_snippet" data-track-client="claude" data-track-snippet-type="mcp_url">${copyLabel}</button>
                 </div>
                 <pre><code id="code-claude-ai">${escapeHtml(mcpUrl)}</code></pre>
               </div>
@@ -1232,7 +1240,7 @@ ${
               <div class="code-card">
                 <div class="code-head">
                   <span>ChatGPT MCP Server URL</span>
-                  <button type="button" class="copy-mini" data-copy-target="code-chatgpt" data-copied-label="${copiedLabel}">${copyLabel}</button>
+                  <button type="button" class="copy-mini" data-copy-target="code-chatgpt" data-copied-label="${copiedLabel}" data-track-event="copy_setup_snippet" data-track-client="chatgpt" data-track-snippet-type="mcp_url">${copyLabel}</button>
                 </div>
                 <pre><code id="code-chatgpt">${escapeHtml(mcpUrl)}</code></pre>
               </div>
@@ -1291,7 +1299,7 @@ ${
                 <div class="code-card">
                   <div class="code-head">
                     <span>Gemini Web · Streamable HTTP URL</span>
-                    <button type="button" class="copy-mini" data-copy-target="code-gemini-web" data-copied-label="${copiedLabel}">${copyLabel}</button>
+                    <button type="button" class="copy-mini" data-copy-target="code-gemini-web" data-copied-label="${copiedLabel}" data-track-event="copy_setup_snippet" data-track-client="gemini" data-track-snippet-type="mcp_url">${copyLabel}</button>
                   </div>
                   <pre><code id="code-gemini-web">${escapeHtml(mcpUrl)}</code></pre>
                 </div>
@@ -1299,7 +1307,7 @@ ${
                 <div class="code-card">
                   <div class="code-head">
                     <span>Gemini CLI Extension (1 command)</span>
-                    <button type="button" class="copy-mini" data-copy-target="code-gemini-ext" data-copied-label="${copiedLabel}">${copyLabel}</button>
+                    <button type="button" class="copy-mini" data-copy-target="code-gemini-ext" data-copied-label="${copiedLabel}" data-track-event="copy_setup_snippet" data-track-client="gemini" data-track-snippet-type="cli_extension">${copyLabel}</button>
                   </div>
                   <pre class="code-wrap"><code id="code-gemini-ext">${escapeHtml(geminiExtCmd)}</code></pre>
                 </div>
@@ -1307,7 +1315,7 @@ ${
                 <div class="code-card">
                   <div class="code-head">
                     <span>Gemini CLI · mcp add</span>
-                    <button type="button" class="copy-mini" data-copy-target="code-gemini-cli" data-copied-label="${copiedLabel}">${copyLabel}</button>
+                    <button type="button" class="copy-mini" data-copy-target="code-gemini-cli" data-copied-label="${copiedLabel}" data-track-event="copy_setup_snippet" data-track-client="gemini" data-track-snippet-type="mcp_add">${copyLabel}</button>
                   </div>
                   <pre class="code-wrap"><code id="code-gemini-cli">${escapeHtml(geminiCliCmd)}</code></pre>
                 </div>
@@ -1315,7 +1323,7 @@ ${
                 <div class="code-card">
                   <div class="code-head">
                     <span>~/.gemini/settings.json (httpUrl)</span>
-                    <button type="button" class="copy-mini" data-copy-target="code-gemini-settings" data-copied-label="${copiedLabel}">${copyLabel}</button>
+                    <button type="button" class="copy-mini" data-copy-target="code-gemini-settings" data-copied-label="${copiedLabel}" data-track-event="copy_setup_snippet" data-track-client="gemini" data-track-snippet-type="settings_json">${copyLabel}</button>
                   </div>
                   <pre><code id="code-gemini-settings">${escapeHtml(geminiSettingsSnippet)}</code></pre>
                 </div>
@@ -1341,7 +1349,7 @@ ${
               <div class="code-card">
                 <div class="code-head">
                   <span>Terminal (zsh / bash)</span>
-                  <button type="button" class="copy-mini" data-copy-target="code-claude-code" data-copied-label="${copiedLabel}">${copyLabel}</button>
+                  <button type="button" class="copy-mini" data-copy-target="code-claude-code" data-copied-label="${copiedLabel}" data-track-event="copy_setup_snippet" data-track-client="claude" data-track-snippet-type="mcp_add">${copyLabel}</button>
                 </div>
                 <pre><code id="code-claude-code">${escapeHtml(claudeCodeCmd)}</code></pre>
               </div>
@@ -1368,7 +1376,7 @@ ${
               <div class="code-card">
                 <div class="code-head">
                   <span>.cursor/mcp.json</span>
-                  <button type="button" class="copy-mini" data-copy-target="code-cursor" data-copied-label="${copiedLabel}">${copyLabel}</button>
+                  <button type="button" class="copy-mini" data-copy-target="code-cursor" data-copied-label="${copiedLabel}" data-track-event="copy_setup_snippet" data-track-client="cursor" data-track-snippet-type="settings_json">${copyLabel}</button>
                 </div>
                 <pre><code id="code-cursor">${escapeHtml(cursorSnippet)}</code></pre>
               </div>
@@ -1395,7 +1403,7 @@ ${
               <div class="code-card">
                 <div class="code-head">
                   <span>mcp-servers.json (stdio)</span>
-                  <button type="button" class="copy-mini" data-copy-target="code-local" data-copied-label="${copiedLabel}">${copyLabel}</button>
+                  <button type="button" class="copy-mini" data-copy-target="code-local" data-copied-label="${copiedLabel}" data-track-event="copy_setup_snippet" data-track-client="local" data-track-snippet-type="oneshot_cli">${copyLabel}</button>
                 </div>
                 <pre><code id="code-local">${escapeHtml(localSnippet)}</code></pre>
               </div>
@@ -1541,6 +1549,7 @@ ${
         <a href="https://wals.pro/policies/legal-notice" target="_blank" rel="noopener noreferrer">${
           de ? "Impressum" : "Legal Notice"
         }</a>
+        ${renderCookieSettingsFooterLink(config, lang)}
       </div>
     </div>
     <p class="disclaimer">${
@@ -1550,6 +1559,7 @@ ${
     }</p>
   </div>
 </footer>
+${renderConsentBanner(config, lang)}
 </body>
 </html>`;
 }

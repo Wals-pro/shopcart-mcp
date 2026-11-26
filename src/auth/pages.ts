@@ -1,3 +1,9 @@
+import type { AppConfig } from "../config.js";
+import {
+  renderAnalyticsHead,
+  renderConsentBanner,
+  renderCookieSettingsFooterLink
+} from "../web/analytics.js";
 import { renderFaviconHeadLinks, renderShopCartWordmark, renderSparkCartSvg } from "../web/brand.js";
 
 export type Lang = "de" | "en";
@@ -372,6 +378,7 @@ export interface AuthorizePageParams {
   email?: string;
   error?: string;
   info?: string;
+  config?: AppConfig;
 }
 
 export function renderAuthorizePage(p: AuthorizePageParams): string {
@@ -419,7 +426,7 @@ export function renderAuthorizePage(p: AuthorizePageParams): string {
     }
   </div>
 
-  <form method="POST" action="/oauth/authorize" aria-labelledby="auth-heading">
+  <form method="POST" action="/oauth/authorize" aria-labelledby="auth-heading" data-track-submit="oauth_authorize_complete">
     ${hiddenOAuthFields}
     <input type="hidden" name="step" value="verify">
     <input type="hidden" name="challenge_id" value="${escapeHtml(p.challengeId)}">
@@ -472,7 +479,7 @@ export function renderAuthorizePage(p: AuthorizePageParams): string {
   </div>
 `
       : `
-  <form method="POST" action="/oauth/authorize" aria-labelledby="auth-heading">
+  <form method="POST" action="/oauth/authorize" aria-labelledby="auth-heading" data-track-submit="signup_start" data-track-surface="oauth">
     ${hiddenOAuthFields}
     <input type="hidden" name="step" value="email">
 
@@ -507,6 +514,14 @@ export function renderAuthorizePage(p: AuthorizePageParams): string {
   </form>
 `;
 
+  const analyticsHead = p.config
+    ? renderAnalyticsHead(p.config, { lang: p.lang, pageType: "oauth", promoActive: p.promoActive })
+    : "";
+  const cookieSettings = p.config
+    ? renderCookieSettingsFooterLink(p.config, p.lang, { separator: " · " })
+    : "";
+  const consentBanner = p.config ? renderConsentBanner(p.config, p.lang) : "";
+
   return `<!doctype html>
 <html lang="${p.lang}">
 <head>
@@ -517,6 +532,7 @@ export function renderAuthorizePage(p: AuthorizePageParams): string {
 ${renderFaviconHeadLinks()}
 <title>${escapeHtml(title)}</title>
 <style>${WALSPRO_DARK_CSS}</style>
+${analyticsHead}
 </head>
 <body class="auth-body">
 <main class="card">
@@ -564,9 +580,10 @@ ${renderFaviconHeadLinks()}
     ${de ? "Mit der Anmeldung akzeptierst du unsere" : "By continuing you agree to our"}
     <a href="/privacy?lang=${p.lang}" target="_blank" rel="noopener">${de ? "Datenschutzerklärung" : "Privacy Policy"}</a> ·
     <a href="/terms?lang=${p.lang}" target="_blank" rel="noopener">${de ? "Nutzungsbedingungen" : "Terms"}</a> ·
-    <a href="https://wals.pro/policies/legal-notice" target="_blank" rel="noopener">${de ? "Impressum" : "Legal Notice"}</a>
+    <a href="https://wals.pro/policies/legal-notice" target="_blank" rel="noopener">${de ? "Impressum" : "Legal Notice"}</a>${cookieSettings}
   </p>
 </main>
+${consentBanner}
 </body>
 </html>`;
 }
@@ -576,6 +593,7 @@ export interface MagicLinkResultPageParams {
   kind: "browser_mismatch" | "invalid" | "expired" | "used";
   email?: string;
   clientName?: string;
+  config?: AppConfig;
 }
 
 export function renderMagicLinkResultPage(p: MagicLinkResultPageParams): string {
@@ -620,6 +638,14 @@ export function renderMagicLinkResultPage(p: MagicLinkResultPageParams): string 
     ? `/billing/login?lang=${p.lang}&email=${encodeURIComponent(p.email)}`
     : `/billing/login?lang=${p.lang}`;
 
+  const analyticsHead = p.config
+    ? renderAnalyticsHead(p.config, { lang: p.lang, pageType: "oauth" })
+    : "";
+  const cookieSettings = p.config
+    ? renderCookieSettingsFooterLink(p.config, p.lang, { separator: " · " })
+    : "";
+  const consentBanner = p.config ? renderConsentBanner(p.config, p.lang) : "";
+
   return `<!doctype html>
 <html lang="${p.lang}">
 <head>
@@ -630,6 +656,7 @@ export function renderMagicLinkResultPage(p: MagicLinkResultPageParams): string 
 ${renderFaviconHeadLinks()}
 <title>${escapeHtml(heading)} — ShopCart MCP</title>
 <style>${WALSPRO_DARK_CSS}</style>
+${analyticsHead}
 </head>
 <body class="auth-body">
 <main class="card" data-state="${escapeHtml(p.kind)}" data-banner="${escapeHtml(bannerClass)}">
@@ -648,9 +675,10 @@ ${renderFaviconHeadLinks()}
   <p class="foot">
     <a href="/privacy?lang=${p.lang}">${de ? "Datenschutz" : "Privacy Policy"}</a> ·
     <a href="/terms?lang=${p.lang}">${de ? "Nutzungsbedingungen" : "Terms"}</a> ·
-    <a href="https://wals.pro/policies/legal-notice" target="_blank" rel="noopener">${de ? "Impressum" : "Legal Notice"}</a>
+    <a href="https://wals.pro/policies/legal-notice" target="_blank" rel="noopener">${de ? "Impressum" : "Legal Notice"}</a>${cookieSettings}
   </p>
 </main>
+${consentBanner}
 </body>
 </html>`;
 }
