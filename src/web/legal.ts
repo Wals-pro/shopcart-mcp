@@ -39,6 +39,7 @@ ${analyticsHead}
     <a class="brand" href="/?lang=${lang}">${renderSparkCartSvg({ size: 26, className: "brand-logo" })}${renderShopCartWordmark("MCP")}</a>
     <nav class="nav">
       <a href="/?lang=${lang}">${de ? "Startseite" : "Home"}</a>
+      <a href="${de ? "/for-merchants" : "/en/for-merchants"}">${de ? "Für Shops" : "For merchants"}</a>
       <a href="/billing?lang=${lang}">${de ? "Konto & Billing" : "Billing"}</a>
       <a href="/privacy?lang=${lang}">${de ? "Datenschutz" : "Privacy"}</a>
       <a href="/terms?lang=${lang}">${de ? "Nutzungsbedingungen" : "Terms"}</a>

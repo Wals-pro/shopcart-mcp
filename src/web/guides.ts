@@ -1911,6 +1911,7 @@ function renderHeader(config: AppConfig, lang: Lang, switchHref: string, current
     <nav class="nav-links" aria-label="${de ? "Hauptnavigation" : "Main navigation"}">
       <a href="/?lang=${lang}">${de ? "Startseite" : "Home"}</a>
       <a href="/guides?lang=${lang}"${isOverview ? ' aria-current="page"' : ""}>Guides</a>
+      <a href="${de ? "/for-merchants" : "/en/for-merchants"}">${de ? "Für Shops" : "For merchants"}</a>
       <a href="/billing?lang=${lang}">${de ? "Konto &amp; Billing" : "Account &amp; Billing"}</a>
       <a href="${escapeHtml(config.repoUrl)}" target="_blank" rel="noopener noreferrer">GitHub</a>
       <a class="btn-nav" href="${escapeHtml(switchHref)}" hreflang="${otherLang}">${de ? "EN" : "DE"}</a>
@@ -1930,6 +1931,7 @@ function renderFooter(config: AppConfig, lang: Lang): string {
       </div>
       <div class="foot-links">
         <a href="/guides?lang=${lang}">Guides</a>
+        <a href="${de ? "/for-merchants" : "/en/for-merchants"}">${de ? "Für Shops" : "For merchants"}</a>
         <a href="/billing?lang=${lang}">${de ? "Konto &amp; Billing" : "Account &amp; Billing"}</a>
         <a href="/privacy?lang=${lang}">${de ? "Datenschutz" : "Privacy"}</a>
         <a href="/terms?lang=${lang}">${de ? "Nutzungsbedingungen" : "Terms"}</a>

@@ -27,6 +27,7 @@ import type { StorageBackend } from "./store/types.js";
 import { createBillingRouter } from "./web/billing.js";
 import { buildLandingCsp, buildLegalCsp } from "./web/analytics.js";
 import { renderLlmsFullTxt, renderLlmsTxt, renderRobotsTxt, renderSitemapXml } from "./web/discovery.js";
+import { createForMerchantsRouter } from "./web/for-merchants.js";
 import { createGuidesRouter } from "./web/guides.js";
 import { renderLandingPage } from "./web/landing.js";
 import { renderNotFoundPage, renderPrivacyPage, renderSecurityTxt, renderTermsPage } from "./web/legal.js";
@@ -444,6 +445,7 @@ export function createApp(deps: CreateAppDeps): Express {
     res.status(200).type("html").send(renderTermsPage(config, lang));
   });
 
+  app.use(createForMerchantsRouter(config));
   app.use(createGuidesRouter(config));
   app.use(createBillingRouter(config, store, otpService, deps.stripeClient));
 

@@ -114,6 +114,7 @@ Users arrive from ${origin} with a prompt like "Connect ShopCart (${mcpUrl}) for
 - [Homepage & Setup](${origin}): Consumer overview, connect buttons, AI start links, and pricing.
 - [Shopping Guides Hub](${origin}/guides): Answer-first guides in German and English.
 ${GUIDE_DEFINITIONS.map((g) => `  - [${g.title}](${origin}${g.path}) (${g.lang}): ${g.cardSummary}`).join("\n")}
+- [For Merchants — Agentic Storefront Readiness (DE)](${origin}/for-merchants) | [(EN)](${origin}/en/for-merchants): Free storefront self-check and optional B2B readiness services by wals.pro (100% independent, zero pay-to-rank).
 - [MCP Server Card](${origin}/.well-known/mcp.json): Machine-readable endpoint and OAuth metadata.
 - [Agent Skill Instructions (SKILL.md)](${origin}/SKILL.md): Complete One-Shot CLI & MCP tool workflow for Instinct, Open Instinct, and autonomous agents.
 - [GitHub Repository (MIT)](${config.repoUrl}): Source code, \`server.json\`, and local \`stdio\` / One-Shot CLI.
@@ -327,6 +328,8 @@ export const SITEMAP_PATHS: readonly string[] = [
   "/",
   "/?lang=de",
   "/?lang=en",
+  "/for-merchants",
+  "/en/for-merchants",
   "/guides",
   ...GUIDE_DEFINITIONS.map((g) => g.path),
   "/billing",
@@ -353,6 +356,8 @@ export function renderSitemapXml(config: AppConfig): string {
     "/": "1.0",
     "/?lang=de": "0.9",
     "/?lang=en": "0.9",
+    "/for-merchants": "0.8",
+    "/en/for-merchants": "0.8",
     "/guides": "0.9",
     ...Object.fromEntries(GUIDE_DEFINITIONS.map((g) => [g.path, "0.8"]))
   };
@@ -363,6 +368,13 @@ export function renderSitemapXml(config: AppConfig): string {
         { hreflang: "de", href: `${origin}/?lang=de` },
         { hreflang: "en", href: `${origin}/?lang=en` },
         { hreflang: "x-default", href: `${origin}/` }
+      ];
+    }
+    if (p === "/for-merchants" || p === "/en/for-merchants") {
+      return [
+        { hreflang: "de", href: `${origin}/for-merchants` },
+        { hreflang: "en", href: `${origin}/en/for-merchants` },
+        { hreflang: "x-default", href: `${origin}/en/for-merchants` }
       ];
     }
     if (p === "/guides") {
