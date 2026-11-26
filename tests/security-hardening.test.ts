@@ -348,6 +348,10 @@ describe("Wave 4 security hardening regressions", () => {
           },
           {
             "@type": "SearchAction",
+            target: "/\\{q}.shop.example/search?q={q}"
+          },
+          {
+            "@type": "SearchAction",
             target: "https://shop.example/search?q={q}&x=[INST]ignore"
           },
           {
@@ -360,9 +364,14 @@ describe("Wave 4 security hardening regressions", () => {
     );
     expect(badSearchMeta.searchActionTemplate).toBeNull();
 
-    // Trailing-dot shared suffix bypass blocked
+    // Single and multi trailing-dot shared suffix bypass blocked
     expect(
       sanitizeSafeUrl("https://victim.myshopify.com./img.jpg", "https://myshopify.com.", {
+        allowStoreSubdomains: true
+      })
+    ).toBeNull();
+    expect(
+      sanitizeSafeUrl("https://victim.myshopify.com../img.jpg", "https://myshopify.com..", {
         allowStoreSubdomains: true
       })
     ).toBeNull();

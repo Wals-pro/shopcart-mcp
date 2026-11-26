@@ -1798,7 +1798,7 @@ function extractSearchActionTemplate(
 
       const cleaned = stripControlAndInvisible(template).trim();
       if (!cleaned || cleaned.length > 500) continue;
-      if (/[\s#]/.test(cleaned)) continue;
+      if (/[\s#\\]/.test(cleaned)) continue;
       if (LLM_CONTROL_TOKEN_TEST_RE.test(cleaned)) continue;
       if (!cleaned.startsWith("https://") && !(cleaned.startsWith("/") && !cleaned.startsWith("//"))) {
         continue;

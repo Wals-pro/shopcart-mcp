@@ -276,6 +276,9 @@ export function isSameStoreSite(originA: string, originB: string): boolean {
     if (a.protocol !== b.protocol) return false;
     const hostA = a.hostname.toLowerCase().replace(/\.$/, "");
     const hostB = b.hostname.toLowerCase().replace(/\.$/, "");
+    if (!hostA || !hostB || hostA.includes("..") || hostB.includes("..") || hostA.endsWith(".") || hostB.endsWith(".")) {
+      return false;
+    }
     return hostA === hostB || hostA === `www.${hostB}` || `www.${hostA}` === hostB;
   } catch {
     return false;
@@ -370,8 +373,12 @@ export function isSameStoreSiteOrSubdomain(storeOrigin: string, candidateOrigin:
     const a = new URL(storeOrigin);
     const b = new URL(candidateOrigin);
     if (a.protocol !== b.protocol) return false;
-    const baseDomain = a.hostname.toLowerCase().replace(/\.$/, "").replace(/^www\./, "");
+    const rawHostA = a.hostname.toLowerCase().replace(/\.$/, "");
     const candidateHost = b.hostname.toLowerCase().replace(/\.$/, "");
+    if (!rawHostA || !candidateHost || rawHostA.includes("..") || candidateHost.includes("..") || rawHostA.endsWith(".") || candidateHost.endsWith(".")) {
+      return false;
+    }
+    const baseDomain = rawHostA.replace(/^www\./, "");
     const isSharedSuffix = SHARED_PLATFORM_SUFFIXES.some(
       (suffix) => baseDomain === suffix || baseDomain.endsWith(`.${suffix}`)
     );
@@ -416,6 +423,9 @@ export function sanitizeSafeUrl(
 
   const storeHost = new URL(storeOrigin).hostname.toLowerCase().replace(/\.$/, "");
   const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
+  if (!storeHost || !host || storeHost.includes("..") || host.includes("..") || storeHost.endsWith(".") || host.endsWith(".")) {
+    return null;
+  }
   const hostMatchesStore = host === storeHost || host === `www.${storeHost}` || `www.${host}` === storeHost;
 
   let hostMatchesSubdomain = false;

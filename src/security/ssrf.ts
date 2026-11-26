@@ -204,7 +204,7 @@ export function validateExternalUrl(rawUrl: string): URL {
   }
 
   const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
-  if (!host || host.length > 253) {
+  if (!host || host.length > 253 || host.includes("..") || host.startsWith(".") || host.endsWith(".")) {
     throw new SsrfError("BLOCKED_HOST", "Invalid hostname");
   }
   // Reject IP literals (IPv4 or bracketed IPv6)
