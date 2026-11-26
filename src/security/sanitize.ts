@@ -48,6 +48,7 @@ const DANGEROUS_HTML_TAGS = [
 ] as const;
 
 const HIDDEN_STYLE_TAGS = new Set(["div", "span", "p", "section"]);
+const MAX_HIDDEN_STYLE_ATTR_WINDOW = 8192;
 const HIDDEN_CSS_PATTERN =
   /(?:display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0(?![0-9.])|font-size\s*:\s*0(?:px|em|rem|%)?(?![0-9.]))/i;
 
@@ -207,6 +208,7 @@ export function stripHiddenStyleBlocksLinear(html: string): string {
   const len = html.length;
   let out = "";
   let pos = 0;
+  let rawFallbackUntil = 0;
 
   while (pos < len) {
     const lt = lower.indexOf("<", pos);
@@ -227,14 +229,51 @@ export function stripHiddenStyleBlocksLinear(html: string): string {
 
     const tagName = lower.slice(lt + 1, nameEnd);
     if (tagName && HIDDEN_STYLE_TAGS.has(tagName) && isTagNameBoundary(lower[nameEnd])) {
-      // Bound '>' search to single tag window (<= 1024 chars) to prevent scanning to EOF on unclosed tags
-      const searchEnd = Math.min(len, nameEnd + 1024);
-      const windowSlice = lower.slice(nameEnd, searchEnd);
-      const relOpenEnd = windowSlice.indexOf(">");
-      const relNextLt = windowSlice.indexOf("<");
-      if (relOpenEnd !== -1 && (relNextLt === -1 || relOpenEnd < relNextLt)) {
-        const openEnd = nameEnd + relOpenEnd;
-        const attrSlice = windowSlice.slice(0, relOpenEnd);
+      // Bound '>' search to MAX_HIDDEN_STYLE_ATTR_WINDOW (8192 chars) with quote-aware O(N) scanning
+      // so long Shopify/Tailwind attributes or quoted '>'/'<' cannot bypass hidden-style stripping.
+      const searchEnd = Math.min(len, nameEnd + MAX_HIDDEN_STYLE_ATTR_WINDOW);
+      let openEnd = -1;
+      let unquotedLt = -1;
+
+      if (nameEnd < rawFallbackUntil) {
+        for (let j = nameEnd; j < searchEnd; j++) {
+          const ch = lower[j]!;
+          if (ch === ">") {
+            openEnd = j;
+            break;
+          }
+          if (ch === "<") {
+            unquotedLt = j;
+            break;
+          }
+        }
+      } else {
+        let quote: string | null = null;
+        for (let j = nameEnd; j < searchEnd; j++) {
+          const ch = lower[j]!;
+          if (quote) {
+            if (ch === quote) quote = null;
+          } else if (ch === '"' || ch === "'") {
+            quote = ch;
+          } else if (ch === ">") {
+            openEnd = j;
+            break;
+          } else if (ch === "<") {
+            unquotedLt = j;
+            break;
+          }
+        }
+
+        if (openEnd === -1 && unquotedLt === -1) {
+          rawFallbackUntil = Math.max(rawFallbackUntil, searchEnd);
+          out += html.slice(pos, lt + 1);
+          pos = lt + 1;
+          continue;
+        }
+      }
+
+      if (openEnd !== -1) {
+        const attrSlice = lower.slice(nameEnd, openEnd);
         const styleIdx = attrSlice.indexOf("style");
         if (styleIdx !== -1 && HIDDEN_CSS_PATTERN.test(attrSlice.slice(styleIdx))) {
           let closeIdx = -1;
@@ -258,7 +297,15 @@ export function stripHiddenStyleBlocksLinear(html: string): string {
           }
           continue;
         }
+        out += html.slice(pos, openEnd + 1);
+        pos = openEnd + 1;
+        continue;
       }
+
+      const nextPos = unquotedLt !== -1 ? unquotedLt : searchEnd;
+      out += html.slice(pos, nextPos);
+      pos = nextPos;
+      continue;
     }
 
     out += html.slice(pos, lt + 1);

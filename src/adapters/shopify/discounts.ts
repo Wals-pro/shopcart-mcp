@@ -38,7 +38,7 @@ const HARD_SSRF_CODES = new Set(["INVALID_URL", "BLOCKED_HOST", "BLOCKED_IP", "C
 const MAX_VISIBLE_TEXT_CHARS = 150_000;
 const MAX_ZONE_SLICE_CHARS = 4096;
 const MAX_ZONE_MATCHES = 30;
-const MAX_ATTR_WINDOW = 1024;
+const MAX_ATTR_WINDOW = 8192;
 const MAX_RETURNED_CODES = 10;
 const MAX_RETURNED_AUTOMATIC_DEALS = 5;
 
@@ -478,8 +478,21 @@ function isTagNameBoundary(ch: string | undefined): boolean {
   );
 }
 
+function isTagStartChar(code: number): boolean {
+  return (
+    (code >= 65 && code <= 90) || // A-Z
+    (code >= 97 && code <= 122) || // a-z
+    code === 47 || // /
+    code === 33 || // !
+    code === 63 // ?
+  );
+}
+
 /**
  * Strictly linear-time O(N) HTML tag stripper without regex backtracking.
+ * Supports long Shopify/Tailwind/Alpine tag attributes (up to MAX_ATTR_WINDOW)
+ * and falls back to quote-free linear scanning on malformed/unclosed quotes so
+ * every character is visited at most twice even on 300KB+ adversarial HTML.
  * Inserts newlines around block-level tags so promo copy stays cleanly segmented.
  */
 function stripTagsLinear(html: string): string {
@@ -488,6 +501,7 @@ function stripTagsLinear(html: string): string {
   const parts: string[] = [];
   let textStart = 0;
   let i = 0;
+  let rawFallbackUntil = 0;
 
   while (i < len) {
     const lt = html.indexOf("<", i);
@@ -496,30 +510,67 @@ function stripTagsLinear(html: string): string {
       break;
     }
 
-    // Look for closing '>' within a bounded tag window (never backtracking)
-    const searchLimit = Math.min(len, lt + MAX_ATTR_WINDOW);
-    let quote: string | null = null;
-    let gt = -1;
-    for (let j = lt + 1; j < searchLimit; j++) {
-      const ch = html[j]!;
-      if (quote) {
-        if (ch === quote) quote = null;
-      } else if (ch === '"' || ch === "'") {
-        quote = ch;
-      } else if (ch === ">") {
-        gt = j;
-        break;
-      } else if (ch === "<") {
-        break;
-      }
-    }
-
-    if (gt === -1) {
-      // Bare '<' or malformed unclosed tag: skip it as a single char
+    if (lt + 1 >= len || !isTagStartChar(html.charCodeAt(lt + 1))) {
+      // Bare '<' (e.g. "2 < 3" or "<<<"): skip in O(1)
       if (lt > textStart) parts.push(html.slice(textStart, lt));
       parts.push(" ");
       textStart = lt + 1;
       i = lt + 1;
+      continue;
+    }
+
+    const searchLimit = Math.min(len, lt + MAX_ATTR_WINDOW);
+    let gt = -1;
+    let unquotedLt = -1;
+
+    if (lt < rawFallbackUntil) {
+      for (let j = lt + 1; j < searchLimit; j++) {
+        const ch = html[j]!;
+        if (ch === ">") {
+          gt = j;
+          break;
+        }
+        if (ch === "<") {
+          unquotedLt = j;
+          break;
+        }
+      }
+    } else {
+      let quote: string | null = null;
+      let firstRawGt = -1;
+      for (let j = lt + 1; j < searchLimit; j++) {
+        const ch = html[j]!;
+        if (ch === ">" && firstRawGt === -1) {
+          firstRawGt = j;
+        }
+        if (quote) {
+          if (ch === quote) quote = null;
+        } else if (ch === '"' || ch === "'") {
+          quote = ch;
+        } else if (ch === ">") {
+          gt = j;
+          break;
+        } else if (ch === "<") {
+          unquotedLt = j;
+          break;
+        }
+      }
+
+      if (gt === -1 && unquotedLt === -1) {
+        rawFallbackUntil = Math.max(rawFallbackUntil, searchLimit);
+        if (firstRawGt !== -1) {
+          gt = firstRawGt;
+        }
+      }
+    }
+
+    if (gt === -1) {
+      // Malformed unclosed tag: advance monotonically past its attributes so they never leak as text
+      if (lt > textStart) parts.push(html.slice(textStart, lt));
+      parts.push(" ");
+      const nextPos = unquotedLt !== -1 ? unquotedLt : searchLimit;
+      textStart = nextPos;
+      i = nextPos;
       continue;
     }
 
@@ -597,6 +648,7 @@ function extractPromoZoneFragmentsLinear(visibleHtml: string): {
   const lower = asciiLowerCase(visibleHtml);
   const len = lower.length;
   let pos = 0;
+  let rawFallbackUntil = 0;
 
   while (
     pos < len &&
@@ -621,29 +673,52 @@ function extractPromoZoneFragmentsLinear(visibleHtml: string): {
     }
 
     const searchLimit = Math.min(len, nameEnd + MAX_ATTR_WINDOW);
-    let quote: string | null = null;
     let openEnd = -1;
-    for (let j = nameEnd; j < searchLimit; j++) {
-      const ch = visibleHtml[j]!;
-      if (quote) {
-        if (ch === quote) quote = null;
-      } else if (ch === '"' || ch === "'") {
-        quote = ch;
-      } else if (ch === ">") {
-        openEnd = j;
-        break;
-      } else if (ch === "<") {
-        break;
+    let unquotedLt = -1;
+
+    if (nameEnd < rawFallbackUntil) {
+      for (let j = nameEnd; j < searchLimit; j++) {
+        const ch = visibleHtml[j]!;
+        if (ch === ">") {
+          openEnd = j;
+          break;
+        }
+        if (ch === "<") {
+          unquotedLt = j;
+          break;
+        }
+      }
+    } else {
+      let quote: string | null = null;
+      for (let j = nameEnd; j < searchLimit; j++) {
+        const ch = visibleHtml[j]!;
+        if (quote) {
+          if (ch === quote) quote = null;
+        } else if (ch === '"' || ch === "'") {
+          quote = ch;
+        } else if (ch === ">") {
+          openEnd = j;
+          break;
+        } else if (ch === "<") {
+          unquotedLt = j;
+          break;
+        }
+      }
+
+      if (openEnd === -1 && unquotedLt === -1) {
+        rawFallbackUntil = Math.max(rawFallbackUntil, searchLimit);
+        pos = nameEnd;
+        continue;
       }
     }
 
     if (openEnd === -1) {
-      pos = nameEnd;
+      pos = unquotedLt !== -1 ? unquotedLt : searchLimit;
       continue;
     }
 
     const openAttrs = visibleHtml.slice(nameEnd, openEnd);
-    const attrs = parseTagAttributesLinear(openAttrs);
+    const attrs = parseTagAttributesLinear(openAttrs, MAX_ATTR_WINDOW);
     const markerHaystack = asciiLowerCase(
       `${tagName} ${attrs["class"] ?? ""} ${attrs["id"] ?? ""} ${attrs["data-section-type"] ?? ""} ${attrs["aria-label"] ?? ""}`
     );

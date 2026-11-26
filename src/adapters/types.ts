@@ -273,6 +273,7 @@ export interface CartLinkResult {
   discount_source?: DiscountSource | "user_supplied";
   discount_context?: string;
   discount_notice?: string;
+  source_notice?: string;
   affiliate_disclosure?: boolean;
   warnings: string[];
   next_step: string;

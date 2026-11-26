@@ -611,6 +611,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
         let discountSource: DiscountSource | "user_supplied" | undefined;
         let discountContext: string | undefined;
         let discountNotice: string | undefined;
+        let hasStorefrontDiscountText = false;
 
         const hasValidShopifyVariants =
           adapter.platform !== "shopify" ||
@@ -664,11 +665,20 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
             effectiveDiscountCode = bestHigh.code;
             discountSource = bestHigh.source;
             discountContext = bestHigh.context_snippet;
+            if (
+              bestHigh.source === "homepage_announcement" ||
+              bestHigh.source === "homepage_banner" ||
+              bestHigh.source === "homepage_text" ||
+              bestHigh.source === "collection_description"
+            ) {
+              hasStorefrontDiscountText = true;
+            }
             discountNotice =
               bestHigh.source === "partner_rule"
                 ? "Configured partner discount code auto-applied to the cart link. Eligibility, exclusions, and expiration are validated by the merchant at checkout."
                 : "Publicly advertised storefront discount code auto-applied to the cart link. Eligibility, minimum order values, exclusions, and expiration are validated by the merchant at checkout.";
           } else if (discovered && discovered.automatic_deals.length > 0) {
+            hasStorefrontDiscountText = true;
             discountNotice = `No promo code applied — store advertises an automatic checkout deal: "${discovered.automatic_deals[0]!.text}". Eligibility is validated by the merchant at checkout.`;
           }
         }
@@ -716,6 +726,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           ...(discountSource ? { discount_source: discountSource } : {}),
           ...(discountContext ? { discount_context: discountContext } : {}),
           ...(discountNotice ? { discount_notice: discountNotice } : {}),
+          ...(hasStorefrontDiscountText ? { source_notice: SOURCE_NOTICE_DISCOUNTS } : {}),
           ...(decoratedAdditionalLinks ? { additional_cart_links: decoratedAdditionalLinks } : {}),
           affiliate_disclosure: anyAffiliate,
           ...(anyAffiliate
