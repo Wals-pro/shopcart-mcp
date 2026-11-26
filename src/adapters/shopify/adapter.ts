@@ -1,4 +1,5 @@
 import {
+  asciiLowerCase,
   sanitizeOptionalText,
   sanitizeSafeUrl,
   sanitizeText,
@@ -167,7 +168,7 @@ const POLICY_HTML_SCAN_MAX_CHARS = 131_072;
 function extractPolicyHtmlToCleanText(html: string, maxLen = POLICY_EXCERPT_MAX_CHARS): string {
   if (!html) return "";
   const raw = String(html);
-  const lowerRaw = raw.toLowerCase();
+  const lowerRaw = asciiLowerCase(raw);
 
   // Locate <main> or Shopify's standard policy container in O(N) using indexOf before slicing
   let slice = raw;

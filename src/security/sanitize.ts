@@ -80,6 +80,14 @@ function isTagNameBoundary(ch: string | undefined): boolean {
 }
 
 /**
+ * ASCII-only lowercasing (A-Z -> a-z) that guarantees output.length === input.length
+ * for all UTF-16 strings (avoids U+0130 'İ' -> 2-code-unit index desynchronization).
+ */
+export function asciiLowerCase(input: string): string {
+  return input.replace(/[A-Z]+/g, (m) => m.toLowerCase());
+}
+
+/**
  * Linear-time O(N) HTML comment remover without regex backtracking.
  */
 export function stripHtmlCommentsLinear(html: string): string {
@@ -113,7 +121,7 @@ export function stripTagBlocksLinear(html: string, tagNames: readonly string[]):
   if (!html || !html.includes("<")) return html;
   const tagSet = new Set(tagNames.map((t) => t.toLowerCase()));
   const noCloseTag = new Set<string>();
-  const lower = html.toLowerCase();
+  const lower = asciiLowerCase(html);
   const len = html.length;
   let out = "";
   let pos = 0;
@@ -191,9 +199,10 @@ export function stripTagBlocksLinear(html: string, tagNames: readonly string[]):
  * opacity:0, font-size:0) used to hide prompt-injection payloads on storefront pages.
  */
 export function stripHiddenStyleBlocksLinear(html: string): string {
-  if (!html || !html.includes("<") || !html.toLowerCase().includes("style")) return html;
+  if (!html || !html.includes("<")) return html;
+  const lower = asciiLowerCase(html);
+  if (!lower.includes("style")) return html;
   const noCloseTag = new Set<string>();
-  const lower = html.toLowerCase();
   const len = html.length;
   let out = "";
   let pos = 0;

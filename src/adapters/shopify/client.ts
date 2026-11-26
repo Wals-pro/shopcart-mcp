@@ -192,9 +192,11 @@ export class ShopifyClient {
     const existing = this.cache.get(origin);
     if (existing) {
       existing.storefrontMcpTools = tools;
-      const canonical = this.cache.get(existing.origin);
-      if (canonical && canonical !== existing) {
-        canonical.storefrontMcpTools = tools;
+      if (isSameStoreSite(origin, existing.origin)) {
+        const canonical = this.cache.get(existing.origin);
+        if (canonical && canonical !== existing) {
+          canonical.storefrontMcpTools = tools;
+        }
       }
     }
   }
@@ -204,10 +206,12 @@ export class ShopifyClient {
     if (existing) {
       existing.productCatalogBlocked = true;
       existing.wafRestricted = true;
-      const canonical = this.cache.get(existing.origin);
-      if (canonical && canonical !== existing) {
-        canonical.productCatalogBlocked = true;
-        canonical.wafRestricted = true;
+      if (isSameStoreSite(origin, existing.origin)) {
+        const canonical = this.cache.get(existing.origin);
+        if (canonical && canonical !== existing) {
+          canonical.productCatalogBlocked = true;
+          canonical.wafRestricted = true;
+        }
       }
     }
   }
