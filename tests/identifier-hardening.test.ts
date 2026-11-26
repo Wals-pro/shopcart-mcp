@@ -3,11 +3,17 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { BigCommerceAdapter } from "../src/adapters/bigcommerce/adapter.js";
+import { BigCommerceClient } from "../src/adapters/bigcommerce/client.js";
+import { UniversalJsonLdAdapter } from "../src/adapters/jsonld/adapter.js";
 import { parseProductFromHtml } from "../src/adapters/jsonld/parser.js";
+import { MagentoClient } from "../src/adapters/magento/client.js";
 import type { AdapterRegistry } from "../src/adapters/registry.js";
 import { ShopifyAdapter } from "../src/adapters/shopify/adapter.js";
 import { ShopifyClient } from "../src/adapters/shopify/client.js";
 import { extractCollectionHandle, extractProductHandle } from "../src/adapters/shopify/normalize.js";
+import { ShopwareAdapter } from "../src/adapters/shopware/adapter.js";
+import { ShopwareClient } from "../src/adapters/shopware/client.js";
 import type { StoreAdapter, StoreInfo } from "../src/adapters/types.js";
 import { WooCommerceAdapter } from "../src/adapters/woocommerce/adapter.js";
 import { createApp } from "../src/app.js";
@@ -21,11 +27,14 @@ import {
 } from "../src/cli/oneshot.js";
 import { loadConfig } from "../src/config.js";
 import {
+  enforceShellSafeHttpsUrl,
+  isValidLdhHostname,
   sanitizeGenericVariantId,
   sanitizeNumericVariantId,
   sanitizeSafeHandle
 } from "../src/security/identifiers.js";
-import type { SafeFetchResponse } from "../src/security/ssrf.js";
+import { sanitizeSafeUrl } from "../src/security/sanitize.js";
+import { validateExternalUrl, type SafeFetchResponse } from "../src/security/ssrf.js";
 import { MemoryStore } from "../src/store/memory.js";
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -249,10 +258,10 @@ describe("Strict identifier allowlists & adapter emission hardening", () => {
       "https://merchant.example.com/p/item%24%28id%29%3Bwhoami.html"
     );
     expect(parsed).not.toBeNull();
-    // Unsafe decoded URL handle and unsafe SKU must never be emitted
+    // Unsafe decoded URL handle and unsafe SKU must never be emitted; fallback IDs are product-unique hashes
     expect(parsed!.product.handle).toBe("");
-    expect(parsed!.product.id).toBe("product");
-    expect(parsed!.product.variants[0]!.id).toBe("offer-1");
+    expect(parsed!.product.id).toMatch(/^product-[0-9a-f]{12}$/);
+    expect(parsed!.product.variants[0]!.id).toMatch(/^offer-[0-9a-f]{12}-1$/);
 
     // Legitimate URL handle passes through unchanged
     const okParsed = parseProductFromHtml(
@@ -261,6 +270,349 @@ describe("Strict identifier allowlists & adapter emission hardening", () => {
     );
     expect(okParsed!.product.handle).toBe("pack_2.0");
     expect(okParsed!.product.variants[0]!.id).toBe("SKU-42");
+  });
+
+  it("derives product-unique JSON-LD fallback IDs so two same-origin products cannot collide in variantCache", async () => {
+    const htmlA = `<!doctype html><html><head><script type="application/ld+json">${JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "Product",
+      name: "Product Alpha",
+      offers: {
+        "@type": "Offer",
+        price: "29.00",
+        priceCurrency: "EUR",
+        availability: "https://schema.org/InStock"
+      }
+    })}</script></head><body></body></html>`;
+    const htmlB = `<!doctype html><html><head><script type="application/ld+json">${JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "Product",
+      name: "Product Beta",
+      offers: {
+        "@type": "Offer",
+        price: "59.00",
+        priceCurrency: "EUR",
+        availability: "https://schema.org/InStock"
+      }
+    })}</script></head><body></body></html>`;
+
+    const urlA = "https://merchant.example.com/p/alpha%24%28id%29.html";
+    const urlB = "https://merchant.example.com/p/beta%24%28id%29.html";
+
+    const mockFetch = async (url: string): Promise<SafeFetchResponse> => {
+      const bodyText = url.includes("beta") ? htmlB : htmlA;
+      return {
+        status: 200,
+        url,
+        contentType: "text/html; charset=utf-8",
+        headers: { "content-type": "text/html; charset=utf-8" },
+        bodyBuffer: Buffer.from(bodyText, "utf8"),
+        bodyText
+      };
+    };
+
+    const adapter = new UniversalJsonLdAdapter({ fetcher: mockFetch });
+    const prodA = await adapter.getProduct("https://merchant.example.com", urlA);
+    const prodB = await adapter.getProduct("https://merchant.example.com", urlB);
+
+    const varA = prodA.product.variants[0]!.id;
+    const varB = prodB.product.variants[0]!.id;
+    expect(varA).toMatch(/^offer-[0-9a-f]{12}-1$/);
+    expect(varB).toMatch(/^offer-[0-9a-f]{12}-1$/);
+    expect(varA).not.toBe(varB);
+    expect(prodA.product.id).not.toBe(prodB.product.id);
+
+    // Building a cart link for product A after product B was fetched must still point to product A
+    const cartA = await adapter.buildCartLink(
+      "https://merchant.example.com",
+      [{ variantId: varA, quantity: 1 }],
+      { mode: "cart" }
+    );
+    expect(cartA.cart_url).toContain("alpha");
+    expect(cartA.cart_url).not.toContain("beta");
+
+    const cartB = await adapter.buildCartLink(
+      "https://merchant.example.com",
+      [{ variantId: varB, quantity: 1 }],
+      { mode: "cart" }
+    );
+    expect(cartB.cart_url).toContain("beta");
+    expect(cartB.cart_url).not.toContain("alpha");
+  });
+
+  it("enforces RFC 1123 ASCII LDH hostnames and blocks cross-site canonicalOrigin takeover on redirects", async () => {
+    for (const okHost of ["snocks.com", "www.shop-1.example.co.uk", "xn--bcher-kva.example"]) {
+      expect(isValidLdhHostname(okHost), okHost).toBe(true);
+      expect(validateExternalUrl(`https://${okHost}/`).hostname).toBe(okHost);
+    }
+
+    for (const badHost of [
+      "evil'quote.example.com",
+      "evil$(id).example.com",
+      "evil;ls.example.com",
+      "evil_under.example.com",
+      "-leading.example.com",
+      "trailing-.example.com",
+      "bad..dots.example.com",
+      "has space.example.com"
+    ]) {
+      expect(isValidLdhHostname(badHost), badHost).toBe(false);
+      expect(() => validateExternalUrl(`https://${badHost}/`), badHost).toThrow();
+    }
+
+    const htmlResp = (url: string, html: string): SafeFetchResponse => ({
+      status: 200,
+      url,
+      contentType: "text/html; charset=utf-8",
+      headers: { "content-type": "text/html; charset=utf-8" },
+      bodyBuffer: Buffer.from(html, "utf8"),
+      bodyText: html
+    });
+
+    // WooCommerce: cross-site redirect must not replace canonicalOrigin, same-site www redirect should
+    const wooCross = new WooCommerceAdapter(async (url) => {
+      if (url.includes("/wp-json/wc/store/v1/cart")) {
+        return makeJsonResp("https://attacker.example.org/wp-json/wc/store/v1/cart", {
+          items: [],
+          totals: { currency_code: "EUR", currency_minor_unit: 2 }
+        });
+      }
+      return makeJsonResp("https://attacker.example.org/wp-json/", { name: "Hijacked" });
+    });
+    const wooCrossInfo = await wooCross.detect("https://store.example.com");
+    expect(wooCrossInfo?.origin).toBe("https://store.example.com");
+
+    const wooSame = new WooCommerceAdapter(async (url) => {
+      if (url.includes("/wp-json/wc/store/v1/cart")) {
+        return makeJsonResp("https://www.store.example.com/wp-json/wc/store/v1/cart", {
+          items: [],
+          totals: { currency_code: "EUR", currency_minor_unit: 2 }
+        });
+      }
+      return makeJsonResp("https://www.store.example.com/wp-json/", { name: "Legit Woo" });
+    });
+    const wooSameInfo = await wooSame.detect("https://store.example.com");
+    expect(wooSameInfo?.origin).toBe("https://www.store.example.com");
+
+    // BigCommerce: cross-site redirect on homepage or /cart.php must not replace canonicalOrigin
+    const bcClient = new BigCommerceClient(async () =>
+      htmlResp(
+        "https://attacker.example.org/",
+        '<html><head><title>BC</title></head><body><script>window.BCData = {"currency":"EUR"};</script></body></html>'
+      )
+    );
+    const bcMeta = await bcClient.resolveDomainMetadata("https://bc.example.com");
+    expect(bcMeta.origin).toBe("https://bc.example.com");
+
+    // Magento: cross-site redirect must not replace canonicalOrigin
+    const magentoClient = new MagentoClient(async () =>
+      makeJsonResp("https://attacker.example.org/graphql", {
+        data: { storeConfig: { store_name: "M2", default_display_currency_code: "EUR" } }
+      })
+    );
+    const m2Meta = await magentoClient.resolveDomainMetadata("https://m2.example.com");
+    expect(m2Meta.origin).toBe("https://m2.example.com");
+
+    // Shopware: cross-site redirect must not replace canonicalOrigin
+    const swClient = new ShopwareClient(async (url) => {
+      if (url.includes("/store-api/context")) {
+        return makeJsonResp("https://attacker.example.org/store-api/context", {
+          currency: { isoCode: "EUR" },
+          salesChannel: { name: "SW" }
+        });
+      }
+      return htmlResp(
+        "https://attacker.example.org/",
+        '<html><head><meta name="sw-access-key" content="SWSCABCDEFGHIJKLMNOPQRSTUV" /></head><body>shopware</body></html>'
+      );
+    });
+    const swMeta = await swClient.resolveDomainMetadata("https://sw.example.com");
+    expect(swMeta.origin).toBe("https://sw.example.com");
+  });
+
+  it("percent-encodes shell-active URL characters across JSON-LD, Shopware, BigCommerce, WooCommerce, and CLI output", async () => {
+    const shellUnsafeRe = /['"$()`;|\\<>]/;
+
+    // Direct enforceShellSafeHttpsUrl + sanitizeSafeUrl verification
+    const encoded = enforceShellSafeHttpsUrl(
+      "https://shop.example.com/p/item'$(id);|test?foo=bar'baz&storefront=true#frag"
+    );
+    expect(encoded).not.toBeNull();
+    expect(encoded).not.toMatch(shellUnsafeRe);
+    expect(encoded).toContain("%27");
+    expect(encoded).toContain("storefront=true");
+    expect(encoded).not.toContain("#frag");
+
+    const preserved = sanitizeSafeUrl(
+      "https://shop.example.com/cart/12345:1?storefront=true&discount=SAVE10",
+      "https://shop.example.com"
+    );
+    expect(preserved).toBe("https://shop.example.com/cart/12345:1?storefront=true&discount=SAVE10");
+    expect(enforceShellSafeHttpsUrl("http://shop.example.com/p/a")).toBeNull();
+    expect(enforceShellSafeHttpsUrl("https://user:pass@shop.example.com/p/a")).toBeNull();
+    expect(enforceShellSafeHttpsUrl("https://bad'host.example.com/p/a")).toBeNull();
+
+    // 1. JSON-LD Product.url with single quote / shell chars
+    const jsonLdHtml = `<!doctype html><html><head><script type="application/ld+json">${JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "Product",
+      name: "Quote Shoe",
+      sku: "SHOE-1",
+      url: "https://merchant.example.com/p/shoe'$(id);x?color=red'blue",
+      offers: {
+        "@type": "Offer",
+        url: "https://merchant.example.com/p/shoe'offer?size=M'L",
+        price: "79.00",
+        priceCurrency: "EUR",
+        availability: "https://schema.org/InStock"
+      }
+    })}</script></head><body></body></html>`;
+    const jsonLdParsed = parseProductFromHtml(jsonLdHtml, "https://merchant.example.com/p/shoe");
+    expect(jsonLdParsed).not.toBeNull();
+    expect(jsonLdParsed!.product.url).not.toMatch(shellUnsafeRe);
+    expect(jsonLdParsed!.product.variants[0]!.url).not.toMatch(shellUnsafeRe);
+
+    // 2. Shopware seoPathInfo with single quote / shell chars
+    const swAdapter = new ShopwareAdapter(
+      new ShopwareClient(async (url) => {
+        if (url.endsWith("/store-api/context")) {
+          return makeJsonResp(url, {
+            currency: { isoCode: "EUR" },
+            salesChannel: { name: "SW Test" }
+          });
+        }
+        if (url.endsWith("/store-api/search")) {
+          return makeJsonResp(url, {
+            elements: [
+              {
+                id: "018f0000000000000000000000000001",
+                productNumber: "SW-100",
+                name: "SW Quote Item",
+                available: true,
+                calculatedPrice: { unitPrice: 19.99 },
+                seoUrls: [{ seoPathInfo: "detail/item'$(id);ls", isCanonical: true }]
+              }
+            ]
+          });
+        }
+        return {
+          status: 200,
+          url,
+          contentType: "text/html; charset=utf-8",
+          headers: { "content-type": "text/html; charset=utf-8" },
+          bodyBuffer: Buffer.from(
+            '<html><head><meta name="sw-access-key" content="SWSCABCDEFGHIJKLMNOPQRSTUV" /></head><body>shopware</body></html>',
+            "utf8"
+          ),
+          bodyText:
+            '<html><head><meta name="sw-access-key" content="SWSCABCDEFGHIJKLMNOPQRSTUV" /></head><body>shopware</body></html>'
+        };
+      })
+    );
+    const swSearch = await swAdapter.searchProducts("https://sw-url.example.com", {
+      query: "item",
+      limit: 5
+    });
+    expect(swSearch.products).toHaveLength(1);
+    expect(swSearch.products[0]!.url).not.toMatch(shellUnsafeRe);
+    expect(swSearch.products[0]!.url).toContain("%27");
+
+    // 3. BigCommerce JSON-LD url with single quote / shell chars
+    const bcHtml = `<!doctype html><html><head><title>BC Shop</title><script type="application/ld+json">${JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "Product",
+      name: "BC Quote Item",
+      sku: "BC-42",
+      url: "https://bc-url.example.com/bc-item'$(whoami);x",
+      offers: {
+        "@type": "Offer",
+        price: "39.00",
+        priceCurrency: "USD",
+        availability: "https://schema.org/InStock"
+      }
+    })}</script></head><body><script>window.BCData = {"product_attributes":{"product_id":42},"currency":"USD"};</script></body></html>`;
+    const bcAdapter = new BigCommerceAdapter(
+      new BigCommerceClient(async (url) => ({
+        status: 200,
+        url,
+        contentType: "text/html; charset=utf-8",
+        headers: { "content-type": "text/html; charset=utf-8" },
+        bodyBuffer: Buffer.from(bcHtml, "utf8"),
+        bodyText: bcHtml
+      }))
+    );
+    const bcDetail = await bcAdapter.getProduct(
+      "https://bc-url.example.com",
+      "https://bc-url.example.com/bc-item"
+    );
+    expect(bcDetail.product.url).not.toMatch(shellUnsafeRe);
+    expect(bcDetail.product.url).toContain("%27");
+
+    // 4. WooCommerce permalink with single quote / shell chars
+    const wooAdapter = new WooCommerceAdapter(async (url) => {
+      if (url.includes("/wp-json/wc/store/v1/cart")) {
+        return makeJsonResp(url, { totals: { currency_code: "EUR", currency_minor_unit: 2 } });
+      }
+      if (url.includes("/wp-json/?_fields=name")) {
+        return makeJsonResp(url, { name: "Woo Quote" });
+      }
+      return makeJsonResp(url, [
+        {
+          id: 701,
+          name: "Woo Quote Item",
+          slug: "woo-quote-item",
+          permalink: "https://woo-url.example.com/product/item'$(id);x/?ref=a'b",
+          type: "simple",
+          is_purchasable: true,
+          is_in_stock: true,
+          prices: { price: "1999", currency_code: "EUR", currency_minor_unit: 2 }
+        }
+      ]);
+    });
+    const wooSearch = await wooAdapter.searchProducts("https://woo-url.example.com", {
+      query: "quote",
+      limit: 5
+    });
+    expect(wooSearch.products).toHaveLength(1);
+    expect(wooSearch.products[0]!.url).not.toMatch(shellUnsafeRe);
+    expect(wooSearch.products[0]!.url).toContain("%27");
+
+    // 5. CLI output emission gate re-enforces shell-safe HTTPS URLs and LDH origins on every URL field
+    const sanitized = sanitizeCliOutput({
+      store_origin: "https://bad'origin.example.com",
+      store: { origin: "https://shop.example.com" },
+      cart_url: "https://shop.example.com/cart/123:1?storefront=true&note=hi'there",
+      products: [
+        {
+          id: "1",
+          handle: "safe-item",
+          url: "https://shop.example.com/p/safe'$(id)",
+          image_url: "https://shop.example.com/img/a'b.jpg"
+        }
+      ],
+      product: {
+        id: "1",
+        handle: "safe-item",
+        url: "https://shop.example.com/p/safe'$(id)",
+        images: ["https://shop.example.com/img/1'2.jpg", "javascript:alert(1)"],
+        variants: [{ id: "123", url: "https://shop.example.com/p/safe?v=1'2" }]
+      },
+      collections: [{ id: "c1", handle: "sale", url: "https://shop.example.com/c/sale'1" }],
+      policy_urls: {
+        privacy: "https://shop.example.com/policies/privacy'1",
+        evil: "https://bad'host.example.com/policies/evil"
+      }
+    }) as Record<string, unknown>;
+
+    expect(sanitized.store_origin).toBeUndefined();
+    expect((sanitized.store as { origin: string }).origin).toBe("https://shop.example.com");
+    expect(sanitized.cart_url).toBe("https://shop.example.com/cart/123:1?storefront=true&note=hi%27there");
+    const serialized = JSON.stringify(sanitized);
+    expect(serialized).not.toContain("bad'origin");
+    expect(serialized).not.toContain("bad'host");
+    expect(serialized).not.toContain("javascript:");
+    expect(serialized).not.toContain("$(id)");
+    expect(serialized).not.toMatch(/'/);
   });
 
   it("enforces defense-in-depth CLI output emission gate and strict CLI/normalize input validation", async () => {
@@ -442,23 +794,27 @@ describe("Strict identifier allowlists & adapter emission hardening", () => {
       expect(doc, `${name} single-quoted product`).toContain("npx -y shopcart-mcp product '<store>'");
       expect(doc, `${name} single-quoted cart`).toContain("npx -y shopcart-mcp cart '<store>' '<variantId:qty>'");
       expect(doc, `${name} quoting rule`).toMatch(/single-quote/i);
+      expect(doc, `${name} user-named domain rule`).toMatch(/user-named store domain|user-named/i);
       expect(doc, `${name} no bare <store> in inspect`).not.toContain("shopcart-mcp inspect <store>");
       expect(doc, `${name} no double-quoted <query>`).not.toContain('"<query>"');
     }
 
     expect(llmsFullTxt).toContain("npx -y shopcart-mcp inspect '<store>'");
     expect(llmsFullTxt).toMatch(/single-quot/i);
+    expect(llmsFullTxt).toMatch(/user-named store domain|user-named/i);
 
     expect(readmeText).toContain("npx -y shopcart-mcp inspect 'snocks.com'");
     expect(readmeText).toContain("npx -y shopcart-mcp search 'snocks.com' 'socken'");
     expect(readmeText).toContain("npx -y shopcart-mcp product 'snocks.com' '<handle>'");
     expect(readmeText).toContain("npx -y shopcart-mcp cart 'snocks.com' '<variantId>:1'");
     expect(readmeText).toMatch(/single-quote/i);
+    expect(readmeText).toMatch(/user-named store domain|user-named/i);
 
     expect(helpText).toContain("shopcart-mcp inspect '<store>'");
     expect(helpText).toContain("shopcart-mcp search '<store>' '<query>'");
     expect(helpText).toContain("shopcart-mcp product '<store>' '<handle-or-url>'");
     expect(helpText).toContain("shopcart-mcp cart '<store>' '<id:qty>'");
     expect(helpText).toMatch(/single-quote/i);
+    expect(helpText).toMatch(/user-named store domain|user-named/i);
   });
 });

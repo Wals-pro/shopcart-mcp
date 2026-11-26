@@ -275,10 +275,13 @@ export class WooCommerceAdapter implements StoreAdapter {
       };
     }
 
-    const redirectedOrigin =
+    const candidateRedirected =
       (firstProduct ? extractCanonicalOriginFromUrl(productsProbe.url) : null) ??
-      (validCart ? extractCanonicalOriginFromUrl(cartProbe.url) : null) ??
-      origin;
+      (validCart ? extractCanonicalOriginFromUrl(cartProbe.url) : null);
+    const redirectedOrigin =
+      candidateRedirected && isSameStoreSite(origin, candidateRedirected)
+        ? candidateRedirected
+        : origin;
 
     const currency = normalizeWooCurrency(
       firstProduct?.prices?.currency_code ?? validCart?.totals?.currency_code,

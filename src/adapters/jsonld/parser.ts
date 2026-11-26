@@ -1,4 +1,6 @@
+import crypto from "node:crypto";
 import {
+  enforceShellSafeHttpsUrl,
   extractSafeHandleFromUrl,
   sanitizeGenericVariantId,
   sanitizeSafeHandle
@@ -746,8 +748,8 @@ export function sanitizeUniversalProductUrl(
     }
   }
   parsed.hash = "";
-  const finalUrl = parsed.toString();
-  return finalUrl.length <= MAX_SAFE_URL_LENGTH ? finalUrl : null;
+  const finalUrl = enforceShellSafeHttpsUrl(parsed.toString());
+  return finalUrl && finalUrl.length <= MAX_SAFE_URL_LENGTH ? finalUrl : null;
 }
 
 export function sanitizeUniversalImageUrl(rawUrl: unknown, pageUrl: string): string | null {
@@ -1151,6 +1153,10 @@ function extractVariantAttributes(node: JsonObject): Array<{ name: string; value
   return attrs;
 }
 
+function shortUrlHash(canonicalUrl: string): string {
+  return crypto.createHash("sha256").update(canonicalUrl).digest("hex").slice(0, 12);
+}
+
 function deriveHandleFromUrl(url: string, fallbackSku: string | null): string {
   try {
     const parsed = new URL(url);
@@ -1167,7 +1173,7 @@ function deriveHandleFromUrl(url: string, fallbackSku: string | null): string {
   } catch {
     // ignore
   }
-  return sanitizeSafeHandle(fallbackSku) ?? "product";
+  return sanitizeSafeHandle(fallbackSku) ?? `product-${shortUrlHash(url)}`;
 }
 
 function pickSafeJsonLdVariantId(
@@ -1252,6 +1258,7 @@ function buildFromProductGroup(
     sanitizeUniversalProductUrl(hints.ogUrl, pageUrl) ??
     sanitizeUniversalProductUrl(pageUrl, pageUrl) ??
     pageUrl;
+  const urlHash = shortUrlHash(canonicalUrl);
 
   const images = extractImages(group["image"], pageUrl);
   const optionMap = new Map<string, Set<string>>();
@@ -1318,7 +1325,7 @@ function buildFromProductGroup(
       const mpn = offer.mpn ?? vIds.mpn ?? groupIds.mpn;
       const id = pickSafeJsonLdVariantId(
         [sku, gtin, mpn],
-        `variant-${variants.length + 1}`
+        `variant-${urlHash}-${variants.length + 1}`
       );
       const displayTitle =
         optionValues.length > 0
@@ -1366,7 +1373,10 @@ function buildFromProductGroup(
       const ean = offer.ean ?? groupIds.ean;
       const mpn = offer.mpn ?? groupIds.mpn;
       variants.push({
-        id: pickSafeJsonLdVariantId([sku, gtin, mpn], `variant-${variants.length + 1}`),
+        id: pickSafeJsonLdVariantId(
+          [sku, gtin, mpn],
+          `variant-${urlHash}-${variants.length + 1}`
+        ),
         title: offer.title ?? "Default",
         sku,
         gtin,
@@ -1425,7 +1435,7 @@ function buildFromProductGroup(
       groupIds.gtin,
       handle
     ],
-    "product"
+    `product-${urlHash}`
   );
 
   return {
@@ -1530,6 +1540,7 @@ function buildFromProductNode(
     sanitizeUniversalProductUrl(hints.ogUrl, pageUrl) ??
     sanitizeUniversalProductUrl(pageUrl, pageUrl) ??
     pageUrl;
+  const urlHash = shortUrlHash(canonicalUrl);
 
   const attrs = extractVariantAttributes(node);
   const optionValues = attrs.map((a) => a.value);
@@ -1564,7 +1575,7 @@ function buildFromProductNode(
     variants.push({
       id: pickSafeJsonLdVariantId(
         [vSku, vGtin, vMpn, offers.length === 1 ? deriveHandleFromUrl(canonicalUrl, null) : null],
-        `offer-${i + 1}`
+        `offer-${urlHash}-${i + 1}`
       ),
       title: offer.title ?? (optionValues.length > 0 ? optionValues.join(" / ") : "Default"),
       sku: vSku,
@@ -1598,7 +1609,7 @@ function buildFromProductNode(
       variants.push({
         id: pickSafeJsonLdVariantId(
           [skuFallback, productIds.gtin, deriveHandleFromUrl(canonicalUrl, null)],
-          "offer-1"
+          `offer-${urlHash}-1`
         ),
         title: optionValues.length > 0 ? optionValues.join(" / ") : "Default",
         sku: skuFallback,
@@ -1635,7 +1646,7 @@ function buildFromProductNode(
   const handle = deriveHandleFromUrl(canonicalUrl, skuFallback);
   const productId = pickSafeJsonLdVariantId(
     [skuFallback, productIds.gtin, productIds.mpn, handle],
-    "product"
+    `product-${urlHash}`
   );
   const overallAvailability = pickOverallAvailability(variants);
 
@@ -1706,7 +1717,8 @@ function buildFromOpenGraphOnly(
   }
 
   const money = formatMoney(parsedPrice.amount, currency);
-  const safeOgId = pickSafeJsonLdVariantId([sku, handle], "product");
+  const urlHash = shortUrlHash(canonicalUrl);
+  const safeOgId = pickSafeJsonLdVariantId([sku, handle], `product-${urlHash}`);
 
   return {
     currency,

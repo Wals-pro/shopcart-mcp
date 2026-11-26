@@ -77,7 +77,8 @@ npx -y shopcart-mcp cart '<store>' '<variantId:qty>' ['<variantId:qty>' ...] [--
 
 When invoking `shopcart-mcp` through a shell:
 - **Always single-quote** (or pass via an `argv` array without a shell — **never** unquoted and **never** double-quoted where `$()` or backtick expansion can occur) every store-derived argument (`handle`, `variantId`, `collection`, product URLs, queries, notes).
-- **Only forward safe identifiers** matching strict allowlists: `^[A-Za-z0-9._~-]+$` for handles/collections (no `..`), and `^[A-Za-z0-9._:-]+$` (digits `^\d+$` on Shopify/WooCommerce) for variant IDs. Reject or skip any untrusted value containing whitespace, quotes, or shell metacharacters.
+- **Always reuse the user-named store domain** for `'<store>'` rather than an untrusted redirected origin.
+- **Only forward safe identifiers** matching strict allowlists: `^[A-Za-z0-9._~-]+$` for handles/collections (no `..`), and `^[A-Za-z0-9._:-]+$` (digits `^\d+$` on Shopify/WooCommerce) for variant IDs. Never reuse a store-returned URL as a shell argument unless it contains no quotes, whitespace, or shell metacharacters.
 
 Always send the returned `cart_url` (plus itemized variant titles, quantities, unit prices, and currency) back to the user in WhatsApp, iMessage, or chat so the human reviews and completes payment in 1 click. Never log into stores or enter payment credentials.
 

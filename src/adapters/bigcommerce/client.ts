@@ -160,7 +160,7 @@ export class BigCommerceClient {
       });
 
       const redirected = extractCanonicalOrigin(home.url);
-      if (redirected) canonicalOrigin = redirected;
+      if (redirected && isSameStoreSite(origin, redirected)) canonicalOrigin = redirected;
 
       if (home.status === 401 || home.status === 403) {
         wafRestricted = true;
@@ -191,7 +191,9 @@ export class BigCommerceClient {
         ) {
           detected = true;
           const redirected = extractCanonicalOrigin(cartRes.url);
-          if (redirected) canonicalOrigin = redirected;
+          if (redirected && isSameStoreSite(origin, redirected)) {
+            canonicalOrigin = redirected;
+          }
           name = name ?? extractHtmlTitle(cartRes.html);
           currency = currency ?? extractCurrencyFromHtml(cartRes.html);
         }

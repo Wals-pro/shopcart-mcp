@@ -128,7 +128,8 @@ const response = await ai.models.generateContent({
 npx -y shopcart-mcp
 
 # One-Shot CLI subcommands (deterministic JSON on stdout, zero OAuth popup)
-# Always single-quote store-derived arguments (or pass via argv array) when invoking via a shell.
+# Always single-quote store-derived arguments (or pass via argv array), reuse the user-named store domain for '<store>',
+# and never reuse a store-returned URL as a shell argument unless it contains no quotes, whitespace, or shell metacharacters.
 npx -y shopcart-mcp inspect 'snocks.com'
 npx -y shopcart-mcp search 'snocks.com' 'socken' --limit 3 --available
 npx -y shopcart-mcp product 'snocks.com' '<handle>'

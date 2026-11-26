@@ -180,7 +180,7 @@ export class MagentoClient {
         if (cfg.store_code || cfg.base_currency_code || cfg.default_display_currency_code) {
           detected = true;
           const redirected = extractCanonicalOrigin(res.url);
-          if (redirected) canonicalOrigin = redirected;
+          if (redirected && isSameStoreSite(origin, redirected)) canonicalOrigin = redirected;
           name = sanitizeOptionalText(cfg.store_name, 120);
           currency = normalizeCurrency(
             cfg.default_display_currency_code ?? cfg.base_currency_code ?? "USD"

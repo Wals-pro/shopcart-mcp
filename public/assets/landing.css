@@ -2179,11 +2179,6 @@ details[open] > summary .faq-icon::after {
   color: var(--walspro-ink);
 }
 
-.code-card pre.code-wrap {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 .instinct-code-stack {
   display: grid;
   gap: 12px;

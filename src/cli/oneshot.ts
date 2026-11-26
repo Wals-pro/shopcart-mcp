@@ -7,6 +7,7 @@ import {
   type AttributionConfig
 } from "../attribution/links.js";
 import {
+  enforceShellSafeHttpsUrl,
   sanitizeGenericVariantId,
   sanitizeSafeHandle
 } from "../security/identifiers.js";
@@ -134,7 +135,9 @@ Options:
 
 Shell safety:
   Always single-quote store-derived arguments (or pass via argv array) when invoking via a shell.
-  Only forward safe identifiers (^[A-Za-z0-9._~-]+$ for handles; ^[A-Za-z0-9._:-]+$ for variant IDs).
+  Always reuse the user-named store domain for '<store>' (not an untrusted redirected origin).
+  Only forward safe identifiers (^[A-Za-z0-9._~-]+$ for handles; ^[A-Za-z0-9._:-]+$ for variant IDs),
+  and never reuse a store-returned URL as a shell argument unless it contains no quotes, whitespace, or shell metacharacters.
 
 Exit codes:
   0  Success
@@ -956,16 +959,55 @@ function isSafeVariantIdOrHttpsUrl(raw: unknown): boolean {
   return false;
 }
 
+function sanitizeOriginField(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const safe = enforceShellSafeHttpsUrl(raw);
+  if (!safe) return undefined;
+  try {
+    return new URL(safe).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function sanitizeOptionalShellUrl(raw: unknown): string | null | undefined {
+  if (raw === null) return null;
+  if (typeof raw !== "string") return undefined;
+  return enforceShellSafeHttpsUrl(raw) ?? undefined;
+}
+
 /**
  * Defense-in-depth CLI output emission gate: guarantees that emitted stdout JSON
- * never propagates shell metacharacters in product handles, collection handles,
- * or variant IDs regardless of which adapter produced the payload.
+ * never propagates shell metacharacters or unencoded quotes in handles, variant IDs,
+ * origins, or URLs regardless of which adapter produced the payload.
  */
 export function sanitizeCliOutput(payload: unknown): unknown {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return payload;
   }
   const obj = { ...(payload as Record<string, unknown>) };
+
+  // Store origin fields
+  if (typeof obj.store_origin === "string") {
+    const safeOrigin = sanitizeOriginField(obj.store_origin);
+    if (safeOrigin) {
+      obj.store_origin = safeOrigin;
+    } else {
+      delete obj.store_origin;
+    }
+  }
+  if (obj.store && typeof obj.store === "object" && !Array.isArray(obj.store)) {
+    const store = { ...(obj.store as Record<string, unknown>) };
+    if (typeof store.origin === "string") {
+      const safeOrigin = sanitizeOriginField(store.origin);
+      if (safeOrigin) {
+        store.origin = safeOrigin;
+      } else {
+        delete store.origin;
+      }
+    }
+    obj.store = store;
+  }
 
   // Collections & highlighted_deals arrays
   for (const key of ["collections", "highlighted_deals"] as const) {
@@ -974,13 +1016,17 @@ export function sanitizeCliOutput(payload: unknown): unknown {
         if (!entry || typeof entry !== "object") return [];
         const safeHandle = sanitizeSafeHandle(entry.handle);
         if (!safeHandle) return [];
-        return [
-          {
-            ...entry,
-            id: sanitizeGenericVariantId(entry.id) ?? safeHandle,
-            handle: safeHandle
-          }
-        ];
+        const next: Record<string, unknown> = {
+          ...entry,
+          id: sanitizeGenericVariantId(entry.id) ?? safeHandle,
+          handle: safeHandle
+        };
+        if ("url" in next) {
+          const safeUrl = sanitizeOptionalShellUrl(next.url);
+          if (safeUrl !== undefined) next.url = safeUrl;
+          else delete next.url;
+        }
+        return [next];
       });
       obj[key] = cleaned;
     }
@@ -992,13 +1038,21 @@ export function sanitizeCliOutput(payload: unknown): unknown {
       if (!entry || typeof entry !== "object") return [];
       const safeHandle = sanitizeSafeHandle(entry.handle);
       if (!safeHandle) return [];
-      return [
-        {
-          ...entry,
-          id: sanitizeGenericVariantId(entry.id) ?? safeHandle,
-          handle: safeHandle
-        }
-      ];
+      const next: Record<string, unknown> = {
+        ...entry,
+        id: sanitizeGenericVariantId(entry.id) ?? safeHandle,
+        handle: safeHandle
+      };
+      if ("url" in next) {
+        const safeUrl = sanitizeOptionalShellUrl(next.url);
+        if (safeUrl !== undefined) next.url = safeUrl;
+        else delete next.url;
+      }
+      if ("image_url" in next) {
+        const safeImg = sanitizeOptionalShellUrl(next.image_url);
+        next.image_url = safeImg ?? null;
+      }
+      return [next];
     });
     obj.products = cleanedProducts;
     if (typeof obj.total_returned === "number") {
@@ -1021,18 +1075,75 @@ export function sanitizeCliOutput(payload: unknown): unknown {
     } else {
       delete product.id;
     }
+    if ("url" in product) {
+      const safeUrl = sanitizeOptionalShellUrl(product.url);
+      if (safeUrl !== undefined) product.url = safeUrl;
+      else delete product.url;
+    }
+    if (Array.isArray(product.images)) {
+      product.images = (product.images as unknown[])
+        .map((img) => (typeof img === "string" ? enforceShellSafeHttpsUrl(img) : null))
+        .filter((u): u is string => Boolean(u));
+    }
     if (Array.isArray(product.variants)) {
       product.variants = (product.variants as Array<Record<string, unknown>>).flatMap((v) => {
         if (!v || typeof v !== "object") return [];
         const safeVarId = sanitizeGenericVariantId(v.id);
         if (!safeVarId) return [];
-        return [{ ...v, id: safeVarId }];
+        const nextVar: Record<string, unknown> = { ...v, id: safeVarId };
+        if ("url" in nextVar) {
+          const safeVarUrl = sanitizeOptionalShellUrl(nextVar.url);
+          if (safeVarUrl !== undefined) nextVar.url = safeVarUrl;
+          else delete nextVar.url;
+        }
+        return [nextVar];
       });
     }
     obj.product = product;
   }
 
-  // Cart items & additional_cart_links
+  // Policy URLs (policy_urls object + optional policies[] array)
+  if (obj.policy_urls && typeof obj.policy_urls === "object" && !Array.isArray(obj.policy_urls)) {
+    const policyUrls: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj.policy_urls as Record<string, unknown>)) {
+      const safeUrl = sanitizeOptionalShellUrl(v);
+      if (safeUrl !== undefined) policyUrls[k] = safeUrl;
+    }
+    obj.policy_urls = policyUrls;
+  }
+  if (Array.isArray(obj.policies)) {
+    obj.policies = (obj.policies as Array<Record<string, unknown>>).map((pol) => {
+      if (!pol || typeof pol !== "object") return pol;
+      const nextPol = { ...pol };
+      if ("url" in nextPol) {
+        const safeUrl = sanitizeOptionalShellUrl(nextPol.url);
+        if (safeUrl !== undefined) nextPol.url = safeUrl;
+        else delete nextPol.url;
+      }
+      return nextPol;
+    });
+  }
+
+  // Search hints URLs
+  if (obj.search_hints && typeof obj.search_hints === "object" && !Array.isArray(obj.search_hints)) {
+    const hints = { ...(obj.search_hints as Record<string, unknown>) };
+    if ("search_url" in hints) {
+      hints.search_url = sanitizeOptionalShellUrl(hints.search_url) ?? null;
+    }
+    if (Array.isArray(hints.sitemaps)) {
+      hints.sitemaps = (hints.sitemaps as unknown[])
+        .map((u) => (typeof u === "string" ? enforceShellSafeHttpsUrl(u) : null))
+        .filter((u): u is string => Boolean(u));
+    }
+    obj.search_hints = hints;
+  }
+
+  // Cart URLs & items
+  if ("cart_url" in obj) {
+    const safeCartUrl = sanitizeOptionalShellUrl(obj.cart_url);
+    if (safeCartUrl !== undefined) obj.cart_url = safeCartUrl;
+    else delete obj.cart_url;
+  }
   if (Array.isArray(obj.items)) {
     obj.items = (obj.items as Array<Record<string, unknown>>).filter(
       (i) => i && typeof i === "object" && isSafeVariantIdOrHttpsUrl(i.variant_id)
@@ -1041,7 +1152,12 @@ export function sanitizeCliOutput(payload: unknown): unknown {
   if (Array.isArray(obj.additional_cart_links)) {
     obj.additional_cart_links = (
       obj.additional_cart_links as Array<Record<string, unknown>>
-    ).filter((l) => l && typeof l === "object" && isSafeVariantIdOrHttpsUrl(l.variant_id));
+    ).flatMap((l) => {
+      if (!l || typeof l !== "object" || !isSafeVariantIdOrHttpsUrl(l.variant_id)) return [];
+      const safeLinkUrl = sanitizeOptionalShellUrl(l.cart_url);
+      if (typeof safeLinkUrl !== "string") return [];
+      return [{ ...l, cart_url: safeLinkUrl }];
+    });
   }
 
   return obj;
