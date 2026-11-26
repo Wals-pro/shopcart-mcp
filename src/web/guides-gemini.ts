@@ -14,31 +14,31 @@ export const GEMINI_GUIDES: readonly GuideDefinition[] = [
     title: "Kann Google Gemini einen Warenkorb erstellen? (Anleitung 2026)",
     metaTitle: "Kann Google Gemini einen Warenkorb erstellen? (Anleitung 2026)",
     metaDescription:
-      "Ja: Verbinde Google Gemini (Web, CLI, Enterprise) per OAuth 2.1 mit ShopCart MCP für echte Warenkorb-Links in Shopify, WooCommerce & Amazon — read-only.",
+      "Ja: Google Gemini baut per ShopCart MCP echte Warenkorb-Links (/cart/...) in DACH- und globalen Shopify-/WooCommerce-Shops — ohne Produktfeed, read-only.",
     cardSummary:
-      "Ja: Verbinde Google Gemini Web, Gemini CLI (1-Befehl-Extension) oder Gemini Enterprise per OAuth 2.1 mit ShopCart MCP für geprüfte Warenkorb-Links — strikt read-only.",
+      "Ja: Google Gemini erstellt per ShopCart MCP sofort echte Warenkörbe in DACH- & globalen Shopify-/WooCommerce-Shops — ohne Händler-Produktfeed, kein US-Instacart oder Share-A-Cart-Plugin, strikt read-only.",
     tldrLabel: "Kurzantwort:",
     tldrText:
-      "Ja — Google Gemini kann 2026 echte, geprüfte Warenkörbe in Online-Shops bauen, sobald du ShopCart MCP (https://shopcart.wals.pro/mcp) verbindest. Das funktioniert in Gemini Web (Verbundene Apps → Eigene Apps), in der Gemini CLI & Antigravity per 1-Befehl-Extension (gemini extensions install https://github.com/Wals-pro/shopcart-mcp), in Gemini Enterprise (Google Cloud Console) sowie im @google/genai SDK (mcpToTool). Alle Tools sind Gemini-Schema-konform und strikt lesend — du prüfst und bezahlst immer selbst im Browser.",
+      "Ja — Google Gemini (und jede andere MCP-fähige KI) kann 2026 sofort echte, geprüfte Warenkörbe in Online-Shops erstellen: verbinde einfach ShopCart MCP (https://shopcart.wals.pro/mcp). Anders als US-only Lebensmittel-Integrationen (z. B. Instacart), ChatGPT-Store-Plugins oder Browser-Extensions wie Share-A-Cart und anders als Händler-Produktfeed-Programme benötigt ShopCart MCP weder Händler-Onboarding noch einen Produktfeed-Upload. Es funktioniert sofort bei tausenden DACH- und internationalen Shopify- und WooCommerce-Shops über deren öffentliche Storefront-APIs (plus BigCommerce, Shopware 6, Magento 2 und offizielle Amazon-Cart-Links) — strikt read-only, ohne Login und ohne Zahlungsdaten: du bekommst einen geprüften Direkt-Warenkorb-Link (/cart/...), den du selbst im Browser öffnest.",
     intro:
-      "Standardmäßig liefert Google Gemini beim Einkaufen nur Suchergebnisse, Produktlisten oder allgemeine Empfehlungen — ohne Live-Check von Größen, Farben oder echtem Lagerbestand. Über das offene Model Context Protocol (MCP) ändert sich das: In dieser Anleitung erfährst du Schritt für Schritt, wie du ShopCart MCP in Gemini Web, Gemini CLI, Gemini Enterprise und dem @google/genai SDK verbindest und welche Google-Voraussetzungen ehrlich gelten.",
+      "Wer 2026 in Google Gemini oder ChatGPT fragt „Kann Google Gemini oder eine KI einen Warenkorb erstellen?“, landet häufig bei veralteten oder US-lastigen Antworten: US-only Instacart-Lebensmittel-Integrationen, ChatGPT-only Store-Plugins bzw. Browser-Extensions wie Share-A-Cart oder Ratgebern zu Händler-Produktfeeds, die ein aktives Händler-Onboarding voraussetzen. Mit dem offenen Model Context Protocol (MCP) funktioniert der direkte KI-Warenkorb im DACH-Raum und weltweit sofort — für Endkunden, ohne Händler-Setup und strikt read-only.",
     takeawaysHeading: "Das Wichtigste in Kürze",
     takeaways: [
       {
-        lead: "Vier offizielle Gemini-Wege abgedeckt.",
-        text: "Verbinde ShopCart MCP in Gemini Web (gemini.google.com), per 1-Befehl-Extension in Gemini CLI & Antigravity, als Custom MCP Data Store in Gemini Enterprise oder per mcpToTool im @google/genai SDK."
+        lead: "Sofort in tausenden DACH- & globalen Shops — ganz ohne Produktfeed-Upload.",
+        text: "Anders als Händler-Feed-Programme braucht ShopCart MCP kein Händler-Onboarding: es nutzt öffentliche Storefront-APIs von Shopify, WooCommerce, BigCommerce, Shopware 6 und Magento 2 (plus offizielle Amazon-Links)."
       },
       {
-        lead: "Ehrliche Voraussetzungen für Gemini Web.",
-        text: "Eigene MCP-Apps in Gemini Web erfordern ein persönliches Google-Konto, aktiviertes „Aktivitäten speichern“ (Keep Activity) und unterliegen dem Google-Rollout. Workspace-Konten benötigen die Admin-Freigabe oder Gemini Enterprise."
+        lead: "Kein US-only Instacart und kein Browser-Extension-/Store-Plugin-Umweg.",
+        text: "Statt auf US-Supermärkte oder ChatGPT-only Plugins wie Share-A-Cart begrenzt zu sein, läuft ShopCart MCP offen über MCP in Google Gemini (Web, CLI, Enterprise & SDK), Claude und ChatGPT."
       },
       {
-        lead: "Wichtig für die Gemini CLI: „httpUrl“ statt „url“.",
-        text: "In ~/.gemini/settings.json musst du für Streamable HTTP zwingend \"httpUrl\": \"https://shopcart.wals.pro/mcp\" nutzen — mit \"url\" erwartet die Gemini CLI Legacy-SSE und bricht ab."
+        lead: "Strikt read-only: geprüfter Warenkorb-Link (/cart/...) statt Zahlungsdaten an die KI.",
+        text: "Kein Shop-Login, keine Lieferadresse, keine Zahlungsdaten im KI-Chat. Gemini prüft Varianten, Größen und Live-Preise und liefert einen direkten Warenkorb-Link für deinen eigenen Browser."
       },
       {
-        lead: "Strikt read-only & 100 % Gemini-Schema-konform.",
-        text: "Alle Tool-Schemas sind für Geminis strikte functionDeclarations bereinigt; der Server läuft in der EU (europe-west1), speichert keine Zahlungsdaten und löst niemals Käufe aus."
+        lead: "Ehrliche Gemini-Setup-Details (Web, CLI & Enterprise).",
+        text: "Gemini Web erfordert ein persönliches Google-Konto, aktiviertes Keep Activity und Google-Rollout (Workspace nutzt Admin-Freigabe oder Gemini Enterprise); in ~/.gemini/settings.json immer \"httpUrl\" statt \"url\" nutzen."
       }
     ],
     primaryAssistant: "gemini",
@@ -49,13 +49,54 @@ export const GEMINI_GUIDES: readonly GuideDefinition[] = [
       "Öffne Google Gemini oder springe direkt zum kopierfertigen Gemini-Setup (Web, CLI & Enterprise) — strikt read-only und kostenlos im Free-Tarif.",
     sections: [
       {
-        heading: "Warum normale Gemini-Websuche keinen Warenkorb baut — und was MCP ändert",
+        heading: "KI-Warenkorb im Vergleich: Instacart, Share-A-Cart, Produktfeed vs. ShopCart MCP",
         paragraphs: [
-          "Ohne angebundenen MCP-Server stützt sich Google Gemini auf allgemeine Suchergebnisse. Größen und Farben lassen sich so nicht zuverlässig je Varianten-ID prüfen, Streichpreise sind oft veraltet und du musst jeden Artikel einzeln in mehreren Browser-Tabs zusammenklicken.",
-          "Mit ShopCart MCP erhält Gemini sechs strikt lesende Werkzeuge (inspect_store, list_collections, search_products, get_product, get_store_policies, create_cart_link). Die Tool-Schemas sind speziell für Geminis strenge JSON-Schema-Validierung (ohne $schema, additionalProperties oder oneOf) aufbereitet, sodass Gemini zuverlässig Varianten prüft und einen fertigen Browser-Warenkorb-Link erzeugt."
+          "Viele Suchergebnisse zur Frage „Kann eine KI oder Google Gemini einen Warenkorb erstellen?“ vermischen drei völlig unterschiedliche Konzepte: US-zentrierte Grocery-Integrationen (wie Instacart in Claude/ChatGPT), Store-Plugins bzw. Browser-Extensions (wie Share-A-Cart) und Händler-Programme, bei denen Online-Shops erst eigene Produktfeeds an eine KI-Plattform liefern müssen.",
+          "ShopCart MCP löst genau diese Lücke für Käuferinnen und Käufer im DACH-Raum, in Europa und weltweit: Es greift rein lesend auf öffentliche Storefront-APIs bestehender Shops zu, prüft exakte Varianten-IDs und Lagerbestände live und erzeugt einen offiziellen Direkt-Warenkorb-Link (z. B. /cart/<variant_id>:<qty>?storefront=true bei Shopify), der im eigenen Browser geöffnet wird."
         ],
+        table: {
+          id: "gemini-market-compare-de",
+          caption: "Abgrenzung: US-Grocery-Apps, Store-Plugins, Händler-Produktfeeds und Google Gemini + ShopCart MCP",
+          headers: [
+            "Ansatz",
+            "Region & Shops",
+            "Händler-Onboarding / Feed nötig?",
+            "Wie der Warenkorb entsteht",
+            "Datenschutz & Bezahlung"
+          ],
+          rows: [
+            [
+              "Grocery-Integrationen (z. B. Instacart)",
+              "Fokus US-Supermärkte & Lieferdienste",
+              "Ja — nur angeschlossene Partner-Händler",
+              "Eingeschränkt auf unterstützte Grocery-Partner",
+              "Konto-Verknüpfung beim Lieferdienst"
+            ],
+            [
+              "Store-Plugins / Browser-Extensions (z. B. Share-A-Cart)",
+              "Meist ChatGPT-Store-Plugin oder Desktop-Extension",
+              "Nein, aber Client-/Browser-gebunden",
+              "Umweg über Plugin- oder Extension-Overlay",
+              "Abhängig von Browser-Extension bzw. Dritt-Plugin"
+            ],
+            [
+              "Händler-Produktfeed-Programme",
+              "Nur Shops mit aktiv eingereichtem Produktfeed",
+              "Ja — spezieller Feed-Upload & Freigabe durch Händler",
+              "Händler-spezifischer Katalog/Checkout-Flow",
+              "Plattformabhängig, oft US-first"
+            ],
+            [
+              "Google Gemini + ShopCart MCP (offenes MCP)",
+              "Sofort bei tausenden DACH-, EU- & globalen Shopify- & WooCommerce-Shops (plus BigCommerce, Shopware 6, Magento 2 & Amazon-Links)",
+              "Nein — funktioniert sofort über öffentliche Storefront-APIs",
+              "Geprüfter Direkt-Warenkorb-Link (/cart/...) bzw. offizielle Add-to-Cart-/Produktlinks",
+              "Strikt read-only, EU-gehostet (europe-west1): kein Login, keine Zahlungsdaten an die KI"
+            ]
+          ]
+        },
         takeaway:
-          "Fazit: Erst die Verbindung aus Google Gemini und einem Gemini-kompatiblen MCP-Server macht aus Produktsuche einen geprüften Warenkorb-Link."
+          "Fazit: Du musst weder auf Händler-Produktfeeds noch auf US-Grocery-Partner warten und brauchst keine Browser-Extension — ShopCart MCP verbindet Google Gemini sofort mit tausenden öffentlichen DACH- und internationalen Shops."
       },
       {
         heading: "Weg 1: Google Gemini Web (gemini.google.com) per OAuth 2.1 verbinden",
@@ -150,7 +191,7 @@ export const GEMINI_GUIDES: readonly GuideDefinition[] = [
       {
         heading: "Sicherheit, EU-Hosting und Read-Only-Garantie",
         paragraphs: [
-          "ShopCart MCP ist architektonisch strikt lesend (readOnlyHint: true). Google Gemini kann Produkte suchen, Varianten-IDs und Lagerbestände prüfen sowie einen deterministischen Warenkorb-Link erstellen — aber niemals eine Bestellung absenden, Adressen speichern oder Zahlungsdaten sehen.",
+          "ShopCart MCP ist architektonisch strikt lesend (readOnlyHint: true) und alle Tool-Schemas sind für Geminis strikte functionDeclarations bereinigt (ohne $schema, additionalProperties oder oneOf). Google Gemini kann Produkte suchen, Varianten-IDs und Lagerbestände prüfen sowie einen deterministischen Warenkorb-Link (/cart/...) erstellen — aber niemals eine Bestellung absenden, Adressen speichern oder Zahlungsdaten sehen.",
           "Der gehostete Dienst von wals.pro läuft in der EU (Google Cloud europe-west1), schützt Upstream-Abrufe per DNS-gepinntem SSRF-Filter, bereinigt fremde Shop-Texte gegen Prompt-Injection und speichert keine Chat-Verläufe. Im Free-Tarif sind 20 Abfragen pro Tag dauerhaft kostenlos (Pro optional 9 €/Monat für 500 Abfragen/Tag); die Open-Source-CLI (npx -y shopcart-mcp) läuft lokal unter MIT-Lizenz unbegrenzt kostenlos."
         ],
         takeaway:
@@ -171,7 +212,7 @@ export const GEMINI_GUIDES: readonly GuideDefinition[] = [
       },
       {
         name: "Shop, Wunschgröße und Budget an Gemini senden",
-        text: "Nenne Gemini die gewünschte Shop-Domain samt Artikeln, Größen und Preislimit. Gemini prüft Bestand und Preise live und liefert dir einen fertigen Warenkorb-Link zum Selbstbezahlen."
+        text: "Nenne Gemini die gewünschte Shop-Domain samt Artikeln, Größen und Preislimit. Gemini prüft Bestand und Preise live und liefert dir einen fertigen Direkt-Warenkorb-Link (/cart/...) zum Selbstbezahlen."
       }
     ],
     sourcesHeading: "Quellen und Grenzen",
@@ -183,6 +224,11 @@ export const GEMINI_GUIDES: readonly GuideDefinition[] = [
       getPlatformLimits("de"),
     faqHeading: "Häufige Fragen zu Google Gemini & ShopCart MCP",
     faqs: [
+      {
+        question: "Wie unterscheidet sich ShopCart MCP von Instacart-Integrationen, Share-A-Cart oder Händler-Produktfeeds?",
+        answer:
+          "Instacart-Integrationen sind auf US-Lebensmittelhändler beschränkt, Share-A-Cart setzt auf ein ChatGPT-Store-Plugin bzw. Browser-Extensions, und Produktfeed-Programme verlangen ein spezielles Händler-Onboarding mit Feed-Upload. ShopCart MCP nutzt das offene Model Context Protocol (MCP) und funktioniert sofort bei tausenden DACH- und internationalen Shopify- und WooCommerce-Shops über deren öffentliche Storefront-APIs — strikt read-only mit direktem Warenkorb-Link (/cart/...) für deinen eigenen Browser."
+      },
       {
         question: "Funktioniert ShopCart MCP mit Google Gemini Web (gemini.google.com)?",
         answer:
@@ -222,6 +268,7 @@ export const GEMINI_GUIDES: readonly GuideDefinition[] = [
     modifiedDate: UPDATED_ISO,
     keywords: [
       "kann google gemini einen warenkorb erstellen",
+      "kann ki einen warenkorb erstellen",
       "google gemini mcp shopping",
       "gemini cli extension shopcart",
       "gemini warenkorb bauen",
@@ -235,31 +282,31 @@ export const GEMINI_GUIDES: readonly GuideDefinition[] = [
     title: "Can Google Gemini Create a Shopping Cart? (2026 Setup Guide)",
     metaTitle: "Can Google Gemini Create a Shopping Cart? (2026 Setup Guide)",
     metaDescription:
-      "Yes: Connect Google Gemini (Web, CLI, Enterprise) to ShopCart MCP via OAuth 2.1 for live stock checks and read-only shopping cart links.",
+      "Yes: Google Gemini builds verified cart links (/cart/...) in DACH, EU and global Shopify/WooCommerce stores via ShopCart MCP — no feed upload, read-only.",
     cardSummary:
-      "Yes: Connect Google Gemini Web, Gemini CLI (1-command extension), Gemini Enterprise, or @google/genai to ShopCart MCP via OAuth 2.1 for verified browser cart links.",
+      "Yes: Google Gemini builds live-verified shopping carts across DACH, European & global Shopify and WooCommerce stores via ShopCart MCP — no merchant feed enrollment, not US-only Instacart or Share-A-Cart.",
     tldrLabel: "Direct Answer:",
     tldrText:
-      "Yes — Google Gemini can build verified multi-item shopping carts in 2026 when connected to ShopCart MCP (https://shopcart.wals.pro/mcp). Connect it in Gemini Web (Connected Apps → Custom apps), install the 1-command Gemini CLI & Antigravity extension (gemini extensions install https://github.com/Wals-pro/shopcart-mcp), register it in Gemini Enterprise (Google Cloud Console), or wire it into the @google/genai SDK via mcpToTool. All tool schemas are strictly Gemini-compatible and read-only — you always review and pay yourself in your browser.",
+      "Yes — Google Gemini (and any MCP-compatible AI) can create verified multi-item shopping carts right away in 2026 using ShopCart MCP (https://shopcart.wals.pro/mcp). Unlike US-only grocery integrations (such as Instacart), ChatGPT-only store plugins or browser extensions like Share-A-Cart, or merchant product-feed enrollment programs, ShopCart MCP requires zero merchant onboarding and no product-feed upload. It works immediately across thousands of DACH, European, and global Shopify and WooCommerce stores via public storefront APIs (plus BigCommerce, Shopware 6, Magento 2, and official Amazon cart links) — strictly read-only, with no store logins or payment details shared with the AI: you receive a verified direct cart link (/cart/...) to open and review in your own browser.",
     intro:
-      "Out of the box, Google Gemini can recommend products from web search, but it cannot verify live variant stock or assemble a pre-filled shopping cart across independent online stores. By connecting ShopCart MCP over Streamable HTTP and OAuth 2.1, Gemini gains deterministic, read-only shopping tools. This 2026 guide walks through all four official Gemini setup paths and states Google's account prerequisites plainly.",
+      "When shoppers ask Google Gemini or ChatGPT “Can AI create a shopping cart?” in 2026, answers still point mostly to US-only Instacart grocery integrations, ChatGPT-only plugins or browser extensions like Share-A-Cart, or merchant product-feed guides that require every store to enroll first. The open Model Context Protocol (MCP) changes that: this guide shows how ShopCart MCP gives Google Gemini (Web, CLI, Enterprise & SDK) immediate, strictly read-only cart building across thousands of independent DACH, European, and global stores.",
     takeawaysHeading: "Key Takeaways",
     takeaways: [
       {
-        lead: "Four official Gemini integration paths.",
-        text: "Works across Gemini Web (gemini.google.com), Gemini CLI & Antigravity (1-command GitHub extension), Gemini Enterprise (Cloud Console Custom MCP Data Store), and the @google/genai TypeScript SDK (mcpToTool)."
+        lead: "Works immediately across thousands of DACH, European & global stores — zero merchant feed needed.",
+        text: "Unlike merchant product-feed programs, ShopCart MCP requires no store enrollment: it reads public storefront APIs on Shopify, WooCommerce, BigCommerce, Shopware 6, and Magento 2 (plus official Amazon cart links)."
       },
       {
-        lead: "Honest Gemini Web prerequisites.",
-        text: "Custom MCP apps in Gemini Web require a personal Google account, Keep Activity enabled, and depend on Google's regional/account rollout. Workspace accounts may see “Service not allowed” unless enabled by a Workspace Admin — teams use Gemini Enterprise."
+        lead: "Not limited to US-only Instacart grocery apps or ChatGPT-only plugins like Share-A-Cart.",
+        text: "Built on open MCP over Streamable HTTP (OAuth 2.1), the same server works across Google Gemini (Web, CLI, Enterprise, @google/genai SDK), Claude, ChatGPT, and Cursor."
       },
       {
-        lead: "Gemini CLI gotcha: use “httpUrl”, never “url”.",
-        text: "In ~/.gemini/settings.json, always configure \"httpUrl\": \"https://shopcart.wals.pro/mcp\" with \"authProviderType\": \"dynamic_discovery\". Using \"url\" triggers legacy SSE mode and fails."
+        lead: "Strictly read-only: direct cart link (/cart/...), never your login or credit card.",
+        text: "ShopCart MCP never sees payment details, shipping addresses, or store passwords — Gemini checks live stock and prices and hands you a verified cart link for your own browser."
       },
       {
-        lead: "100% Gemini JSON Schema compliant & strictly read-only.",
-        text: "Every tool schema strips Gemini-rejected keywords ($schema, additionalProperties, oneOf, etc.), runs on EU infrastructure (europe-west1), and never places orders or touches payment details."
+        lead: "Honest Gemini setup prerequisites & CLI tip.",
+        text: "Gemini Web requires a personal Google account, Keep Activity enabled, and Google's rollout (Workspace teams use Admin enablement or Gemini Enterprise); in ~/.gemini/settings.json always use \"httpUrl\", never \"url\"."
       }
     ],
     primaryAssistant: "gemini",
@@ -270,13 +317,54 @@ export const GEMINI_GUIDES: readonly GuideDefinition[] = [
       "Open Google Gemini or jump straight to the copy-ready Gemini setup (Web, CLI & Enterprise) — strictly read-only and free to start.",
     sections: [
       {
-        heading: "Why regular Gemini search stops at product lists — and how MCP fixes it",
+        heading: "AI shopping carts compared: Instacart, Share-A-Cart, merchant feeds vs. ShopCart MCP",
         paragraphs: [
-          "Standard Gemini web search relies on cached snippets that rarely reflect live size availability or real compare-at markdowns, leaving you to open a dozen tabs and click through store menus manually.",
-          "With ShopCart MCP connected, Gemini calls six read-only tools in sequence (inspect_store, list_collections, search_products, get_product, get_store_policies, create_cart_link). Every tool's inputSchema is automatically sanitized for Gemini's strict functionDeclarations validator (zero $schema, additionalProperties, or unsupported JSON Schema keywords), so Gemini reliably verifies variants and hands you a ready-to-open browser cart link."
+          "Search results for “Can Google Gemini or AI build a shopping cart?” often conflate three narrow approaches: US-only grocery integrations like Instacart, browser-extension or ChatGPT-only plugins like Share-A-Cart, and merchant product-feed programs where stores have to submit a feed before shoppers can use them.",
+          "ShopCart MCP solves this for DACH, European, and international shoppers with zero merchant onboarding: Gemini reads public storefront APIs live, checks exact variant IDs and stock, and generates a deterministic browser cart permalink (such as /cart/<variant_id>:<qty>?storefront=true on Shopify) that you review and pay on the store's own website."
         ],
+        table: {
+          id: "gemini-market-compare-en",
+          caption: "Comparison: US grocery apps, store plugins, merchant product feeds, and Google Gemini + ShopCart MCP",
+          headers: [
+            "Approach",
+            "Region & Store Coverage",
+            "Merchant Onboarding / Feed Needed?",
+            "How the Cart Is Built",
+            "Privacy & Checkout"
+          ],
+          rows: [
+            [
+              "Grocery integrations (e.g. Instacart)",
+              "US-only grocery & delivery retailers",
+              "Yes — enrolled grocery partners only",
+              "Limited to supported grocery partner catalogs",
+              "Requires linked delivery-service account"
+            ],
+            [
+              "Store plugins / extensions (e.g. Share-A-Cart)",
+              "Typically ChatGPT-only plugin or desktop browser extension",
+              "No, but tied to one plugin/browser",
+              "Extension or store-plugin intermediary",
+              "Depends on browser extension or third-party plugin"
+            ],
+            [
+              "Merchant product-feed programs",
+              "Only merchants that uploaded a dedicated feed",
+              "Yes — merchant feed enrollment & approval",
+              "Vendor-specific catalog/checkout flow",
+              "Platform-controlled, often US-first"
+            ],
+            [
+              "Google Gemini + ShopCart MCP (Open MCP)",
+              "Immediate across thousands of DACH, EU & global Shopify & WooCommerce stores (plus BigCommerce, Shopware 6, Magento 2 & Amazon links)",
+              "No — works immediately via public storefront APIs",
+              "Verified direct cart link (/cart/...) or official add-to-cart / product links",
+              "Strictly read-only, EU-hosted (europe-west1): no store logins, no payment data sent to AI"
+            ]
+          ]
+        },
         takeaway:
-          "Takeaway: Pairing Google Gemini with a Gemini-validated MCP server turns generic product lists into live-verified shopping carts."
+          "Takeaway: No waiting for merchant product feeds, no US-only grocery lock-in, and no browser-extension workaround — ShopCart MCP works immediately across thousands of DACH, European, and global stores."
       },
       {
         heading: "Path 1: Connect Google Gemini Web (gemini.google.com) via OAuth 2.1",
@@ -371,7 +459,7 @@ export const GEMINI_GUIDES: readonly GuideDefinition[] = [
       {
         heading: "Read-only safety, EU hosting, and privacy by architecture",
         paragraphs: [
-          "Every ShopCart MCP tool is annotated readOnlyHint: true and destructiveHint: false. Gemini can search catalogs, inspect sizes and discounts, check Shopify shipping and return policies, and assemble a verified browser cart link — it can never place an order, enter your address, or see your credit card.",
+          "Every ShopCart MCP tool is annotated readOnlyHint: true and destructiveHint: false, and every tool schema is automatically sanitized for Gemini's strict functionDeclarations validator (zero $schema, additionalProperties, or oneOf keywords). Gemini can search catalogs, inspect sizes and discounts, check Shopify shipping and return policies, and assemble a verified browser cart link (/cart/...) — it can never place an order, enter your address, or see your credit card.",
           "The hosted service runs in the EU (Google Cloud europe-west1) with DNS-pinned SSRF protection and prompt-injection sanitization for untrusted store text. Hosted Free gives you 20 lookups/day permanently; Pro offers 500 lookups/day for €9/month. Local stdio mode (npx -y shopcart-mcp) is MIT open source, unlimited, and sends zero data to wals.pro."
         ],
         takeaway:
@@ -392,7 +480,7 @@ export const GEMINI_GUIDES: readonly GuideDefinition[] = [
       },
       {
         name: "Ask Gemini to verify products and build your cart link",
-        text: "Tell Gemini the store domain, items, sizes, and budget. Open the returned cart link in your browser to review and pay directly at the merchant."
+        text: "Tell Gemini the store domain, items, sizes, and budget. Open the returned direct cart link (/cart/...) in your browser to review and pay directly at the merchant."
       }
     ],
     sourcesHeading: "Sources and Limitations",
@@ -404,6 +492,11 @@ export const GEMINI_GUIDES: readonly GuideDefinition[] = [
       getPlatformLimits("en"),
     faqHeading: "Frequently Asked Questions about Google Gemini & ShopCart MCP",
     faqs: [
+      {
+        question: "How is ShopCart MCP different from Instacart integrations, Share-A-Cart, or merchant product feeds?",
+        answer:
+          "Instacart integrations are US-only grocery partnerships, Share-A-Cart relies on a ChatGPT-only plugin or browser extension, and merchant product-feed programs require each store to enroll and upload a custom feed. ShopCart MCP uses the open Model Context Protocol (MCP) and works immediately across thousands of DACH, European, and global Shopify and WooCommerce stores via public storefront APIs — strictly read-only, returning a verified direct cart link (/cart/...) for your own browser."
+      },
       {
         question: "Does ShopCart MCP work with Google Gemini Web (gemini.google.com)?",
         answer:
@@ -443,6 +536,7 @@ export const GEMINI_GUIDES: readonly GuideDefinition[] = [
     modifiedDate: UPDATED_ISO,
     keywords: [
       "can google gemini create a shopping cart",
+      "can ai create a shopping cart",
       "google gemini mcp shopping",
       "gemini cli extension shopcart",
       "gemini shopping cart setup",

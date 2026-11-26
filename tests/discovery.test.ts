@@ -58,6 +58,9 @@ describe("Agent discovery (GEO/AEO): llms.txt, llms-full.txt, robots.txt, sitema
     expect(res.text).toContain("gemini extensions install https://github.com/Wals-pro/shopcart-mcp");
     expect(res.text).toContain("https://shopcart.wals.pro/guides/gemini-warenkorb-erstellen");
     expect(res.text).toContain("https://shopcart.wals.pro/guides/gemini-shopping-cart");
+    expect(res.text).toContain("Instacart");
+    expect(res.text).toContain("Share-A-Cart");
+    expect(res.text).toContain("zero merchant onboarding");
     expect(res.text).toContain("Start Prompt");
     expect(res.text).toMatch(/never (places|place) orders|read-only/i);
     // Brand spelling & no internal keyword numbers in public text
@@ -78,10 +81,6 @@ describe("Agent discovery (GEO/AEO): llms.txt, llms-full.txt, robots.txt, sitema
     for (const guide of GUIDE_DEFINITIONS) {
       expect(res.text).toContain(`https://shopcart.wals.pro${guide.path}`);
     }
-    expect(res.text).toContain("Google Gemini");
-    expect(res.text).toContain("gemini extensions install https://github.com/Wals-pro/shopcart-mcp");
-    expect(res.text).toContain("https://shopcart.wals.pro/guides/gemini-warenkorb-erstellen");
-    expect(res.text).toContain("https://shopcart.wals.pro/guides/gemini-shopping-cart");
     for (const platform of ["Shopify", "WooCommerce", "BigCommerce", "Amazon", "Shopware 6", "Magento 2", "JSON-LD"]) {
       expect(res.text).toContain(platform);
     }
@@ -96,6 +95,9 @@ describe("Agent discovery (GEO/AEO): llms.txt, llms-full.txt, robots.txt, sitema
     expect(res.text).toContain("vertexaisearch.cloud.google.com/oauth-redirect");
     expect(res.text).toContain("https://shopcart.wals.pro/guides/gemini-warenkorb-erstellen");
     expect(res.text).toContain("https://shopcart.wals.pro/guides/gemini-shopping-cart");
+    expect(res.text).toContain("Instacart");
+    expect(res.text).toContain("Share-A-Cart");
+    expect(res.text).toContain("Produktfeed-Upload");
     expect(res.text).not.toMatch(/Wals\.pro|WALS\.PRO/);
     expect(res.text).not.toMatch(/search volume|Suchvolumen|DataForSEO|54[.,]3\s*%|30[.,]4\s*%/i);
   });
