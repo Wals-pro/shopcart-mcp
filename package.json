@@ -9,7 +9,7 @@
   "homepage": "https://shopcart.wals.pro",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Wals-pro/shopcart-mcp.git"
+    "url": "git+https://github.com/Wals-pro/shopcart-mcp.git"
   },
   "keywords": [
     "mcp",
@@ -24,7 +24,7 @@
     "oauth2"
   ],
   "bin": {
-    "shopcart-mcp": "./dist/cli.js"
+    "shopcart-mcp": "dist/cli.js"
   },
   "main": "./dist/cli.js",
   "files": [
@@ -40,6 +40,7 @@
     "build:mcpb": "node scripts/build-mcpb.mjs",
     "dev:stdio": "tsx src/cli.ts",
     "dev:server": "tsx src/server.ts",
+    "prepublishOnly": "npm run build",
     "start": "node dist/server.js",
     "start:stdio": "node dist/cli.js",
     "test": "vitest run",
