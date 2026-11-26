@@ -16,7 +16,9 @@ const GUIDE_DETAIL_ROUTES = [
   "/en/guides/chatgpt-amazon-shopping-cart",
   "/guides/chatgpt-amazon-warenkorb",
   "/en/guides/shopify-mcp-server-comparison",
-  "/guides/shopify-mcp-server-vergleich"
+  "/guides/shopify-mcp-server-vergleich",
+  "/guides/gemini-warenkorb-erstellen",
+  "/guides/gemini-shopping-cart"
 ] as const;
 
 const RECIPROCAL_HREFLANG_PAIRS: ReadonlyArray<readonly [string, string]> = [
@@ -24,7 +26,8 @@ const RECIPROCAL_HREFLANG_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ["/guides/chatgpt-warenkorb-erstellen", "/en/guides/chatgpt-shopify-cart"],
   ["/guides/chatgpt-instant-checkout-alternative", "/en/guides/chatgpt-instant-checkout-alternative"],
   ["/guides/chatgpt-amazon-warenkorb", "/en/guides/chatgpt-amazon-shopping-cart"],
-  ["/guides/shopify-mcp-server-vergleich", "/en/guides/shopify-mcp-server-comparison"]
+  ["/guides/shopify-mcp-server-vergleich", "/en/guides/shopify-mcp-server-comparison"],
+  ["/guides/gemini-warenkorb-erstellen", "/guides/gemini-shopping-cart"]
 ];
 
 const ALL_GUIDE_ROUTES = ["/guides", ...GUIDE_DETAIL_ROUTES] as const;
@@ -249,6 +252,22 @@ describe("SEO & GEO shopping guide pages (/guides, 11 DE/EN detail routes, sitem
     const shopifyCompDe = await request(app).get("/guides/shopify-mcp-server-vergleich").expect(200);
     const theadColsDe = shopifyCompDe.text.match(/<th scope="col">/g) ?? [];
     expect(theadColsDe).toHaveLength(8);
+
+    const geminiDe = await request(app).get("/guides/gemini-warenkorb-erstellen").expect(200);
+    expect(extractTagContent(geminiDe.text, "h1")).toBe(
+      "Kann Google Gemini einen Warenkorb erstellen? (Anleitung 2026)"
+    );
+    expect(geminiDe.text).toContain("gemini extensions install https://github.com/Wals-pro/shopcart-mcp");
+    expect(geminiDe.text).toContain("httpUrl");
+    expect(geminiDe.text).toContain("vertexaisearch.cloud.google.com/oauth-redirect");
+
+    const geminiEn = await request(app).get("/guides/gemini-shopping-cart").expect(200);
+    expect(extractTagContent(geminiEn.text, "h1")).toBe(
+      "Can Google Gemini Create a Shopping Cart? (2026 Setup Guide)"
+    );
+    expect(geminiEn.text).toContain("gemini extensions install https://github.com/Wals-pro/shopcart-mcp");
+    expect(geminiEn.text).toContain("httpUrl");
+    expect(geminiEn.text).toContain("mcpToTool");
   });
 
   it("links all 11 DE + EN guides from /guides and supports ?lang=de and ?lang=en", async () => {

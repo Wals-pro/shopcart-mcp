@@ -3,6 +3,7 @@ import { createAffiliateFeedProvider } from "../adapters/affiliate-feed/index.js
 import { AdapterRegistry } from "../adapters/registry.js";
 import { loadAttributionConfig } from "../attribution/links.js";
 import { registerShoppingTools, type ToolRuntimeContext } from "./tools.js";
+import { installGeminiSchemaSanitizer } from "./schema-sanitize.js";
 
 export const SERVER_INSTRUCTIONS = [
   "ShopCart MCP is an independent read-only shopping assistant for public online storefronts across Amazon, Shopify (incl. Smart-Shopper & UCP), WooCommerce, BigCommerce, Shopware 6, Magento 2 / Adobe Commerce, and Universal Schema.org JSON-LD stores (not affiliated with any platform vendor).",
@@ -22,6 +23,8 @@ export function createShopcartMcpServer(
       instructions: SERVER_INSTRUCTIONS
     }
   );
+
+  installGeminiSchemaSanitizer(server);
 
   registerShoppingTools(server, {
     registry: opts.registry ?? new AdapterRegistry(),

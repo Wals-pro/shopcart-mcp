@@ -231,7 +231,7 @@ export function getComfortFeatures(lang: Lang): ComfortFeature[] {
       {
         id: "connect",
         title: "In zwei Schritten verbunden",
-        text: "Link wird automatisch kopiert, die Connector-Einstellungen von Claude oder ChatGPT öffnen sich. Danach startest du mit einem fertigen Start-Prompt per Klick."
+        text: "Link wird automatisch kopiert, die Einstellungen von Claude, ChatGPT oder Google Gemini öffnen sich. Für die Gemini CLI gibt es zudem eine 1-Befehl-Erweiterung."
       },
       {
         id: "desktop",
@@ -265,7 +265,7 @@ export function getComfortFeatures(lang: Lang): ComfortFeature[] {
     {
       id: "connect",
       title: "Connected in two steps",
-      text: "Your link is copied automatically and the connector settings of Claude or ChatGPT open. After that, a ready-made start prompt is one click away."
+      text: "Your link is copied automatically and the settings of Claude, ChatGPT, or Google Gemini open. Gemini CLI also supports a 1-command extension install."
     },
     {
       id: "desktop",

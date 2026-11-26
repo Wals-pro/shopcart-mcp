@@ -51,7 +51,7 @@ export interface GuideDefinition {
   intro: string;
   takeawaysHeading: string;
   takeaways: Array<{ lead: string; text: string }>;
-  primaryAssistant: "claude" | "chatgpt";
+  primaryAssistant: "claude" | "chatgpt" | "gemini";
   starterPrompt: string;
   ctaHeading: string;
   ctaSubtext: string;
@@ -177,6 +177,34 @@ export const SHOPIFY_MCP_SOURCES_EN: GuideSource[] = [
   {
     label: "Shopify Developer Docs: Migrate from Storefront MCP (UCP)",
     url: "https://shopify.dev/docs/apps/build/storefront-mcp",
+    retrieved: "2026-11-26"
+  }
+];
+
+export const GEMINI_SOURCES_DE: GuideSource[] = [
+  ...SOURCES_DE,
+  {
+    label: "Google Gemini CLI Dokumentation: MCP Server & Extensions",
+    url: "https://github.com/google-gemini/gemini-cli",
+    retrieved: "26.11.2026"
+  },
+  {
+    label: "Google AI for Developers: Gemini API Function Calling & MCP (mcpToTool)",
+    url: "https://ai.google.dev/gemini-api/docs/function-calling",
+    retrieved: "26.11.2026"
+  }
+];
+
+export const GEMINI_SOURCES_EN: GuideSource[] = [
+  ...SOURCES_EN,
+  {
+    label: "Google Gemini CLI Documentation: MCP Servers & Extensions",
+    url: "https://github.com/google-gemini/gemini-cli",
+    retrieved: "2026-11-26"
+  },
+  {
+    label: "Google AI for Developers: Gemini API Function Calling & MCP (mcpToTool)",
+    url: "https://ai.google.dev/gemini-api/docs/function-calling",
     retrieved: "2026-11-26"
   }
 ];

@@ -54,6 +54,10 @@ describe("Agent discovery (GEO/AEO): llms.txt, llms-full.txt, robots.txt, sitema
     for (const guide of GUIDE_DEFINITIONS) {
       expect(res.text).toContain(`https://shopcart.wals.pro${guide.path}`);
     }
+    expect(res.text).toContain("Google Gemini");
+    expect(res.text).toContain("gemini extensions install https://github.com/Wals-pro/shopcart-mcp");
+    expect(res.text).toContain("https://shopcart.wals.pro/guides/gemini-warenkorb-erstellen");
+    expect(res.text).toContain("https://shopcart.wals.pro/guides/gemini-shopping-cart");
     expect(res.text).toContain("Start Prompt");
     expect(res.text).toMatch(/never (places|place) orders|read-only/i);
     // Brand spelling & no internal keyword numbers in public text
@@ -74,6 +78,10 @@ describe("Agent discovery (GEO/AEO): llms.txt, llms-full.txt, robots.txt, sitema
     for (const guide of GUIDE_DEFINITIONS) {
       expect(res.text).toContain(`https://shopcart.wals.pro${guide.path}`);
     }
+    expect(res.text).toContain("Google Gemini");
+    expect(res.text).toContain("gemini extensions install https://github.com/Wals-pro/shopcart-mcp");
+    expect(res.text).toContain("https://shopcart.wals.pro/guides/gemini-warenkorb-erstellen");
+    expect(res.text).toContain("https://shopcart.wals.pro/guides/gemini-shopping-cart");
     for (const platform of ["Shopify", "WooCommerce", "BigCommerce", "Amazon", "Shopware 6", "Magento 2", "JSON-LD"]) {
       expect(res.text).toContain(platform);
     }
@@ -83,6 +91,11 @@ describe("Agent discovery (GEO/AEO): llms.txt, llms-full.txt, robots.txt, sitema
     expect(res.text).not.toMatch(/all 4 tools|four tools|4 Read-Only Tools/i);
     expect(res.text).toContain("Kauft die KI über ShopCart automatisch für mich ein?");
     expect(res.text).toContain("Does ShopCart place orders or charge my card automatically?");
+    expect(res.text).toContain("Funktioniert ShopCart MCP mit Google Gemini?");
+    expect(res.text).toContain("Does ShopCart MCP work with Google Gemini?");
+    expect(res.text).toContain("vertexaisearch.cloud.google.com/oauth-redirect");
+    expect(res.text).toContain("https://shopcart.wals.pro/guides/gemini-warenkorb-erstellen");
+    expect(res.text).toContain("https://shopcart.wals.pro/guides/gemini-shopping-cart");
     expect(res.text).not.toMatch(/Wals\.pro|WALS\.PRO/);
     expect(res.text).not.toMatch(/search volume|Suchvolumen|DataForSEO|54[.,]3\s*%|30[.,]4\s*%/i);
   });

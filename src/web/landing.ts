@@ -375,6 +375,9 @@ function renderLauncher(config: AppConfig, lang: Lang, slot: "hero" | "demo"): s
   const connectHintChatgpt = de
     ? "Link kopiert ✓ – in ChatGPT: Einstellungen → Connectors → eigenen Connector hinzufügen (Plus/Pro)."
     : "Link copied ✓ – in ChatGPT: Settings → Connectors → add a custom connector (Plus/Pro).";
+  const connectHintGemini = de
+    ? "Link kopiert ✓ – in Google Gemini: Einstellungen → Verbundene Apps → Eigene Apps → App hinzufügen (persönliches Google-Konto & Aktivitäten speichern aktiv)."
+    : "Link copied ✓ – in Google Gemini: Settings → Connected Apps → Custom apps → Add a custom app (personal Google account & Keep Activity enabled).";
   const connectHintFailed = de
     ? "Kopieren hat nicht geklappt – bitte den Link unten manuell kopieren."
     : "Copying didn't work – please copy the link below manually.";
@@ -396,12 +399,15 @@ function renderLauncher(config: AppConfig, lang: Lang, slot: "hero" | "demo"): s
         <span class="launch-step-num" aria-hidden="true">1</span>
         <span class="launch-step-title">${de ? "Einmalig verbinden" : "Connect once"}</span>
       </div>
-      <div class="launch-grid">
+      <div class="launch-grid launch-grid-3">
         <a class="btn-launch btn-launch-primary" data-connect="claude" data-connect-url="${escapeHtml(mcpUrl)}" data-connect-hint="${escapeHtml(connectHintClaude)}" data-connect-failed="${escapeHtml(connectHintFailed)}" href="${CONNECT_SETTINGS_URLS.claude}" target="_blank" rel="noopener">
           <span>${de ? "Mit Claude verbinden" : "Connect to Claude"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
         </a>
         <a class="btn-launch btn-launch-primary" data-connect="chatgpt" data-connect-url="${escapeHtml(mcpUrl)}" data-connect-hint="${escapeHtml(connectHintChatgpt)}" data-connect-failed="${escapeHtml(connectHintFailed)}" href="${CONNECT_SETTINGS_URLS.chatgpt}" target="_blank" rel="noopener">
           <span>${de ? "Mit ChatGPT verbinden" : "Connect to ChatGPT"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
+        </a>
+        <a class="btn-launch btn-launch-primary" data-connect="gemini" data-connect-url="${escapeHtml(mcpUrl)}" data-connect-hint="${escapeHtml(connectHintGemini)}" data-connect-failed="${escapeHtml(connectHintFailed)}" href="${CONNECT_SETTINGS_URLS.gemini}" target="_blank" rel="noopener">
+          <span>${de ? "Mit Gemini verbinden" : "Connect to Gemini"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
         </a>
       </div>
       <p class="connect-status" data-connect-status role="status" aria-live="polite">${
@@ -542,12 +548,12 @@ export function renderLandingPage(config: AppConfig, lang: Lang): string {
   const promptHead = startPromptHead(config, lang);
 
   const title = de
-    ? "ShopCart – KI Shopping Assistent: Warenkorb mit Claude & ChatGPT füllen"
-    : "ShopCart – AI shopping assistant: let Claude & ChatGPT fill your cart";
+    ? "ShopCart – KI Shopping Assistent für Claude, ChatGPT & Gemini"
+    : "ShopCart – AI Shopping Assistant for Claude, ChatGPT & Gemini";
 
   const description = de
-    ? "Sag Claude oder ChatGPT, was du suchst: ShopCart findet echte Produkte, Größen und Preise in Online-Shops und gibt dir einen fertigen Warenkorb-Link. Du prüfst und bezahlst selbst. Kostenlos starten."
-    : "Tell Claude or ChatGPT what you're looking for: ShopCart finds real products, sizes, and prices in online stores and hands you a ready-to-review cart link. You stay in control of checkout. Free to start.";
+    ? "Sag Claude, ChatGPT oder Google Gemini, was du suchst: ShopCart findet echte Produkte, Größen und Preise in Online-Shops und liefert einen Warenkorb-Link."
+    : "Tell Claude, ChatGPT, or Google Gemini what you need: ShopCart verifies live prices and stock in online stores and returns a ready-to-review cart link.";
 
   const cursorSnippet = JSON.stringify({ mcpServers: { shopcart: { url: mcpUrl } } }, null, 2);
   const localSnippet = JSON.stringify(
@@ -556,6 +562,21 @@ export function renderLandingPage(config: AppConfig, lang: Lang): string {
     2
   );
   const claudeCodeCmd = `claude mcp add --transport http shopcart ${mcpUrl}`;
+  const geminiExtCmd = `gemini extensions install ${config.repoUrl}`;
+  const geminiCliCmd = `gemini mcp add --transport http --scope user shopcart ${mcpUrl}`;
+  const geminiSettingsSnippet = JSON.stringify(
+    {
+      mcpServers: {
+        shopcart: {
+          httpUrl: mcpUrl,
+          authProviderType: "dynamic_discovery"
+        }
+      }
+    },
+    null,
+    2
+  );
+  const geminiGuidePath = de ? "/guides/gemini-warenkorb-erstellen" : "/guides/gemini-shopping-cart";
   const installLinks = buildInstallLinks(config);
   const copyLabel = de ? "Kopieren" : "Copy";
   const copiedLabel = de ? "Kopiert ✓" : "Copied ✓";
@@ -787,8 +808,8 @@ ${
 
         <h1 class="hero-title">${
           de
-            ? `Lass Claude &amp; ChatGPT <span class="title-accent">deinen Warenkorb füllen.</span>`
-            : `Let Claude &amp; ChatGPT <span class="title-accent">fill your shopping cart.</span>`
+            ? `Lass Claude, ChatGPT &amp; Gemini <span class="title-accent">deinen Warenkorb füllen.</span>`
+            : `Let Claude, ChatGPT &amp; Gemini <span class="title-accent">fill your shopping cart.</span>`
         }</h1>
 
         <p class="hero-lead">${
@@ -804,6 +825,19 @@ ${
           <li>${de ? "Keine Zahlungsdaten bei uns" : "No payment details with us"}</li>
           <li>${de ? "Kostenlos starten" : "Free to start"}</li>
         </ul>
+
+        <a class="hero-platforms hero-clients" href="#setup">
+          <span class="hero-platforms-label">${de ? "Für deine KI" : "Works in"}</span>
+          <span class="hero-platforms-list">
+            <span class="pill-featured">Claude</span>
+            <span class="pill-featured">ChatGPT</span>
+            <span class="pill-featured">Google Gemini</span>
+            <span>Gemini CLI</span>
+            <span>Cursor</span>
+            <span>Claude Code</span>
+            <span>Perplexity</span>
+          </span>
+        </a>
 
         <a class="hero-platforms" href="#shops">
           <span class="hero-platforms-label">${de ? "Funktioniert mit" : "Works with"}</span>
@@ -836,8 +870,8 @@ ${
         }</h2>
         <p class="section-sub">${
           de
-            ? "So sieht KI-Shopping mit ChatGPT oder Claude aus: Du schreibst einen Satz, deine KI sucht, prüft Größe und Preis und legt alles in den Warenkorb."
-            : "This is what ChatGPT shopping or shopping with Claude looks like: you write one sentence, your AI searches, checks size and price, and fills the cart."
+            ? "So sieht KI-Shopping mit Claude, ChatGPT oder Google Gemini aus: Du schreibst einen Satz, deine KI sucht, prüft Größe und Preis und legt alles in den Warenkorb."
+            : "This is what shopping with Claude, ChatGPT, or Google Gemini looks like: you write one sentence, your AI searches, checks size and price, and fills the cart."
         }</p>
       </div>
 
@@ -1009,7 +1043,7 @@ ${
           </div>
           <ul class="feat-list">
             <li>${de ? `${config.freeDailyLimit} Shop-Abfragen pro Tag` : `${config.freeDailyLimit} store lookups per day`}</li>
-            <li>${de ? "Für Claude, ChatGPT und andere KI-Tools" : "For Claude, ChatGPT, and other AI tools"}</li>
+            <li>${de ? "Für Claude, ChatGPT, Google Gemini und andere KI-Tools" : "For Claude, ChatGPT, Google Gemini, and other AI tools"}</li>
             <li>${de ? "Keine Kreditkarte nötig" : "No credit card needed"}</li>
           </ul>
           <a class="btn-secondary w-full" href="#start">${de ? "Kostenlos starten" : "Start free"}</a>
@@ -1110,13 +1144,16 @@ ${
         }</span>
       </div>
 
-      <div class="tabs-card" data-tabs-root>
+      <div class="tabs-card" id="setup" data-tabs-root>
         <div class="tablist" role="tablist" aria-label="${de ? "MCP-Clients" : "MCP clients"}">
           <button type="button" role="tab" id="tab-claude-ai" class="tab-btn" aria-selected="true" tabindex="0">
             <span>Claude.ai</span><span class="tab-tag">OAuth 2.1</span>
           </button>
           <button type="button" role="tab" id="tab-chatgpt" class="tab-btn" aria-selected="false" tabindex="-1">
             <span>ChatGPT</span><span class="tab-tag">Connectors</span>
+          </button>
+          <button type="button" role="tab" id="tab-gemini" class="tab-btn" aria-selected="false" tabindex="-1">
+            <span>Google Gemini</span><span class="tab-tag">Web · CLI</span>
           </button>
           <button type="button" role="tab" id="tab-claude-code" class="tab-btn" aria-selected="false" tabindex="-1">
             <span>Claude Code</span><span class="tab-tag">CLI</span>
@@ -1182,6 +1219,90 @@ ${
                   <button type="button" class="copy-mini" data-copy-target="code-chatgpt" data-copied-label="${copiedLabel}">${copyLabel}</button>
                 </div>
                 <pre><code id="code-chatgpt">${escapeHtml(mcpUrl)}</code></pre>
+              </div>
+            </div>
+          </div>
+
+          <div role="tabpanel" aria-labelledby="tab-gemini" hidden="until-found">
+            <div class="tab-panel-inner tab-panel-gemini">
+              <div class="gemini-blocks">
+                <div class="gemini-block">
+                  <h3>${de ? "1. Gemini Web (gemini.google.com)" : "1. Gemini Web (gemini.google.com)"}</h3>
+                  <ol class="setup-steps">
+                    <li><span class="step-badge">1</span><span>${
+                      de
+                        ? "In <strong>gemini.google.com</strong> öffnen: <strong>Einstellungen → Verbundene Apps → Eigene Apps → App hinzufügen</strong> (oder zum Testen <code>gemini.google.com/devmode</code>)."
+                        : "Open <strong>gemini.google.com</strong> → <strong>Settings → Connected Apps → Custom apps → Add a custom app</strong> (or test via <code>gemini.google.com/devmode</code>)."
+                    }</span></li>
+                    <li><span class="step-badge">2</span><span>${
+                      de
+                        ? "MCP-Server-URL einfügen und per OAuth 2.1 anmelden (CIMD über <code>accountlinking.google.com</code>)."
+                        : "Paste the MCP server URL and complete OAuth 2.1 sign-in (CIMD via <code>accountlinking.google.com</code>)."
+                    }</span></li>
+                  </ol>
+                  <p class="gemini-prereq-note">${
+                    de
+                      ? "<strong>Voraussetzungen:</strong> Persönliches Google-Konto (bei Google-Workspace-Konten kann „Service not allowed“ erscheinen, solange der Workspace-Admin es nicht freigibt – Teams nutzen Gemini Enterprise), <strong>Aktivitäten speichern</strong> (Keep Activity) aktiviert und abhängig vom Google-Rollout."
+                      : "<strong>Prerequisites:</strong> Personal Google account (Google Workspace accounts may show “Service not allowed” unless enabled by a Workspace Admin — teams use Gemini Enterprise), <strong>Keep Activity</strong> enabled, and subject to Google's regional/account rollout."
+                  }</p>
+                </div>
+
+                <div class="gemini-block">
+                  <h3>${de ? "2. Gemini CLI &amp; Antigravity" : "2. Gemini CLI &amp; Antigravity"}</h3>
+                  <p class="gemini-block-note">${
+                    de
+                      ? "1-Befehl-Installation als offizielle GitHub-Erweiterung oder direkt per <code>gemini mcp add</code>. Wichtig für <code>~/.gemini/settings.json</code>: unbedingt <code>\"httpUrl\"</code> verwenden — nicht <code>\"url\"</code> (sonst erwartet die Gemini CLI Legacy-SSE)."
+                      : "1-command install via the GitHub extension or directly with <code>gemini mcp add</code>. Important for <code>~/.gemini/settings.json</code>: always use <code>\"httpUrl\"</code> — never <code>\"url\"</code> (Gemini CLI treats <code>\"url\"</code> as legacy SSE)."
+                  }</p>
+                </div>
+
+                <div class="gemini-block">
+                  <h3>${de ? "3. Gemini Enterprise &amp; @google/genai SDK" : "3. Gemini Enterprise &amp; @google/genai SDK"}</h3>
+                  <p class="gemini-block-note">${
+                    de
+                      ? `<strong>Google Cloud Console (Gemini Enterprise):</strong> Custom MCP Server Data Store mit Streamable HTTP (<code>${escapeHtml(mcpUrl)}</code>), OAuth-2.0-Redirect-URI <code>https://vertexaisearch.cloud.google.com/oauth-redirect</code> und Scope <code>mcp:read</code>.`
+                      : `<strong>Google Cloud Console (Gemini Enterprise):</strong> Custom MCP Server Data Store using Streamable HTTP (<code>${escapeHtml(mcpUrl)}</code>), OAuth 2.0 Redirect URI <code>https://vertexaisearch.cloud.google.com/oauth-redirect</code>, and scope <code>mcp:read</code>.`
+                  }</p>
+                  <p class="gemini-block-note">${
+                    de
+                      ? `<strong>TypeScript SDK:</strong> Kombiniere <code>mcpToTool(mcpClient)</code> aus <code>@google/genai</code> mit <code>StreamableHTTPClientTransport</code> aus <code>@modelcontextprotocol/sdk</code>. <a class="gemini-guide-link" href="${geminiGuidePath}">Ausführliche Gemini-Anleitung lesen →</a>`
+                      : `<strong>TypeScript SDK:</strong> Combine <code>mcpToTool(mcpClient)</code> from <code>@google/genai</code> with <code>StreamableHTTPClientTransport</code> from <code>@modelcontextprotocol/sdk</code>. <a class="gemini-guide-link" href="${geminiGuidePath}">Read the full Gemini setup guide →</a>`
+                  }</p>
+                </div>
+              </div>
+
+              <div class="gemini-code-stack">
+                <div class="code-card">
+                  <div class="code-head">
+                    <span>Gemini Web · Streamable HTTP URL</span>
+                    <button type="button" class="copy-mini" data-copy-target="code-gemini-web" data-copied-label="${copiedLabel}">${copyLabel}</button>
+                  </div>
+                  <pre><code id="code-gemini-web">${escapeHtml(mcpUrl)}</code></pre>
+                </div>
+
+                <div class="code-card">
+                  <div class="code-head">
+                    <span>Gemini CLI Extension (1 command)</span>
+                    <button type="button" class="copy-mini" data-copy-target="code-gemini-ext" data-copied-label="${copiedLabel}">${copyLabel}</button>
+                  </div>
+                  <pre class="code-wrap"><code id="code-gemini-ext">${escapeHtml(geminiExtCmd)}</code></pre>
+                </div>
+
+                <div class="code-card">
+                  <div class="code-head">
+                    <span>Gemini CLI · mcp add</span>
+                    <button type="button" class="copy-mini" data-copy-target="code-gemini-cli" data-copied-label="${copiedLabel}">${copyLabel}</button>
+                  </div>
+                  <pre class="code-wrap"><code id="code-gemini-cli">${escapeHtml(geminiCliCmd)}</code></pre>
+                </div>
+
+                <div class="code-card">
+                  <div class="code-head">
+                    <span>~/.gemini/settings.json (httpUrl)</span>
+                    <button type="button" class="copy-mini" data-copy-target="code-gemini-settings" data-copied-label="${copiedLabel}">${copyLabel}</button>
+                  </div>
+                  <pre><code id="code-gemini-settings">${escapeHtml(geminiSettingsSnippet)}</code></pre>
+                </div>
               </div>
             </div>
           </div>
@@ -1334,6 +1455,7 @@ ${
 
       <div class="dev-links">
         <a class="btn-secondary" href="${escapeHtml(config.repoUrl)}" target="_blank" rel="noopener noreferrer">GitHub · MIT</a>
+        <a class="btn-secondary" href="${escapeHtml(`${config.repoUrl}/blob/main/gemini-extension.json`)}" target="_blank" rel="noopener noreferrer">gemini-extension.json</a>
         <a class="btn-secondary" href="${escapeHtml(`${config.repoUrl}/blob/main/server.json`)}" target="_blank" rel="noopener noreferrer">server.json</a>
         <a class="btn-secondary" href="/.well-known/mcp.json">mcp.json</a>
         <a class="btn-secondary" href="/llms.txt">llms.txt</a>
