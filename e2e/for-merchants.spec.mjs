@@ -121,9 +121,13 @@ async function verifyViewport({ browser, origin, route, lang, viewportName, view
     pageErrors.push(String(err));
   });
   page.on("request", (req) => {
-    const url = req.url();
-    if (url.includes("googletagmanager.com") || url.includes("google-analytics.com")) {
-      thirdPartyAnalyticsRequests.push(url);
+    try {
+      const parsed = new URL(req.url());
+      if (parsed.origin !== origin) {
+        thirdPartyAnalyticsRequests.push(parsed.href);
+      }
+    } catch {
+      // ignore non-HTTP schemes such as data:
     }
   });
 
