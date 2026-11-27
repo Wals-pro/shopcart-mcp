@@ -5,7 +5,10 @@ import { createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import {
   createProCheckoutSession,
+  extractSubscriptionPeriodEnd,
+  processStripeWebhook,
   resolveStripeLocale,
+  StripeWebhookSignatureError,
   type BillingStripeClient
 } from "../src/billing/stripe.js";
 import { createCsrfPair, hashPassword, sha256Hex } from "../src/auth/crypto.js";
@@ -495,5 +498,303 @@ describe("Stripe checkout polish (locale + allow_promotion_codes)", () => {
       duplicate: true,
       type: "customer.subscription.deleted"
     });
+  });
+
+  it("extracts current_period_end across basil+/endive (single & multi-item max), legacy pre-basil, and invalid payloads", () => {
+    const t1 = 1800000000;
+    const t2 = 1805000000;
+
+    // 1. Basil+/endive multi-item subscription -> picks max item current_period_end
+    const basilSub = {
+      id: "sub_basil_1",
+      items: {
+        object: "list",
+        data: [
+          { id: "si_1", current_period_end: t1 },
+          { id: "si_2", current_period_end: t2 }
+        ]
+      }
+    } as unknown as Stripe.Subscription;
+    expect(extractSubscriptionPeriodEnd(basilSub)?.getTime()).toBe(t2 * 1000);
+
+    // 2. Legacy pre-basil subscription (top-level current_period_end, empty items)
+    const legacySub = {
+      id: "sub_legacy_1",
+      current_period_end: t1,
+      items: { object: "list", data: [] }
+    } as unknown as Stripe.Subscription;
+    expect(extractSubscriptionPeriodEnd(legacySub)?.getTime()).toBe(t1 * 1000);
+
+    // 3. Missing / invalid / zero / negative / NaN period end -> null
+    const badSub = {
+      id: "sub_bad_1",
+      current_period_end: -5,
+      items: {
+        object: "list",
+        data: [
+          { id: "si_nan", current_period_end: Number.NaN },
+          { id: "si_zero", current_period_end: 0 }
+        ]
+      }
+    } as unknown as Stripe.Subscription;
+    expect(extractSubscriptionPeriodEnd(badSub)).toBeNull();
+  });
+
+  it("verifies Stripe 23 HMAC signatures and processes checkout.session.completed, basil+ & legacy customer.subscription.updated, and invoice.payment_failed", async () => {
+    const webhookSecret = "whsec_test_stripe23_full_coverage_secret";
+    const config = loadConfig({
+      APP_ORIGIN: "https://shopcart.wals.pro",
+      SESSION_SECRET: "e".repeat(40),
+      STRIPE_SECRET_KEY: "sk_test_dummy",
+      STRIPE_WEBHOOK_SECRET: webhookSecret,
+      STRIPE_PRO_PRICE_ID: "price_pro_eur_9"
+    });
+    const store = new MemoryStore();
+    const user = makeUser({
+      id: "user_wh_1",
+      email: "webhook@example.de",
+      plan: "free",
+      status: "active",
+      stripeCustomerId: "cus_wh_1",
+      stripeSubscriptionId: null,
+      currentPeriodEnd: null
+    });
+    await store.createUser(user);
+
+    const app = createApp({ config, store });
+    const stripeHelper = new Stripe("sk_test_dummy");
+
+    const sign = (eventObj: Record<string, unknown>) => {
+      const payload = JSON.stringify(eventObj);
+      const sig = stripeHelper.webhooks.generateTestHeaderString({
+        payload,
+        secret: webhookSecret
+      });
+      return { payload, sig };
+    };
+
+    // 1. Missing signature -> StripeWebhookSignatureError / HTTP 400
+    await expect(
+      processStripeWebhook(Buffer.from("{}"), undefined, config, store)
+    ).rejects.toBeInstanceOf(StripeWebhookSignatureError);
+    await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .send("{}")
+      .expect(400);
+
+    // 2. checkout.session.completed activates Pro + duplicate is idempotent
+    const checkoutEv = sign({
+      id: "evt_checkout_1",
+      object: "event",
+      api_version: "2026-11-18.endive",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_test_1",
+          object: "checkout.session",
+          client_reference_id: user.id,
+          customer: "cus_wh_1",
+          subscription: "sub_wh_1",
+          metadata: { user_id: user.id }
+        }
+      }
+    });
+    const rCheckout = await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", checkoutEv.sig)
+      .send(checkoutEv.payload)
+      .expect(200);
+    expect(rCheckout.body).toEqual({ received: true, type: "checkout.session.completed" });
+    let u = (await store.getUserById(user.id))!;
+    expect(u.plan).toBe("pro");
+    expect(u.status).toBe("active");
+    expect(u.stripeSubscriptionId).toBe("sub_wh_1");
+
+    const rCheckoutDup = await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", checkoutEv.sig)
+      .send(checkoutEv.payload)
+      .expect(200);
+    expect(rCheckoutDup.body).toEqual({
+      received: true,
+      duplicate: true,
+      type: "checkout.session.completed"
+    });
+
+    // 3. customer.subscription.updated (basil+/endive format: items.data[].current_period_end)
+    const futureSec = Math.floor(Date.now() / 1000) + 7 * 24 * 3600;
+    const pastSec = Math.floor(Date.now() / 1000) - 3600;
+
+    // 3a. trialing with multi-item max
+    const subTrial = sign({
+      id: "evt_sub_trial_basil",
+      object: "event",
+      api_version: "2026-11-18.endive",
+      type: "customer.subscription.updated",
+      data: {
+        object: {
+          id: "sub_wh_1",
+          object: "subscription",
+          customer: "cus_wh_1",
+          status: "trialing",
+          metadata: { user_id: user.id },
+          items: {
+            object: "list",
+            data: [
+              { id: "si_a", current_period_end: futureSec - 100 },
+              { id: "si_b", current_period_end: futureSec }
+            ]
+          }
+        }
+      }
+    });
+    await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", subTrial.sig)
+      .send(subTrial.payload)
+      .expect(200);
+    u = (await store.getUserById(user.id))!;
+    expect(u.plan).toBe("pro");
+    expect(u.status).toBe("trialing");
+    expect(u.currentPeriodEnd?.getTime()).toBe(futureSec * 1000);
+
+    // 3b. past_due still in grace period (basil+ item period end in future -> stays pro)
+    const subGrace = sign({
+      id: "evt_sub_pastdue_grace_basil",
+      object: "event",
+      api_version: "2026-11-18.endive",
+      type: "customer.subscription.updated",
+      data: {
+        object: {
+          id: "sub_wh_1",
+          object: "subscription",
+          customer: "cus_wh_1",
+          status: "past_due",
+          metadata: { user_id: user.id },
+          items: { object: "list", data: [{ id: "si_a", current_period_end: futureSec }] }
+        }
+      }
+    });
+    await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", subGrace.sig)
+      .send(subGrace.payload)
+      .expect(200);
+    u = (await store.getUserById(user.id))!;
+    expect(u.plan).toBe("pro");
+    expect(u.status).toBe("past_due");
+
+    // 3c. past_due with expired period end (basil+ -> downgraded to free)
+    const subExpired = sign({
+      id: "evt_sub_pastdue_expired_basil",
+      object: "event",
+      api_version: "2026-11-18.endive",
+      type: "customer.subscription.updated",
+      data: {
+        object: {
+          id: "sub_wh_1",
+          object: "subscription",
+          customer: "cus_wh_1",
+          status: "past_due",
+          metadata: { user_id: user.id },
+          items: { object: "list", data: [{ id: "si_a", current_period_end: pastSec }] }
+        }
+      }
+    });
+    await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", subExpired.sig)
+      .send(subExpired.payload)
+      .expect(200);
+    u = (await store.getUserById(user.id))!;
+    expect(u.plan).toBe("free");
+    expect(u.status).toBe("past_due");
+    expect(u.currentPeriodEnd?.getTime()).toBe(pastSec * 1000);
+
+    // 4. Legacy pre-basil customer.subscription.updated (top-level current_period_end)
+    const subLegacy = sign({
+      id: "evt_sub_active_legacy",
+      object: "event",
+      api_version: "2025-02-24.acacia",
+      type: "customer.subscription.updated",
+      data: {
+        object: {
+          id: "sub_wh_1",
+          object: "subscription",
+          customer: "cus_wh_1",
+          status: "past_due",
+          current_period_end: futureSec,
+          metadata: { user_id: user.id },
+          items: { object: "list", data: [] }
+        }
+      }
+    });
+    await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", subLegacy.sig)
+      .send(subLegacy.payload)
+      .expect(200);
+    u = (await store.getUserById(user.id))!;
+    expect(u.plan).toBe("pro");
+    expect(u.status).toBe("past_due");
+    expect(u.currentPeriodEnd?.getTime()).toBe(futureSec * 1000);
+
+    // 5. Missing period_end -> currentPeriodEnd = null
+    const subNoPeriod = sign({
+      id: "evt_sub_active_noperiod",
+      object: "event",
+      api_version: "2026-11-18.endive",
+      type: "customer.subscription.updated",
+      data: {
+        object: {
+          id: "sub_wh_1",
+          object: "subscription",
+          customer: "cus_wh_1",
+          status: "active",
+          metadata: { user_id: user.id },
+          items: { object: "list", data: [] }
+        }
+      }
+    });
+    await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", subNoPeriod.sig)
+      .send(subNoPeriod.payload)
+      .expect(200);
+    u = (await store.getUserById(user.id))!;
+    expect(u.plan).toBe("pro");
+    expect(u.status).toBe("active");
+    expect(u.currentPeriodEnd).toBeNull();
+
+    // 6. invoice.payment_failed -> marks user past_due by stripeCustomerId
+    const invFailed = sign({
+      id: "evt_inv_failed_1",
+      object: "event",
+      api_version: "2026-11-18.endive",
+      type: "invoice.payment_failed",
+      data: {
+        object: {
+          id: "in_test_1",
+          object: "invoice",
+          customer: "cus_wh_1"
+        }
+      }
+    });
+    await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", invFailed.sig)
+      .send(invFailed.payload)
+      .expect(200);
+    u = (await store.getUserById(user.id))!;
+    expect(u.status).toBe("past_due");
   });
 });

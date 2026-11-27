@@ -107,6 +107,34 @@ export async function createBillingPortalSession(
   return { url: session.url };
 }
 
+/**
+ * Extract subscription period end across both Stripe API >= 2025-03-31.basil
+ * (`items.data[].current_period_end`) and legacy pre-basil webhook payloads
+ * (top-level `current_period_end`).
+ */
+export function extractSubscriptionPeriodEnd(sub: Stripe.Subscription): Date | null {
+  const items = Array.isArray(sub.items?.data) ? sub.items.data : [];
+  let maxItemEnd = 0;
+  for (const item of items) {
+    const candidate: unknown = item?.current_period_end;
+    if (typeof candidate === "number" && Number.isFinite(candidate) && candidate > maxItemEnd) {
+      maxItemEnd = candidate;
+    }
+  }
+  if (maxItemEnd > 0) {
+    return new Date(maxItemEnd * 1000);
+  }
+
+  // Fallback for webhook endpoints pinned to pre-2025-03-31.basil API versions
+  const legacyEnd: unknown = (sub as unknown as { current_period_end?: unknown })
+    .current_period_end;
+  if (typeof legacyEnd === "number" && Number.isFinite(legacyEnd) && legacyEnd > 0) {
+    return new Date(legacyEnd * 1000);
+  }
+
+  return null;
+}
+
 function mapStripeSubscriptionState(
   subStatus: string,
   periodEnd: Date | null,
@@ -189,7 +217,7 @@ export async function processStripeWebhook(
           (customerId ? await store.getUserByStripeCustomerId(customerId) : null);
 
         if (user) {
-          const periodEnd = sub.current_period_end ? new Date(sub.current_period_end * 1000) : null;
+          const periodEnd = extractSubscriptionPeriodEnd(sub);
           const mapped = mapStripeSubscriptionState(sub.status, periodEnd);
           await store.updateUser(user.id, {
             plan: mapped.plan,
