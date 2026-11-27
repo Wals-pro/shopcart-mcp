@@ -99,7 +99,7 @@ const CORE_GUIDES: readonly GuideDefinition[] = [
       {
         heading: "So baut dir Claude in vier Schritten einen echten Warenkorb",
         paragraphs: [
-          "ShopCart MCP nutzt das offene Model Context Protocol (MCP), um Claude sechs klar begrenzte Lese-Werkzeuge bereitzustellen. Vier davon bilden den Weg zum Warenkorb, zwei weitere lesen in Shopify-Shops Sale-Kollektionen sowie Versand- und Rückgaberegeln. Statt HTML-Seiten zu raten, ruft der Server strukturierte Katalogdaten direkt vom jeweiligen Shop ab und erzeugt einen offiziellen Warenkorb-Permalink."
+          "ShopCart MCP nutzt das offene Model Context Protocol (MCP), um Claude zwölf klar begrenzte Lese-Werkzeuge bereitzustellen — von Preisvergleich, Deals und Secondhand-Suche über Shop-Suche, Sale-Kollektionen und Versand-/Rückgaberegeln bis zum geprüften Warenkorb-Link. Statt HTML-Seiten zu raten, ruft der Server strukturierte Katalogdaten direkt vom jeweiligen Shop ab und erzeugt einen offiziellen Warenkorb-Permalink."
         ],
         orderedSteps: [
           {

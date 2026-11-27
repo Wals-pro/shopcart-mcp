@@ -291,16 +291,18 @@ export function createApp(deps: CreateAppDeps): Express {
 
   app.get("/.well-known/security.txt", (_req, res) => {
     res.setHeader("Cache-Control", "public, max-age=3600");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.status(200).type("text/plain; charset=utf-8").send(renderSecurityTxt(config));
   });
 
   app.get("/.well-known/mcp.json", (_req, res) => {
     res.setHeader("Cache-Control", "public, max-age=300");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.status(200).json({
       name: "io.github.Wals-pro/shopcart-mcp",
       title: "ShopCart MCP",
       description:
-        "Search Shopify, WooCommerce, BigCommerce, Shopware 6 & Magento 2 stores, verify variants, prices, and policies, and create Shopify and Amazon cart links from your AI assistant. Read-only.",
+        "Read-only agentic shopping MCP: compare prices across regional portals, search 16 second-hand & refurbished marketplaces, hunt deals & promo codes, discover verified online stores, inspect live variants & policies, and build browser cart links.",
       version: config.version,
       websiteUrl: config.appOrigin,
       endpoint: `${config.appOrigin}/mcp`,

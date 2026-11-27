@@ -5,6 +5,7 @@ dist
 .env
 .env.*
 tests
+qa/
 coverage
 *.log
 *.pem

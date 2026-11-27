@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,11 +27,12 @@ const FIXED_DOS_DATE = ((2026 - 1980) << 9) | (1 << 5) | 1;
  * @returns {Buffer}
  */
 export function createZipBuffer(entries) {
+  const sortedEntries = [...entries].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const localParts = [];
   const centralParts = [];
   let offset = 0;
 
-  for (const entry of entries) {
+  for (const entry of sortedEntries) {
     const nameBuf = Buffer.from(entry.name, "utf8");
     const rawData = entry.data;
     const crc = zlib.crc32(rawData) >>> 0;
@@ -114,7 +116,7 @@ export function createMcpbManifest(version) {
     display_name: "ShopCart MCP",
     version,
     description:
-      "Search Shopify, WooCommerce, Amazon, BigCommerce, Shopware 6, Magento 2 & JSON-LD stores, browse deals, inspect variants, and build cart links — local & zero-auth.",
+      "Read-only shopping MCP: price comparison, deals, 16 secondhand/refurbished marketplaces, store discovery & verified cart links — local & zero-auth.",
     long_description: [
       "Connect Claude Desktop directly to public Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2, Universal JSON-LD storefronts, and Amazon marketplaces with zero login, zero API keys required for core features, and zero telemetry.",
       "",
@@ -125,10 +127,10 @@ export function createMcpbManifest(version) {
       "- `search_products` — Search public product catalogs across supported storefronts (or Amazon via optional PA-API/Keepa) with availability, price, and discount sorting (`discount_desc`, `price_asc`, `price_desc`).",
       "- `get_product` — Fetch sanitized product details, options, images, stock, compare-at discounts, and exact variant/SKU IDs or Amazon ASINs (plus optional verified thumbnail via `include_thumbnail=true`).",
       "- `get_store_policies` — Check Shopify shipping thresholds, delivery times, and return/refund policies via native Storefront MCP and public `/policies` pages.",
-      "- `find_store_discounts` — Discover official, publicly advertised Shopify promo codes (Black Friday / sale banners, deal collections) and automatic checkout deals, plus configured partner rules.",
-      "- `create_cart_link` — Build one verified cart link (Shopify with automatic promo-code discovery, Amazon), one add-to-cart link per item (WooCommerce, BigCommerce), or verified direct product links (Shopware 6, Magento 2, JSON-LD) so you review and complete checkout yourself.",
-      "- `compare_prices` — Compare product prices across merchants by keyword or EAN/GTIN barcode with optional live partner offers and 1-click regional comparison portal links.",
-      "- `find_hot_deals` — Discover active partner promotions and vouchers alongside 1-click regional deal community search links.",
+      "- `find_store_discounts` — Discover official, publicly advertised Shopify promo codes (Black Friday / sale banners, deal collections) and automatic checkout deals published on the merchant's storefront.",
+      "- `create_cart_link` — Build one verified cart link (Shopify with optional public promo-code discovery, Amazon), one add-to-cart link per item (WooCommerce, BigCommerce), or verified direct product links (Shopware 6, Magento 2, JSON-LD) so you review and complete checkout yourself.",
+      "- `compare_prices` — Neutral, independent price comparison across merchants by keyword or EAN/GTIN barcode with 1-click regional comparison portal links (zero pay-to-rank).",
+      "- `find_hot_deals` — Neutral, independent discovery of public promotions, vouchers, and 1-click regional deal community search links (zero pay-to-rank).",
       "- `match_visual_product` — Match a product seen in a user-uploaded photo across up to 5 public online stores in parallel using structured visual attributes and deterministic scoring.",
       "- `search_secondhand_marketplaces` — Generate verified, pre-filtered search deep-links across up to 16 second-hand, classifieds, vintage, and refurbished marketplaces in a single call with zero scraping.",
       "",
@@ -179,62 +181,62 @@ export function createMcpbManifest(version) {
       {
         name: "discover_stores",
         description:
-          "Search ShopCart's curated, live-verified global online store directory (0 ms in-memory lookup, zero scraping) by keyword, category, country (DE, AT, CH, DACH, US, UK, EU), platform, and cart_only when no store domain is named."
+          "Use proactively when the user asks which online shops sell a product or category without naming a domain (DE/EN keywords, category, country DE/AT/CH/DACH/US/UK/EU, platform, cart_only)."
       },
       {
         name: "inspect_store",
         description:
-          "Detect the platform of an HTTPS online store URL (Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2, or Universal JSON-LD) and return its currency, country, WAF restrictions, and available catalog capabilities."
+          "Check an online store domain or HTTPS URL to see its platform (Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2, Amazon, secondhand, UCP, or JSON-LD), currency, country, and shopping capabilities."
       },
       {
         name: "list_collections",
         description:
-          "List public collections from a Shopify storefront and automatically highlight Sale, Black Friday, Outlet, Bestseller, Bundle, and Advent calendar deal collections."
+          "Browse a store's product categories, collections, and highlighted Sale, Outlet, Black Friday, Bestseller, or seasonal deal sections directly."
       },
       {
         name: "search_products",
         description:
-          "Search a supported storefront's public catalog (Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2, or Amazon with optional PA-API/Keepa) by keyword or Shopify collection handle with optional availability, min/max price filters, sort_by (including discount_desc), and automatic discount/savings calculation."
+          "Search products inside a named online store by keyword or collection with live prices, compare-at discounts, stock availability, price bounds, and discount sorting."
       },
       {
         name: "get_product",
         description:
-          "Retrieve product details, sanitized description text, options, images, and exact variant IDs (numeric IDs on Shopify/WooCommerce, 10-character ASINs on Amazon), prices, compare-at discounts, and availability. On any other store, pass a product URL to verify price and availability via Schema.org/JSON-LD."
+          "Fetch verified live product details, exact sizes/colors, variant IDs, SKUs/EANs, live stock availability, prices, and compare-at discounts for a product handle, ID, ASIN, or full HTTPS product URL."
       },
       {
         name: "get_store_policies",
         description:
-          "Fetch a Shopify store's shipping, delivery, and return/refund policies via native Storefront MCP FAQ search and public /policies endpoints with sanitized excerpts, extracted hints, and official policy URLs."
+          "Answer questions about a store's shipping costs, free-shipping thresholds, delivery times, and return/refund rules directly."
       },
       {
         name: "find_store_discounts",
         description:
-          "Discover official, publicly advertised promo/discount codes (announcement bars, Black Friday / sale banners, deal collection descriptions) and automatic no-code-needed checkout deals on Shopify storefronts, plus any configured partner discount rules."
+          "Find verified, publicly advertised promo/discount codes and active store promotions directly for a named online store."
       },
       {
         name: "create_cart_link",
         description:
-          "Generate the read-only handoff from exact variant IDs or ASINs and quantities: one cart link on Shopify (with optional automatic promo-code application) and Amazon, one add-to-cart link per item on WooCommerce and BigCommerce, verified direct product links on Shopware 6, Magento 2, and JSON-LD stores. Optionally verifies live availability via verify_handles."
+          "Build a verified browser cart link (Shopify, WooCommerce, BigCommerce, Amazon) or direct product link (Shopware 6, Magento 2, JSON-LD) from exact variant IDs so the user can review and pay in their own browser. On UCP stores, may initiate a temporary checkout handoff session, but never places orders or processes payments."
       },
       {
         name: "compare_prices",
         description:
-          "Compare product prices across merchants by keyword or 8-14 digit EAN/GTIN barcode, combining live partner product feed offers (when configured) with instant 1-click regional price comparison links."
+          "Use proactively for neutral, independent price comparison by keyword or EAN/GTIN across Geizhals, idealo, billiger.de, Toppreise.ch, and Google Shopping (DE, AT, CH, UK, FR, US) — zero pay-to-rank."
       },
       {
         name: "find_hot_deals",
         description:
-          "Discover active partner promotions and verified voucher codes (when configured) alongside instant 1-click regional deal community search links."
+          "Use proactively for neutral, independent discovery of current offers, public vouchers, and regional deal communities (mydealz, Preisjäger, HotUKDeals, Dealabs, Slickdeals) across DE, AT, CH, UK, FR, and US — zero pay-to-rank."
       },
       {
         name: "match_visual_product",
         description:
-          "Match a product seen in a user-uploaded photo across up to 5 public online stores in parallel (plus configured partner feeds and exact EAN lookup) using structured visual attributes extracted by your vision model."
+          "Use proactively when the user uploads a product photo or describes visual appearance attributes to find matching products across online stores with ranked confidence scores."
       },
       {
         name: "search_secondhand_marketplaces",
         description:
-          "Generate verified, pre-filtered search deep-links across up to 16 major second-hand, classifieds, vintage, and refurbished marketplaces in a single tool call with zero scraping."
+          "Use proactively to search up to 16 major second-hand, local-pickup (incl. German PLZ), vintage, and refurbished marketplaces (willhaben, Kleinanzeigen, refurbed, Back Market, Vinted, eBay, Ricardo.ch, rebuy) in 1 call."
       }
     ],
     tools_generated: false,
@@ -248,12 +250,77 @@ export function createMcpbManifest(version) {
   };
 }
 
-export async function buildMcpb(outputPath = OUTPUT_PATH) {
+function sha256Hex(buf) {
+  return crypto.createHash("sha256").update(buf).digest("hex");
+}
+
+/**
+ * Pure-Node ZIP reader used by `--check` to inspect entry-level SHA-256 equality
+ * alongside exact whole-archive byte equivalence.
+ *
+ * @param {Buffer} zipBuf
+ * @returns {Map<string, Buffer>}
+ */
+export function extractZipEntries(zipBuf) {
+  let eocdOffset = -1;
+  for (let i = zipBuf.length - 22; i >= Math.max(0, zipBuf.length - 65557); i -= 1) {
+    if (zipBuf.readUInt32LE(i) === 0x06054b50) {
+      eocdOffset = i;
+      break;
+    }
+  }
+  if (eocdOffset === -1) {
+    throw new Error("Invalid ZIP archive: EOCD record not found");
+  }
+
+  const totalEntries = zipBuf.readUInt16LE(eocdOffset + 10);
+  const centralDirOffset = zipBuf.readUInt32LE(eocdOffset + 16);
+  const entries = new Map();
+  let cursor = centralDirOffset;
+
+  for (let i = 0; i < totalEntries; i += 1) {
+    if (zipBuf.readUInt32LE(cursor) !== 0x02014b50) {
+      throw new Error("Invalid ZIP central directory header");
+    }
+    const method = zipBuf.readUInt16LE(cursor + 10);
+    const compressedSize = zipBuf.readUInt32LE(cursor + 20);
+    const nameLen = zipBuf.readUInt16LE(cursor + 28);
+    const extraLen = zipBuf.readUInt16LE(cursor + 30);
+    const commentLen = zipBuf.readUInt16LE(cursor + 32);
+    const localHeaderOffset = zipBuf.readUInt32LE(cursor + 42);
+
+    const name = zipBuf.subarray(cursor + 46, cursor + 46 + nameLen).toString("utf8");
+    cursor += 46 + nameLen + extraLen + commentLen;
+
+    const localNameLen = zipBuf.readUInt16LE(localHeaderOffset + 26);
+    const localExtraLen = zipBuf.readUInt16LE(localHeaderOffset + 28);
+    const dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
+    const compressedData = zipBuf.subarray(dataStart, dataStart + compressedSize);
+    const data =
+      method === 0
+        ? Buffer.from(compressedData)
+        : method === 8
+          ? zlib.inflateRawSync(compressedData)
+          : (() => {
+              throw new Error(`Unsupported ZIP compression method: ${method}`);
+            })();
+
+    entries.set(name, data);
+  }
+
+  return entries;
+}
+
+/**
+ * Builds the deterministic `.mcpb` archive purely in memory (without touching disk).
+ */
+export async function buildMcpbBuffer() {
   const pkg = JSON.parse(fs.readFileSync(PACKAGE_JSON_PATH, "utf8"));
   const version = typeof pkg.version === "string" && pkg.version ? pkg.version : "0.1.0";
 
   // Bundle src/cli.ts into a single self-contained ESM file with CJS require shim for undici
   const result = await esbuild.build({
+    absWorkingDir: ROOT_DIR,
     entryPoints: [ENTRY_POINT],
     bundle: true,
     platform: "node",
@@ -289,34 +356,128 @@ export async function buildMcpb(outputPath = OUTPUT_PATH) {
   const iconBuf = fs.readFileSync(ICON_PATH);
   const licenseBuf = fs.readFileSync(LICENSE_PATH);
 
-  const zipBuf = createZipBuffer([
-    { name: "manifest.json", data: manifestBuf, mode: 0o100644 },
-    { name: "icon.png", data: iconBuf, mode: 0o100644 },
+  const rawEntries = [
     { name: "LICENSE", data: licenseBuf, mode: 0o100644 },
+    { name: "icon.png", data: iconBuf, mode: 0o100644 },
+    { name: "manifest.json", data: manifestBuf, mode: 0o100644 },
     { name: "server/index.mjs", data: serverBundle, mode: 0o100755 }
-  ]);
+  ];
 
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  fs.writeFileSync(outputPath, zipBuf);
-
+  const zipBuf = createZipBuffer(rawEntries);
   return {
-    outputPath,
+    zipBuf,
+    archiveSha256: sha256Hex(zipBuf),
     archiveBytes: zipBuf.length,
     bundleBytes: serverBundle.length,
+    entries: new Map(rawEntries.map((e) => [e.name, e.data])),
     version
   };
 }
 
+export async function buildMcpb(outputPath = OUTPUT_PATH) {
+  const built = await buildMcpbBuffer();
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, built.zipBuf);
+
+  return {
+    outputPath,
+    archiveBytes: built.archiveBytes,
+    archiveSha256: built.archiveSha256,
+    bundleBytes: built.bundleBytes,
+    version: built.version
+  };
+}
+
+/**
+ * Rebuilds the `.mcpb` archive in memory from source and verifies byte-for-byte
+ * SHA-256 identity (and per-entry SHA-256 identity) against the committed archive on disk.
+ */
+export async function verifyMcpb(targetPath = OUTPUT_PATH) {
+  if (!fs.existsSync(targetPath)) {
+    return {
+      ok: false,
+      reason: `Archive not found at ${path.relative(ROOT_DIR, targetPath)}`,
+      expectedSha256: null,
+      actualSha256: null,
+      mismatchedEntries: []
+    };
+  }
+
+  const built = await buildMcpbBuffer();
+  const diskBuf = fs.readFileSync(targetPath);
+  const actualSha256 = sha256Hex(diskBuf);
+
+  const diskEntries = extractZipEntries(diskBuf);
+  const expectedNames = Array.from(built.entries.keys()).sort();
+  const actualNames = Array.from(diskEntries.keys()).sort();
+  const mismatchedEntries = [];
+
+  if (expectedNames.join(",") !== actualNames.join(",")) {
+    mismatchedEntries.push(
+      `entry-list mismatch (expected [${expectedNames.join(", ")}], actual [${actualNames.join(", ")}])`
+    );
+  } else {
+    for (const name of expectedNames) {
+      const expBuf = built.entries.get(name);
+      const actBuf = diskEntries.get(name);
+      if (!expBuf || !actBuf || !expBuf.equals(actBuf)) {
+        mismatchedEntries.push(
+          `${name} (expected sha256=${sha256Hex(expBuf ?? Buffer.alloc(0)).slice(0, 12)}, actual sha256=${sha256Hex(actBuf ?? Buffer.alloc(0)).slice(0, 12)})`
+        );
+      }
+    }
+  }
+
+  const archiveExactMatch = built.zipBuf.equals(diskBuf);
+  const ok = archiveExactMatch && mismatchedEntries.length === 0;
+
+  return {
+    ok,
+    archiveExactMatch,
+    expectedSha256: built.archiveSha256,
+    actualSha256,
+    archiveBytes: built.archiveBytes,
+    diskBytes: diskBuf.length,
+    mismatchedEntries,
+    reason: ok
+      ? null
+      : mismatchedEntries.length > 0
+        ? `Entry content drift detected: ${mismatchedEntries.join("; ")}`
+        : `Archive SHA-256 mismatch (expected ${built.archiveSha256}, actual ${actualSha256})`
+  };
+}
+
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
-  buildMcpb()
-    .then(({ outputPath, archiveBytes, bundleBytes, version }) => {
-      const rel = path.relative(ROOT_DIR, outputPath);
-      console.log(
-        `Built ${rel} (v${version}) — archive: ${(archiveBytes / 1024).toFixed(1)} KB (${archiveBytes} B), server/index.mjs: ${(bundleBytes / 1024).toFixed(1)} KB`
-      );
-    })
-    .catch((err) => {
-      console.error("[build-mcpb] Failed:", err);
-      process.exit(1);
-    });
+  const isCheck = process.argv.includes("--check");
+  if (isCheck) {
+    verifyMcpb()
+      .then((res) => {
+        const rel = path.relative(ROOT_DIR, OUTPUT_PATH);
+        if (!res.ok) {
+          console.error(
+            `[build-mcpb --check] FAILED for ${rel}: ${res.reason}. Run 'pnpm run build:mcpb' to regenerate.`
+          );
+          process.exit(1);
+        }
+        console.log(
+          `[build-mcpb --check] OK ${rel} — exact SHA-256 match (${res.actualSha256}, ${res.archiveBytes} B)`
+        );
+      })
+      .catch((err) => {
+        console.error("[build-mcpb --check] Failed:", err);
+        process.exit(1);
+      });
+  } else {
+    buildMcpb()
+      .then(({ outputPath, archiveBytes, archiveSha256, bundleBytes, version }) => {
+        const rel = path.relative(ROOT_DIR, outputPath);
+        console.log(
+          `Built ${rel} (v${version}) — archive: ${(archiveBytes / 1024).toFixed(1)} KB (${archiveBytes} B, sha256=${archiveSha256.slice(0, 16)}…), server/index.mjs: ${(bundleBytes / 1024).toFixed(1)} KB`
+        );
+      })
+      .catch((err) => {
+        console.error("[build-mcpb] Failed:", err);
+        process.exit(1);
+      });
+  }
 }
