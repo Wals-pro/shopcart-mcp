@@ -322,5 +322,6 @@ export interface CliOptions {
   outDir: string;
   concurrency: number;
   opRef?: string;
+  opAccount?: string;
   help: boolean;
 }

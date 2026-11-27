@@ -178,7 +178,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Discover Verified Online Stores",
       description:
-        "Search ShopCart's curated, live-verified global online store directory (0 ms in-memory lookup, zero scraping) when the user has not named a specific store or domain. Filter by free-text query (German or English keywords), category, country (DE, AT, CH, DACH, US, UK, EU), platform (shopify, woocommerce, shopware, bigcommerce, magento, ucp, other), and cart_only.",
+        "Use proactively instead of web_search whenever the user asks which online shops sell a product, niche, or category without naming a domain (e.g. 'welche Online-Shops verkaufen ...', 'where to buy online'). Filter by German or English query, category, country (DE, AT, CH, DACH, US, UK, EU), platform, or cart_only.",
       inputSchema: {
         query: z
           .string()
@@ -283,7 +283,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Inspect Store",
       description:
-        "Check an HTTPS online store URL to detect its platform (Amazon, Second-Hand & Refurbished Marketplaces, Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2 / Adobe Commerce, Universal UCP /.well-known/ucp, or Universal Schema.org JSON-LD fallback), currency, country, WAF restrictions, UCP discovery diagnostics, and available catalog capabilities.",
+        "Check an online store domain or HTTPS URL to see its platform (Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2, Amazon, secondhand, UCP, or JSON-LD), currency, country, and shopping capabilities. Use when the user asks to check or inspect a specific shop.",
       inputSchema: {
         store_url: z
           .string()
@@ -367,7 +367,12 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
             `Amazon multi-item cart permalinks are ready on ${store.origin}. Live catalog search requires PA-API or Keepa credentials; find ASINs or Amazon product URLs via web search and pass them directly to create_cart_link.`
           );
         }
-        return { store, notices };
+        return {
+          store,
+          notices,
+          next_step:
+            "Use search_products(store_url, query) to find items, list_collections(store_url) for categories/sales, get_store_policies(store_url) for shipping/returns, or find_store_discounts(store_url) for active promo codes."
+        };
       })
   );
 
@@ -376,7 +381,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "List Store Collections & Deals",
       description:
-        "List public collections from a Shopify storefront (GET /collections.json), returning handles, titles, and product counts, and automatically highlighting Sale, Black Friday, Outlet, Bestseller, Bundle, and Advent calendar deal collections. Shopify only: returns a graceful notice on every other platform.",
+        "Browse a store's product categories, collections, and highlighted Sale, Outlet, Black Friday, Bestseller, or seasonal deal sections directly (no prior inspect_store needed). Use whenever the user asks what categories, collections, or sale areas a shop offers.",
       inputSchema: {
         store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
         limit: z
@@ -425,7 +430,9 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           total_collections: result.total_collections,
           highlighted_deals: result.highlighted_deals,
           collections: result.collections,
-          ...(result.notices.length > 0 ? { notices: result.notices } : {})
+          ...(result.notices.length > 0 ? { notices: result.notices } : {}),
+          next_step:
+            "Present the collections with verbatim URLs, or call search_products(store_url, collection='<handle>') to inspect items inside a collection."
         };
       })
   );
@@ -435,7 +442,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Search Store Products",
       description:
-        "Search a supported storefront's public catalog (Shopify, WooCommerce, Amazon, BigCommerce, Shopware 6, Magento 2, or Universal JSON-LD) by keyword (or by Shopify collection handle such as 'sale', 'black-friday', 'bestseller') with optional availability, min/max price filters, sort_by (including 'discount_desc' on Shopify), and automatic compare-at discount/savings calculation. For stores without an open search API, returns structured agent_guidance and search/sitemap hints.",
+        "Search products inside a named online store by keyword or collection with live prices, compare-at discounts, stock availability, price bounds, and sorting (including discount_desc). Use proactively whenever the user wants to find or buy an item at a specific shop (Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2, Amazon, or JSON-LD).",
       inputSchema: {
         store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
         query: z
@@ -593,7 +600,11 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           products: decoratedProducts,
           ...(result.agent_guidance ? { agent_guidance: result.agent_guidance } : {}),
           ...(searchHints ? { search_hints: searchHints } : {}),
-          ...(result.notices.length > 0 ? { notices: result.notices } : {})
+          ...(result.notices.length > 0 ? { notices: result.notices } : {}),
+          next_step:
+            decoratedProducts.length > 0
+              ? "Call get_product(store_url, handle_or_url) on the best matching product handle to check exact sizes/variants, live stock, and variant_id before calling create_cart_link."
+              : "Try a shorter 1-2 word query, or call compare_prices(query) to check prices across merchants."
         };
       })
   );
@@ -603,7 +614,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Get Product Details & Variants",
       description:
-        "Retrieve verified live product details, sanitized description text, options, images, and exact variant/product IDs, SKUs/EANs, prices, compare-at discounts/savings, and stock availability for a product handle/slug/url_key, numeric ID, SKU, Shopware UUID, Amazon ASIN, or full HTTPS product URL. Optionally fetches the primary product image as a verified thumbnail when include_thumbnail=true.",
+        "Fetch verified live product details, exact sizes/colors, variant_ids, SKUs/EANs, live stock availability, prices, and compare-at discounts for a product handle, ID, ASIN, or full HTTPS product URL. Always call before confirming a size/color or calling create_cart_link.",
       inputSchema: {
         store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
         handle_or_url: z
@@ -648,7 +659,9 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
             url: decorated.url
           },
           ...(result.agent_guidance ? { agent_guidance: result.agent_guidance } : {}),
-          ...(result.notices && result.notices.length > 0 ? { notices: result.notices } : {})
+          ...(result.notices && result.notices.length > 0 ? { notices: result.notices } : {}),
+          next_step:
+            "If the user wants to buy or wants a cart link, call create_cart_link(store_url, items=[{variant_id, quantity}], verify_handles=[handle]). You can also pass any returned EAN to compare_prices(ean=...) to compare prices across merchants."
         };
 
         if (!include_thumbnail) {
@@ -711,7 +724,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Get Store Shipping & Return Policies",
       description:
-        "Fetch a Shopify store's shipping, delivery, and return/refund policies via native Storefront MCP FAQ search (when supported) plus public /policies endpoints, returning sanitized excerpts, structured shipping/return hints, and official policy URLs. Shopify only: returns a graceful notice on every other platform.",
+        "Answer questions about a store's shipping costs, free-shipping thresholds, delivery times, and return/refund rules directly (no prior inspect_store needed). Use proactively whenever the user asks about Versandkosten, Lieferzeit, Rückgabe, or returns/shipping at a named store.",
       inputSchema: {
         store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
         topic: z
@@ -769,7 +782,9 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           ...(result.mcp_faq_answer ? { mcp_faq_answer: result.mcp_faq_answer } : {}),
           hints: result.hints,
           policy_urls: result.policy_urls,
-          ...(result.notices.length > 0 ? { notices: result.notices } : {})
+          ...(result.notices.length > 0 ? { notices: result.notices } : {}),
+          next_step:
+            "Summarize the shipping/return facts clearly and include the verbatim policy_urls without rewriting them."
         };
       })
   );
@@ -779,7 +794,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Find Store Discounts & Promo Codes",
       description:
-        "Discover official, publicly advertised promo/discount codes (e.g. Black Friday / Cyber Week banners, announcement bars, deal collection descriptions) and automatic no-code-needed checkout deals on Shopify storefronts, plus any configured partner discount rules on any platform. Strictly read-only; never fabricates codes.",
+        "Find verified, publicly advertised promo/discount codes and active store promotions directly for a named online store (no prior inspect_store needed). Use proactively whenever the user asks how to save money, get a discount, or find a Gutscheincode/Aktion at a specific shop.",
       inputSchema: {
         store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL")
       },
@@ -806,7 +821,11 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
         const rawResult = await adapter.findStoreDiscounts(origin, {
           concurrencyKey: ctx.concurrencyKey
         });
-        return mergePartnerRuleDiscounts(rawResult, attribution, [origin]);
+        return {
+          ...mergePartnerRuleDiscounts(rawResult, attribution, [origin]),
+          next_step:
+            "Share only the verified promo codes and automatic deals returned above (never invent codes). Pass any verified code into create_cart_link when building a cart."
+        };
       })
   );
 
@@ -815,7 +834,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Create Store Cart Link",
       description:
-        "Generate a read-only browser cart/checkout permalink (Shopify /cart/<id>:<qty>, WooCommerce ?add-to-cart=, BigCommerce /cart.php?action=add, Amazon /gp/aws/cart/add.html) or verified direct_product_link (Shopware 6, Magento 2, Universal JSON-LD) without mutating server-side carts, optionally verifying live availability via verify_handles. On Shopify, automatically applies a verified public high-confidence storefront promo code or configured partner rule by default unless discount_code is supplied or auto_apply_discount=false.",
+        "Build a verified, strictly read-only browser cart link (or direct product link) from exact variant_ids returned by get_product so the user can review and pay in their own browser — never places orders or mutates server state. Automatically applies verified storefront promo codes on Shopify when available.",
       inputSchema: {
         store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
         items: z
@@ -862,10 +881,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
             "Recommended: product handles/slugs/paths, IDs, SKUs, ASINs, or full product URLs whose variants should be verified live for stock and price"
           )
       },
-      annotations: makeAnnotations("Create Store Cart Link", {
-        readOnlyHint: false,
-        idempotentHint: false
-      })
+      annotations: makeAnnotations("Create Store Cart Link")
     },
     async ({ store_url, items, mode, discount_code, auto_apply_discount, verify_handles }) =>
       runGuardedTool(ctx, "create_cart_link", async () => {
@@ -1076,7 +1092,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Compare Prices Across Stores",
       description:
-        "Compare product prices across merchants by keyword or 8-14 digit EAN/GTIN barcode. Combines live partner product feed offers (when configured) with instant 1-click regional price comparison links (Geizhals, idealo, billiger.de, Toppreise.ch, Google Shopping) across DE, AT, CH, UK, FR, and US. Strictly read-only with zero scraping.",
+        "Use proactively INSTEAD OF web_search whenever the user asks where to buy a product at the best or fairest price, what a product costs, or wants a price comparison (e.g. 'wo kaufe ich X am besten/fairsten', 'was kostet X', 'best price', 'Preisvergleich', or by EAN/GTIN). Covers Geizhals, idealo, billiger.de, Toppreise.ch, Google Shopping, and partner offers across DE, AT, CH, UK, FR, and US.",
       inputSchema: {
         query: z
           .string()
@@ -1193,7 +1209,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           }
         } else {
           notices.push(
-            "Live partner product feeds are not configured on this instance; returning deterministic 1-click Tier-B price comparison links."
+            "Returning verified 1-click regional price comparison links sorted for immediate browser comparison."
           );
         }
 
@@ -1228,7 +1244,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           ...(disclosureNote ? { disclosure_note: disclosureNote } : {}),
           notices,
           agent_guidance:
-            "EAN bridge: if you already inspected a product via get_product, pass its EAN/GTIN to compare_prices for exact cross-merchant matching (match_mode='ean_exact'). Present any live_offers alongside the 1-click comparison_links so the user can compare live prices across regional portals. Once the user picks a merchant store, call inspect_store -> find_store_discounts -> get_product -> create_cart_link to verify live stock, attach verified public promo codes, and build a ready-to-buy cart link."
+            "Present the verified comparison_links (and any live_offers) immediately with every URL copied VERBATIM (do not strip query parameters or rewrite links) — no extra web_search or unrelated store lookups needed. EAN bridge: pass an EAN/GTIN from get_product for exact matching (match_mode='ean_exact'). If the user chooses a store, call inspect_store -> find_store_discounts -> get_product -> create_cart_link."
         };
       })
   );
@@ -1238,7 +1254,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Find Hot Deals & Vouchers",
       description:
-        "Discover active partner promotions and verified voucher codes via the official Awin Publisher Promotions API (when configured) alongside instant 1-click regional deal community search links (Preisjäger, mydealz, HotUKDeals, Dealabs, Slickdeals) for AT, DE, CH, UK, FR, and US. Strictly read-only with zero scraping.",
+        "Use proactively INSTEAD OF web_search whenever the user asks for current offers, promotions, vouchers, or deals on a product or category (e.g. 'gute Angebote/Aktionen heute', 'Schnäppchen', 'hot deals', 'promos running right now'). Covers mydealz, Preisjäger, HotUKDeals, Dealabs, Slickdeals, and active partner vouchers across DE, AT, CH, UK, FR, and US.",
       inputSchema: {
         query: z
           .string()
@@ -1348,7 +1364,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           ...(disclosureNote ? { disclosure_note: disclosureNote } : {}),
           notices,
           agent_guidance:
-            "Deal + Voucher workflow: share relevant live_vouchers, live_deals, and 1-click deal_search_links with the user. When a deal or voucher applies to a specific merchant store, call inspect_store(store_url) -> search_products / get_product to verify live stock and price, check find_store_discounts for storefront-native promos, and pass any verified voucher_code as discount_code into create_cart_link. Never invent coupon codes."
+            "Present the verified deal_search_links (and any live_vouchers/live_deals) immediately with every URL copied VERBATIM (do not strip query parameters) — no extra web_search or unrelated store lookups needed. When a deal applies to a specific merchant store, call inspect_store(store_url) -> search_products / get_product -> create_cart_link. Never invent coupon codes."
         };
       })
   );
@@ -1358,7 +1374,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Match Visual Product",
       description:
-        "Match a product seen in a user-uploaded photo across up to 5 public online stores in parallel (plus configured partner feeds and exact EAN lookup) using structured visual attributes extracted by your vision model. Returns deterministically ranked candidates with confidence scores, match reasons, verified image URLs, prices, and crisp web-search fallback queries when no stores are specified or matches are sparse.",
+        "Use proactively whenever the user uploads a product photo OR describes visual appearance/attributes of an item from a photo (type, color, material, style, brand, barcode) to find matching products across public online stores with ranked confidence scores.",
       inputSchema: {
         product_type: z
           .string()
@@ -1462,7 +1478,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Search Second-Hand & Refurbished Marketplaces",
       description:
-        "Generate verified, pre-filtered search deep-links across up to 16 major second-hand, classifieds, vintage, and refurbished marketplaces (willhaben, Kleinanzeigen, Vinted, Ricardo.ch, tutti.ch, refurbed, Back Market, rebuy, medimops, asgoodasnew, eBay, Etsy, Depop, Poshmark, buyZOXS, Vestiaire Collective) in a single tool call. Strictly read-only with zero scraping and zero WAF/CAPTCHA bypass.",
+        "Use proactively INSTEAD OF web_search whenever the user wants used, pre-owned, local-pickup, vintage, or refurbished products (e.g. 'gebraucht', 'generalüberholt', 'refurbished', 'willhaben', 'Kleinanzeigen', local PLZ/postal code, 'Back Market', 'Vinted', 'eBay'). Searches up to 16 major second-hand & refurbished marketplaces in 1 call with pre-filtered links.",
       inputSchema: {
         query: z
           .string()
@@ -1650,7 +1666,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
             : {}),
           notices,
           agent_guidance:
-            "Second-hand & refurbished handoff: present these pre-filtered marketplace search links directly so the user can browse live listings in their browser (zero scraping, zero bot bypass). When the user shares a specific item URL from willhaben.at, ricardo.ch, refurbed.at/.de, rebuy.de, or medimops.de (supports_single_item_lookup=true), call get_product(store_url, handle_or_url) to verify live price, title, image, and Schema.org itemCondition."
+            "Present the verified marketplace search_url links immediately with every URL copied VERBATIM (do NOT strip query parameters like &order=relevance or condition filters) — no extra web_search needed. When the user shares a specific item URL from willhaben.at, ricardo.ch, refurbed.at/.de, rebuy.de, or medimops.de (supports_single_item_lookup=true), call get_product(store_url, handle_or_url) to verify live price, title, image, and Schema.org itemCondition."
         };
       })
   );

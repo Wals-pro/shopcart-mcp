@@ -331,13 +331,8 @@ describe("OAuth 2.1 compliance & MCP auth", () => {
     ]);
     for (const tool of tools) {
       expect(tool.title && tool.title.length > 0 && tool.title.length <= 64).toBe(true);
-      if (tool.name === "create_cart_link") {
-        expect(tool.annotations?.readOnlyHint).toBe(false);
-        expect(tool.annotations?.idempotentHint).toBe(false);
-      } else {
-        expect(tool.annotations?.readOnlyHint).toBe(true);
-        expect(tool.annotations?.idempotentHint).toBe(true);
-      }
+      expect(tool.annotations?.readOnlyHint).toBe(true);
+      expect(tool.annotations?.idempotentHint).toBe(true);
       expect(tool.annotations?.destructiveHint).toBe(false);
       expect(tool.annotations?.openWorldHint).toBe(tool.name !== "discover_stores");
     }

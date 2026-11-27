@@ -7,6 +7,7 @@ import {
   callAnthropicMessages,
   redactSecrets,
   resolveAnthropicApiKey,
+  validateOpAccount,
   validateOpReference
 } from "../qa/agentic/anthropic-client.js";
 import { parseCliArgs, runCliMain } from "../qa/agentic/cli.js";
@@ -97,6 +98,13 @@ describe("Fixture MCP Server over InMemoryTransport", () => {
     try {
       expect(session.serverInstructions).toBe(SERVER_INSTRUCTIONS);
       expect(session.tools).toHaveLength(12);
+      expect(session.prompts.map((p) => p.name)).toEqual([
+        "compare-prices",
+        "find-secondhand",
+        "hunt-deals",
+        "shop-and-build-cart",
+        "discover-shopping-stores"
+      ]);
 
       const compareRes = await session.callTool("compare_prices", {
         query: "Sony WH-1000XM5",
@@ -390,10 +398,17 @@ describe("Secret Hygiene & Anthropic Client (Zero Network)", () => {
     });
     expect(fromEnv).toBe(fakeKey);
 
+    expect(validateOpAccount("walspro.1password.com")).toBe("walspro.1password.com");
+    expect(() => validateOpAccount("bad;account")).toThrow();
+
     const fromOp = await resolveAnthropicApiKey({
       env: {},
       opRef: "op://Private/Anthropic/api-key",
-      opReader: async () => `${fakeKey}\n`
+      opAccount: "walspro.1password.com",
+      opReader: async (_ref, account) => {
+        expect(account).toBe("walspro.1password.com");
+        return `${fakeKey}\n`;
+      }
     });
     expect(fromOp).toBe(fakeKey);
 

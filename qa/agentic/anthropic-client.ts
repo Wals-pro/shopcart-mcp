@@ -12,6 +12,8 @@ export const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 export const ANTHROPIC_VERSION = "2023-06-01";
 
 const OP_REF_RE = /^op:\/\/[A-Za-z0-9._\-\/ ]{3,200}$/;
+const OP_ACCOUNT_RE = /^[A-Za-z0-9._-]{2,120}$/;
+const OP_READ_TIMEOUT_MS = 90_000;
 const ANTHROPIC_KEY_RE = /sk-ant-[A-Za-z0-9_-]{8,}/g;
 
 /**
@@ -35,6 +37,16 @@ export function validateOpReference(opRef: string): string {
   return trimmed;
 }
 
+export function validateOpAccount(account: string): string {
+  const trimmed = account.trim();
+  if (!OP_ACCOUNT_RE.test(trimmed) || trimmed.includes("..")) {
+    throw new Error(
+      "Invalid 1Password account: must contain only letters, digits, dots, hyphens, or underscores."
+    );
+  }
+  return trimmed;
+}
+
 /**
  * Resolves the Anthropic API key strictly into RAM.
  * Priority:
@@ -45,8 +57,9 @@ export function validateOpReference(opRef: string): string {
  */
 export async function resolveAnthropicApiKey(opts: {
   opRef?: string;
+  opAccount?: string;
   env?: NodeJS.ProcessEnv;
-  opReader?: (ref: string) => Promise<string>;
+  opReader?: (ref: string, account?: string) => Promise<string>;
 } = {}): Promise<string> {
   const env = opts.env ?? process.env;
   const fromEnv = env.ANTHROPIC_API_KEY?.trim();
@@ -57,11 +70,14 @@ export async function resolveAnthropicApiKey(opts: {
   const rawOpRef = opts.opRef?.trim() || env.OP_ANTHROPIC_KEY_REF?.trim();
   if (rawOpRef) {
     const safeRef = validateOpReference(rawOpRef);
+    const rawAccount = opts.opAccount?.trim() || env.OP_ACCOUNT?.trim();
+    const safeAccount = rawAccount ? validateOpAccount(rawAccount) : undefined;
     const reader =
       opts.opReader ??
-      (async (ref: string) => {
-        const { stdout } = await execFileAsync("op", ["read", ref], {
-          timeout: 10_000,
+      (async (ref: string, account?: string) => {
+        const args = account ? ["read", "--account", account, ref] : ["read", ref];
+        const { stdout } = await execFileAsync("op", args, {
+          timeout: OP_READ_TIMEOUT_MS,
           maxBuffer: 16 * 1024
         });
         return stdout;
@@ -69,7 +85,7 @@ export async function resolveAnthropicApiKey(opts: {
 
     let value: string;
     try {
-      value = (await reader(safeRef)).trim();
+      value = (await reader(safeRef, safeAccount)).trim();
     } catch (err) {
       const msg = err instanceof Error ? redactSecrets(err.message) : "op read failed";
       throw new Error(`Failed to read Anthropic API key from 1Password reference: ${msg}`);

@@ -114,7 +114,7 @@ export function createMcpbManifest(version) {
     display_name: "ShopCart MCP",
     version,
     description:
-      "Search Shopify, WooCommerce, Amazon, BigCommerce, Shopware 6, Magento 2 & JSON-LD stores, browse deals, inspect variants, and build cart links — local & zero-auth.",
+      "Read-only shopping MCP: price comparison, deals, 16 secondhand/refurbished marketplaces, store discovery & verified cart links — local & zero-auth.",
     long_description: [
       "Connect Claude Desktop directly to public Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2, Universal JSON-LD storefronts, and Amazon marketplaces with zero login, zero API keys required for core features, and zero telemetry.",
       "",
@@ -179,62 +179,62 @@ export function createMcpbManifest(version) {
       {
         name: "discover_stores",
         description:
-          "Search ShopCart's curated, live-verified global online store directory (0 ms in-memory lookup, zero scraping) by keyword, category, country (DE, AT, CH, DACH, US, UK, EU), platform, and cart_only when no store domain is named."
+          "Use proactively when the user asks which online shops sell a product or category without naming a domain (DE/EN keywords, category, country DE/AT/CH/DACH/US/UK/EU, platform, cart_only)."
       },
       {
         name: "inspect_store",
         description:
-          "Detect the platform of an HTTPS online store URL (Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2, or Universal JSON-LD) and return its currency, country, WAF restrictions, and available catalog capabilities."
+          "Check an online store domain or HTTPS URL to see its platform (Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2, Amazon, secondhand, UCP, or JSON-LD), currency, country, and shopping capabilities."
       },
       {
         name: "list_collections",
         description:
-          "List public collections from a Shopify storefront and automatically highlight Sale, Black Friday, Outlet, Bestseller, Bundle, and Advent calendar deal collections."
+          "Browse a store's product categories, collections, and highlighted Sale, Outlet, Black Friday, Bestseller, or seasonal deal sections directly."
       },
       {
         name: "search_products",
         description:
-          "Search a supported storefront's public catalog (Shopify, WooCommerce, BigCommerce, Shopware 6, Magento 2, or Amazon with optional PA-API/Keepa) by keyword or Shopify collection handle with optional availability, min/max price filters, sort_by (including discount_desc), and automatic discount/savings calculation."
+          "Search products inside a named online store by keyword or collection with live prices, compare-at discounts, stock availability, price bounds, and discount sorting."
       },
       {
         name: "get_product",
         description:
-          "Retrieve product details, sanitized description text, options, images, and exact variant IDs (numeric IDs on Shopify/WooCommerce, 10-character ASINs on Amazon), prices, compare-at discounts, and availability. On any other store, pass a product URL to verify price and availability via Schema.org/JSON-LD."
+          "Fetch verified live product details, exact sizes/colors, variant IDs, SKUs/EANs, live stock availability, prices, and compare-at discounts for a product handle, ID, ASIN, or full HTTPS product URL."
       },
       {
         name: "get_store_policies",
         description:
-          "Fetch a Shopify store's shipping, delivery, and return/refund policies via native Storefront MCP FAQ search and public /policies endpoints with sanitized excerpts, extracted hints, and official policy URLs."
+          "Answer questions about a store's shipping costs, free-shipping thresholds, delivery times, and return/refund rules directly."
       },
       {
         name: "find_store_discounts",
         description:
-          "Discover official, publicly advertised promo/discount codes (announcement bars, Black Friday / sale banners, deal collection descriptions) and automatic no-code-needed checkout deals on Shopify storefronts, plus any configured partner discount rules."
+          "Find verified, publicly advertised promo/discount codes and active store promotions directly for a named online store."
       },
       {
         name: "create_cart_link",
         description:
-          "Generate the read-only handoff from exact variant IDs or ASINs and quantities: one cart link on Shopify (with optional automatic promo-code application) and Amazon, one add-to-cart link per item on WooCommerce and BigCommerce, verified direct product links on Shopware 6, Magento 2, and JSON-LD stores. Optionally verifies live availability via verify_handles."
+          "Build a verified, strictly read-only browser cart link (or direct product link) from exact variant IDs so the user can review and pay in their own browser — never places orders."
       },
       {
         name: "compare_prices",
         description:
-          "Compare product prices across merchants by keyword or 8-14 digit EAN/GTIN barcode, combining live partner product feed offers (when configured) with instant 1-click regional price comparison links."
+          "Use proactively to compare prices across merchants by keyword or EAN/GTIN across Geizhals, idealo, billiger.de, Toppreise.ch, Google Shopping, and partner offers (DE, AT, CH, UK, FR, US)."
       },
       {
         name: "find_hot_deals",
         description:
-          "Discover active partner promotions and verified voucher codes (when configured) alongside instant 1-click regional deal community search links."
+          "Use proactively to find current offers, promotions, vouchers, and regional deal communities (mydealz, Preisjäger, HotUKDeals, Dealabs, Slickdeals) across DE, AT, CH, UK, FR, and US."
       },
       {
         name: "match_visual_product",
         description:
-          "Match a product seen in a user-uploaded photo across up to 5 public online stores in parallel (plus configured partner feeds and exact EAN lookup) using structured visual attributes extracted by your vision model."
+          "Use proactively when the user uploads a product photo or describes visual appearance attributes to find matching products across online stores with ranked confidence scores."
       },
       {
         name: "search_secondhand_marketplaces",
         description:
-          "Generate verified, pre-filtered search deep-links across up to 16 major second-hand, classifieds, vintage, and refurbished marketplaces in a single tool call with zero scraping."
+          "Use proactively to search up to 16 major second-hand, local-pickup (incl. German PLZ), vintage, and refurbished marketplaces (willhaben, Kleinanzeigen, refurbed, Back Market, Vinted, eBay, Ricardo.ch, rebuy) in 1 call."
       }
     ],
     tools_generated: false,

@@ -1273,8 +1273,8 @@ describe("AdapterRegistry Priority, Native UCP Enrichment, MCP inspect_store & G
       expect(findGeminiSchemaViolations(tool.inputSchema, tool.name)).toEqual([]);
     }
     const cartLinkTool = tools.find((t) => t.name === "create_cart_link");
-    expect(cartLinkTool?.annotations?.readOnlyHint).toBe(false);
-    expect(cartLinkTool?.annotations?.idempotentHint).toBe(false);
+    expect(cartLinkTool?.annotations?.readOnlyHint).toBe(true);
+    expect(cartLinkTool?.annotations?.idempotentHint).toBe(true);
     expect(cartLinkTool?.annotations?.destructiveHint).toBe(false);
     expect(cartLinkTool?.annotations?.openWorldHint).toBe(true);
 

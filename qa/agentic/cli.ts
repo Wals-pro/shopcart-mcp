@@ -33,6 +33,7 @@ export function parseCliArgs(
   let outDir = "";
   let concurrency = 3;
   let opRef: string | undefined;
+  let opAccount: string | undefined;
   let help = false;
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -82,6 +83,8 @@ export function parseCliArgs(
       concurrency = parsed;
     } else if (arg === "--op-ref") {
       opRef = requireValue("--op-ref").trim();
+    } else if (arg === "--op-account") {
+      opAccount = requireValue("--op-account").trim();
     } else if (arg === "--") {
       // ignore pnpm pass-through delimiter
       continue;
@@ -110,6 +113,7 @@ export function parseCliArgs(
     outDir: effectiveOutDir,
     concurrency,
     opRef,
+    opAccount,
     help
   };
 }
@@ -130,6 +134,7 @@ export function renderHelpText(): string {
     "  --out <dir>                        Output directory for report.json & report.md",
     "  --concurrency <1-10>               Parallel scenarios (default: 3)",
     "  --op-ref <op://vault/item/field>   Optional opt-in 1Password reference (RAM-only, never logged)",
+    "  --op-account <account>             Optional 1Password account shorthand/domain (or OP_ACCOUNT env)",
     "  --help, -h                         Show this help message"
   ].join("\n");
 }
@@ -174,7 +179,11 @@ export async function runCliMain(
   let apiKey: string | undefined;
   if (!opts.dryRun) {
     try {
-      apiKey = await resolveAnthropicApiKey({ opRef: opts.opRef, env });
+      apiKey = await resolveAnthropicApiKey({
+        opRef: opts.opRef,
+        opAccount: opts.opAccount,
+        env
+      });
     } catch (err) {
       console.error(`[qa:agentic] ${err instanceof Error ? err.message : String(err)}`);
       return 1;

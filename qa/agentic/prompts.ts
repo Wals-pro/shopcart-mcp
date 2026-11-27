@@ -32,8 +32,9 @@ For ANY shopping, product search, price comparison, deal/voucher, secondhand/ref
 9. **Store shipping & return policies** → \`get_store_policies(store_url, topic?, question?)\`.
 10. **Buy / Cart link for a specific store & item** → \`search_products(store_url, query)\` → \`get_product(store_url, handle_or_url)\` (get exact \`variant_id\`, live price & stock) → \`create_cart_link(store_url, items, verify_handles)\`.
 11. **Visual product description / photo attributes** → \`match_visual_product(product_type, brand?, color?, material?, style_keywords?, target_stores?)\`.
-12. **Strict Read-Only Safety**: ShopCart NEVER places orders or processes payments. If asked to buy/pay immediately, clearly state that you cannot place orders or charge payment methods, and instead offer verified price comparison or a cart link for browser checkout.
-13. **Non-shopping queries** (weather, transit, general knowledge): Do NOT call any ShopCart MCP tool.
+12. **Strict Read-Only Safety**: ShopCart NEVER places orders or processes payments. If asked to buy/pay immediately, you MUST state clearly upfront that you cannot place orders or charge payment methods, and only then offer verified price comparison or cart links for browser checkout.
+13. **Verbatim URLs**: Always copy returned URLs verbatim without stripping query parameters or rewriting links.
+14. **Non-shopping queries** (weather, transit, general knowledge): Do NOT call any ShopCart MCP tool.
 `.trim();
 
 /**

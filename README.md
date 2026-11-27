@@ -45,23 +45,24 @@ What the shopper gets differs by platform, and ShopCart MCP says so honestly in 
 - **Passwordless login:** 6-digit email code or 1-click magic link. No password to remember.
 - **Read-only & EU-hosted:** the server never places orders, never sees payment data, and runs on Google Cloud Run in `europe-west1`.
 
-### Tools
+### Tools & Native MCP Prompts
 
-All 11 core tools are read-only (`readOnlyHint: true, destructiveHint: false, idempotentHint: true`):
+All 12 core tools are strictly read-only (`readOnlyHint: true, destructiveHint: false, idempotentHint: true`), complemented by 5 native MCP Prompts (`compare-prices`, `find-secondhand`, `hunt-deals`, `shop-and-build-cart`, `discover-shopping-stores`) surfaced via `prompts/list`:
 
 0. **`discover_stores`** — Instant in-memory search across ShopCart's curated, live-verified global store directory (12 categories, DACH + US/UK/EU, multi-platform) whenever the user has not named a specific store domain.
-1. **`inspect_store`** — Detects the platform (Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2, or Universal JSON-LD), resolves currency/country, WAF restrictions, and catalog capabilities including Shopify Storefront MCP and UCP endpoints.
+1. **`inspect_store`** — Detects the platform (Shopify, WooCommerce, BigCommerce, Amazon, Secondhand, Shopware 6, Magento 2, UCP, or Universal JSON-LD), resolves currency/country, WAF restrictions, and catalog capabilities including Shopify Storefront MCP and UCP endpoints.
 2. **`list_collections`** — Lists a Shopify store's public collections and flags Sale, Black Friday, and Bestseller collections.
 3. **`search_products`** — WAF-resilient product search with normalized prices, availability/price filters, `collection` filter, and `sort_by` (`relevance`, `price_asc`, `price_desc`, `discount_desc`).
 4. **`get_product`** — Returns exact variant IDs (numeric IDs on Shopify/WooCommerce, ASINs on Amazon), prices in minor units with ISO 4217 exponents, compare-at discounts, and availability. On any other store, verifies a product URL via Schema.org/JSON-LD. Pass optional `include_thumbnail: true` when visually confirming a product match against a user-uploaded photo (SSRF-hardened, JPEG/PNG/WebP only, ≤ 512 KB, zero-retention).
 5. **`get_store_policies`** — Shipping, returns, and FAQ answers from the store's public policy pages (Shopify), sanitized and marked as untrusted store content.
 6. **`find_store_discounts`** — Discovers official, publicly advertised promo codes and automatic checkout deals on Shopify storefronts plus configured partner rules.
-7. **`create_cart_link`** — Generates the deterministic handoff: Shopify cart permalinks (`/cart/<vid>:<qty>` or checkout mode), Amazon multi-item cart links, per-item add-to-cart links on WooCommerce and BigCommerce, or verified direct product links, with optional live variant verification via `verify_handles`.
+7. **`create_cart_link`** — Generates the deterministic read-only handoff: Shopify cart permalinks (`/cart/<vid>:<qty>` or checkout mode), Amazon multi-item cart links, per-item add-to-cart links on WooCommerce and BigCommerce, or verified direct product links, with optional live variant verification via `verify_handles`.
 8. **`compare_prices`** — Compares prices across merchants by keyword or EAN/GTIN barcode, combining live partner offers (when configured) with 1-click regional comparison portal links (Geizhals, idealo, billiger.de, Toppreise.ch, Google Shopping).
 9. **`find_hot_deals`** — Discovers active partner promotions and vouchers (when configured) alongside 1-click regional deal community search links (Preisjäger, mydealz, HotUKDeals, Dealabs, Slickdeals).
-10. **`match_visual_product`** — Zero-cost visual product search: accepts structured attributes extracted by your vision model from a user photo (`product_type`, `brand`, `model_or_text`, `ean`, `color`, `material`, `style_keywords`), queries up to 5 validated `target_stores` in parallel (plus configured partner feeds / exact EAN lookup), and returns deterministically ranked matches with confidence scores and web-search fallback queries.
+10. **`match_visual_product`** — Zero-cost visual product search: accepts structured attributes extracted from a user photo or visual description (`product_type`, `brand`, `model_or_text`, `ean`, `color`, `material`, `style_keywords`), queries up to 5 validated `target_stores` in parallel (plus configured partner feeds / exact EAN lookup), and returns deterministically ranked matches with confidence scores and web-search fallback queries.
+11. **`search_secondhand_marketplaces`** — Searches up to 16 second-hand, local classifieds (incl. German 5-digit PLZ), vintage, and refurbished marketplaces (willhaben, Kleinanzeigen, Vinted, Ricardo.ch, tutti.ch, refurbed, Back Market, rebuy, medimops, asgoodasnew, eBay, Etsy, Depop, Poshmark, buyZOXS, Vestiaire Collective) in a single call.
 
-Self-hosted only: an optional twelfth tool, `search_affiliate_deals`, appears when you configure your own Awin product feed. It is not enabled on the hosted server.
+Self-hosted only: an optional 13th tool, `search_affiliate_deals`, appears when you configure your own Awin product feed. It is not enabled on the hosted server.
 
 ### Google Gemini Setup (Web, CLI, Enterprise & SDK)
 
