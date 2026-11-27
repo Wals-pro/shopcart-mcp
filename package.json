@@ -43,11 +43,12 @@
     "dev:stdio": "tsx src/cli.ts",
     "dev:server": "tsx src/server.ts",
     "prepublishOnly": "npm run build",
+    "qa:agentic": "tsx qa/agentic/cli.ts",
     "start": "node dist/server.js",
     "start:stdio": "node dist/cli.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p qa/agentic/tsconfig.json --noEmit"
   },
   "dependencies": {
     "@google-cloud/firestore": "^7.11.0",
