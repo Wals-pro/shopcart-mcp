@@ -3,6 +3,7 @@ import type { AppConfig } from "../config.js";
 import type { ClientAuthMethod, OAuthClientRecord, StorageBackend } from "../store/types.js";
 import { isPromoFreeProActive } from "../billing/quota.js";
 import { buildOAuthCsp } from "../web/analytics.js";
+import { extractTrustedClientKey } from "../web/store-check-core.js";
 import { CimdResolver, isCimdClientId, type ResolvedOAuthClient } from "./cimd.js";
 import {
   createCsrfPair,
@@ -55,14 +56,6 @@ class SimpleRateLimiter {
     existing.count += 1;
     return true;
   }
-}
-
-function getClientIp(req: Request): string {
-  const fwd = req.headers["x-forwarded-for"];
-  if (typeof fwd === "string" && fwd.length > 0) {
-    return fwd.split(",")[0]!.trim();
-  }
-  return req.socket.remoteAddress ?? "unknown";
 }
 
 function setSecurityHeadersForHtml(
@@ -212,7 +205,7 @@ export function createOAuthRouter(
   // 2. Dynamic Client Registration (RFC 7591)
   router.post("/oauth/register", express.json({ limit: "32kb" }), async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
-    const ip = getClientIp(req);
+    const ip = extractTrustedClientKey(req, config.trustedProxyHops);
     if (!rateLimiter.check(`dcr:${ip}`, 30, 15 * 60 * 1000)) {
       res.status(429).json({
         error: "too_many_requests",
@@ -367,7 +360,7 @@ export function createOAuthRouter(
     const codeChallenge = String(req.query.code_challenge ?? "").trim();
     const codeChallengeMethod = String(req.query.code_challenge_method ?? "").trim();
     const state = String(req.query.state ?? "");
-    const rawResource = typeof req.query.resource === "string" ? req.query.resource : undefined;
+    const queryResource: unknown = req.query.resource;
     const rawScope = typeof req.query.scope === "string" ? req.query.scope : "";
     const lang = detectLang(req.query.lang, req.headers["accept-language"]);
 
@@ -401,7 +394,12 @@ export function createOAuthRouter(
       return;
     }
 
-    const resolvedRes = resolveResourceParam(rawResource, canonicalResource);
+    if (queryResource !== undefined && typeof queryResource !== "string") {
+      redirectError("invalid_target", "Multiple or invalid resource parameters are not supported");
+      return;
+    }
+
+    const resolvedRes = resolveResourceParam(queryResource, canonicalResource);
     if (!resolvedRes.ok) {
       redirectError(resolvedRes.error, resolvedRes.description);
       return;
@@ -453,9 +451,9 @@ export function createOAuthRouter(
       const redirectUri = (body.redirect_uri ?? "").trim();
       const codeChallenge = (body.code_challenge ?? "").trim();
       const codeChallengeMethod = (body.code_challenge_method ?? "").trim();
-      const rawResource = body.resource;
+      const rawResource: unknown = (req.body as Record<string, unknown> | undefined)?.resource;
       const scopeStr = normalizeScopes(body.scope).join(" ");
-      const state = body.state ?? "";
+      const state = typeof body.state === "string" ? body.state : "";
       const email = normalizeEmail(body.email ?? "");
       const challengeId = (body.challenge_id ?? "").trim();
       const otpCode = body.code ?? "";
@@ -469,6 +467,19 @@ export function createOAuthRouter(
 
       if (!codeChallenge || codeChallengeMethod !== "S256") {
         res.status(400).send("PKCE S256 required");
+        return;
+      }
+
+      if (rawResource !== undefined && typeof rawResource !== "string") {
+        const target = new URL(redirectUri);
+        target.searchParams.set("error", "invalid_target");
+        target.searchParams.set(
+          "error_description",
+          "Multiple or invalid resource parameters are not supported"
+        );
+        if (state) target.searchParams.set("state", state);
+        target.searchParams.set("iss", issuer);
+        res.redirect(303, target.toString());
         return;
       }
 
@@ -556,7 +567,7 @@ export function createOAuthRouter(
         return;
       }
 
-      const ip = getClientIp(req);
+      const ip = extractTrustedClientKey(req, config.trustedProxyHops);
 
       if (step === "email") {
         const requested = await otpService.requestChallenge({
@@ -891,13 +902,22 @@ export function createOAuthRouter(
         }
       }
 
+      const rawBodyResource: unknown = (req.body as Record<string, unknown> | undefined)?.resource;
+      if (rawBodyResource !== undefined && typeof rawBodyResource !== "string") {
+        res.status(400).json({
+          error: "invalid_target",
+          error_description: "Multiple or invalid resource parameters are not supported"
+        });
+        return;
+      }
+
       const grantType = (body.grant_type ?? "").trim();
 
       if (grantType === "authorization_code") {
         const code = (body.code ?? "").trim();
         const redirectUri = (body.redirect_uri ?? "").trim();
         const codeVerifier = (body.code_verifier ?? "").trim();
-        const rawResource = body.resource;
+        const rawResource = rawBodyResource;
 
         if (!code || !redirectUri || !codeVerifier) {
           res.status(400).json({
@@ -989,7 +1009,7 @@ export function createOAuthRouter(
 
       if (grantType === "refresh_token") {
         const rawRefresh = (body.refresh_token ?? "").trim();
-        const rawResource = body.resource;
+        const rawResource = rawBodyResource;
         if (!rawRefresh) {
           res.status(400).json({
             error: "invalid_request",

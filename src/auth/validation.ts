@@ -119,13 +119,25 @@ export function filterDcrRedirectUris(rawUris: unknown): {
  * Reject any foreign/non-canonical resource fail-closed.
  */
 export function resolveResourceParam(
-  rawResource: string | undefined | null,
+  rawResource: unknown,
   canonicalResource: string
 ): { ok: true; resource: string } | { ok: false; error: "invalid_target"; description: string } {
   const canonicalUrl = new URL(canonicalResource);
   const canonicalNormalized = `${canonicalUrl.origin}${canonicalUrl.pathname.replace(/\/+$/, "")}`;
 
-  if (!rawResource || rawResource.trim() === "") {
+  if (rawResource === undefined || rawResource === null) {
+    return { ok: true, resource: canonicalNormalized };
+  }
+
+  if (typeof rawResource !== "string") {
+    return {
+      ok: false,
+      error: "invalid_target",
+      description: "Multiple or invalid resource parameters are not supported"
+    };
+  }
+
+  if (rawResource.trim() === "") {
     return { ok: true, resource: canonicalNormalized };
   }
 

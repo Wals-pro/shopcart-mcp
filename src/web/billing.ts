@@ -23,6 +23,7 @@ import {
   renderCookieSettingsFooterLink
 } from "./analytics.js";
 import { renderFaviconHeadLinks, renderShopCartWordmark, renderSparkCartSvg } from "./brand.js";
+import { extractTrustedClientKey } from "./store-check-core.js";
 import { SESSION_COOKIE } from "../auth/router.js";
 import { getBerlinDayKey, getEffectiveEntitlement, isPromoFreeProActive } from "../billing/quota.js";
 import {
@@ -50,14 +51,6 @@ function formatCookie(name: string, value: string, maxAge: number, secure: boole
   ];
   if (secure) parts.push("Secure");
   return parts.join("; ");
-}
-
-function getClientIp(req: Request): string {
-  const fwd = req.headers["x-forwarded-for"];
-  if (typeof fwd === "string" && fwd.length > 0) {
-    return fwd.split(",")[0]!.trim();
-  }
-  return req.socket.remoteAddress ?? "unknown";
 }
 
 function setBillingSecurityHeaders(res: Response, config: AppConfig): void {
@@ -511,7 +504,7 @@ export function createBillingRouter(
 
     const requested = await otpService.requestChallenge({
       email,
-      ip: getClientIp(req),
+      ip: extractTrustedClientKey(req, config.trustedProxyHops),
       purpose: "billing",
       lang,
       oauthParams: null
