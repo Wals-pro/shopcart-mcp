@@ -13,7 +13,7 @@ export function registerShoppingPrompts(server: McpServer): void {
     {
       title: "Compare Prices Across Merchants",
       description:
-        "Compare prices for any product or EAN/GTIN across regional price-comparison portals (Geizhals, idealo, billiger.de, Toppreise.ch, Google Shopping) and live partner offers.",
+        "Compare prices for any product or EAN/GTIN across regional price-comparison portals (Geizhals, idealo, billiger.de, Toppreise.ch, Google Shopping) — neutral, independent ranking by price and relevance.",
       argsSchema: {
         product: z.string().min(1).max(200).describe("Product name, model, or 8-14 digit EAN/GTIN"),
         country: z

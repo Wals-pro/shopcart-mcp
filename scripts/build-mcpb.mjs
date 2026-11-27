@@ -127,10 +127,10 @@ export function createMcpbManifest(version) {
       "- `search_products` — Search public product catalogs across supported storefronts (or Amazon via optional PA-API/Keepa) with availability, price, and discount sorting (`discount_desc`, `price_asc`, `price_desc`).",
       "- `get_product` — Fetch sanitized product details, options, images, stock, compare-at discounts, and exact variant/SKU IDs or Amazon ASINs (plus optional verified thumbnail via `include_thumbnail=true`).",
       "- `get_store_policies` — Check Shopify shipping thresholds, delivery times, and return/refund policies via native Storefront MCP and public `/policies` pages.",
-      "- `find_store_discounts` — Discover official, publicly advertised Shopify promo codes (Black Friday / sale banners, deal collections) and automatic checkout deals, plus configured partner rules.",
-      "- `create_cart_link` — Build one verified cart link (Shopify with automatic promo-code discovery, Amazon), one add-to-cart link per item (WooCommerce, BigCommerce), or verified direct product links (Shopware 6, Magento 2, JSON-LD) so you review and complete checkout yourself.",
-      "- `compare_prices` — Compare product prices across merchants by keyword or EAN/GTIN barcode with optional live partner offers and 1-click regional comparison portal links.",
-      "- `find_hot_deals` — Discover active partner promotions and vouchers alongside 1-click regional deal community search links.",
+      "- `find_store_discounts` — Discover official, publicly advertised Shopify promo codes (Black Friday / sale banners, deal collections) and automatic checkout deals published on the merchant's storefront.",
+      "- `create_cart_link` — Build one verified cart link (Shopify with optional public promo-code discovery, Amazon), one add-to-cart link per item (WooCommerce, BigCommerce), or verified direct product links (Shopware 6, Magento 2, JSON-LD) so you review and complete checkout yourself.",
+      "- `compare_prices` — Neutral, independent price comparison across merchants by keyword or EAN/GTIN barcode with 1-click regional comparison portal links (zero pay-to-rank).",
+      "- `find_hot_deals` — Neutral, independent discovery of public promotions, vouchers, and 1-click regional deal community search links (zero pay-to-rank).",
       "- `match_visual_product` — Match a product seen in a user-uploaded photo across up to 5 public online stores in parallel using structured visual attributes and deterministic scoring.",
       "- `search_secondhand_marketplaces` — Generate verified, pre-filtered search deep-links across up to 16 second-hand, classifieds, vintage, and refurbished marketplaces in a single call with zero scraping.",
       "",
@@ -221,12 +221,12 @@ export function createMcpbManifest(version) {
       {
         name: "compare_prices",
         description:
-          "Use proactively to compare prices across merchants by keyword or EAN/GTIN across Geizhals, idealo, billiger.de, Toppreise.ch, Google Shopping, and partner offers (DE, AT, CH, UK, FR, US)."
+          "Use proactively for neutral, independent price comparison by keyword or EAN/GTIN across Geizhals, idealo, billiger.de, Toppreise.ch, and Google Shopping (DE, AT, CH, UK, FR, US) — zero pay-to-rank."
       },
       {
         name: "find_hot_deals",
         description:
-          "Use proactively to find current offers, promotions, vouchers, and regional deal communities (mydealz, Preisjäger, HotUKDeals, Dealabs, Slickdeals) across DE, AT, CH, UK, FR, and US."
+          "Use proactively for neutral, independent discovery of current offers, public vouchers, and regional deal communities (mydealz, Preisjäger, HotUKDeals, Dealabs, Slickdeals) across DE, AT, CH, UK, FR, and US — zero pay-to-rank."
       },
       {
         name: "match_visual_product",

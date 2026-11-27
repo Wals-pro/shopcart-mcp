@@ -99,7 +99,15 @@ describe("Fixture MCP Server over InMemoryTransport", () => {
     const session = await createMcpTestSession();
     try {
       expect(session.serverInstructions).toBe(SERVER_INSTRUCTIONS);
+      expect(session.serverInstructions).toMatch(/neutral.*independent.*zero pay-to-rank/i);
       expect(session.tools).toHaveLength(12);
+      // Guard against distrust-triggering internal affiliate/partner jargon in public tool descriptions & schemas
+      for (const tool of session.tools) {
+        const surface = `${tool.description} ${JSON.stringify(tool.input_schema)}`.toLowerCase();
+        expect(surface, `${tool.name} must not expose partner-rule/Awin jargon`).not.toMatch(
+          /partner rule|configured partner|awin|when configured|partner feed|partner promotion|partner voucher/
+        );
+      }
       expect(session.prompts.map((p) => p.name)).toEqual([
         "compare-prices",
         "find-secondhand",

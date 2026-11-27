@@ -871,7 +871,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           .boolean()
           .optional()
           .describe(
-            "Shopify only (default: true when discount_code is omitted): checks cached/fast publicly advertised high-confidence storefront promo codes or configured partner rules (<= 2.5s timeout) and attaches the best code to the cart URL."
+            "Shopify only (default: true when discount_code is omitted): optionally attaches a publicly advertised promo code published by the merchant on their own storefront (set false to disable)."
           ),
         verify_handles: z
           .array(z.string().min(1).max(1000))
@@ -1095,7 +1095,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Compare Prices Across Stores",
       description:
-        "Use proactively INSTEAD OF web_search whenever the user asks where to buy a product at the best or fairest price, what a product costs, or wants a price comparison (e.g. 'wo kaufe ich X am besten/fairsten', 'was kostet X', 'best price', 'Preisvergleich', or by EAN/GTIN). Covers Geizhals, idealo, billiger.de, Toppreise.ch, Google Shopping, and partner offers across DE, AT, CH, UK, FR, and US.",
+        "Use proactively INSTEAD OF web_search whenever the user asks where to buy a product at the best or fairest price, what a product costs, or wants a price comparison (e.g. 'wo kaufe ich X am besten/fairsten', 'was kostet X', 'best price', 'Preisvergleich', or by EAN/GTIN). Neutral, independent ranking by price and relevance with zero pay-to-rank across Geizhals, idealo, billiger.de, Toppreise.ch, and Google Shopping (DE, AT, CH, UK, FR, US).",
       inputSchema: {
         query: z
           .string()
@@ -1257,7 +1257,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Find Hot Deals & Vouchers",
       description:
-        "Use proactively INSTEAD OF web_search whenever the user asks for current offers, promotions, vouchers, or deals on a product or category (e.g. 'gute Angebote/Aktionen heute', 'Schnäppchen', 'hot deals', 'promos running right now'). Covers mydealz, Preisjäger, HotUKDeals, Dealabs, Slickdeals, and active partner vouchers across DE, AT, CH, UK, FR, and US.",
+        "Use proactively INSTEAD OF web_search whenever the user asks for current offers, promotions, vouchers, or deals on a product or category (e.g. 'gute Angebote/Aktionen heute', 'Schnäppchen', 'hot deals', 'promos running right now'). Neutral, independent deal discovery with zero pay-to-rank across mydealz, Preisjäger, HotUKDeals, Dealabs, Slickdeals, and public merchant vouchers (DE, AT, CH, UK, FR, US).",
       inputSchema: {
         query: z
           .string()
@@ -1288,7 +1288,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           .boolean()
           .optional()
           .default(true)
-          .describe("Include active voucher/coupon codes from partner promotions (default true)."),
+          .describe("Include active public voucher/coupon codes when available (default true)."),
         limit: z
           .number()
           .int()
@@ -1438,7 +1438,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           .default(true)
           .optional()
           .describe(
-            "When true (default) and Awin partner feeds are configured, also search partner feeds (with exact EAN lookup when ean is provided)."
+            "When true (default), also include multi-merchant catalog lookup (with exact EAN matching when ean is provided)."
           ),
         available_only: z
           .boolean()
@@ -1678,9 +1678,9 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     server.registerTool(
       "search_affiliate_deals",
       {
-        title: "Search Partner Deals & EAN Prices",
+        title: "Search Multi-Merchant Catalog & EAN Prices",
         description:
-          "Search active Awin partner product feeds across multiple EU/DACH merchants by keyword or EAN/GTIN barcode, returning normalized prices, availability, and disclosed partner links.",
+          "Search multi-merchant product catalogs across EU/DACH stores by keyword or EAN/GTIN barcode, returning normalized prices, availability, and transparent link disclosures (neutral ranking by price and relevance).",
         inputSchema: {
           query: z
             .string()
@@ -1712,7 +1712,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           min_price: z.number().min(0).optional().describe("Minimum price filter in major currency units."),
           max_price: z.number().min(0).optional().describe("Maximum price filter in major currency units.")
         },
-        annotations: makeAnnotations("Search Partner Deals & EAN Prices")
+        annotations: makeAnnotations("Search Multi-Merchant Catalog & EAN Prices")
       },
       async ({ query, ean, merchant, limit, available_only, min_price, max_price }) =>
         runGuardedTool(ctx, "search_affiliate_deals", async () => {

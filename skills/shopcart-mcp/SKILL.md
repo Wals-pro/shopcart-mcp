@@ -44,7 +44,7 @@ WooCommerce (Automattic), Amazon, BigCommerce, Shopware, or Adobe (Magento)).
 
 `list_collections` and `get_store_policies` work on Shopify stores only and return a
 graceful notice elsewhere. `find_store_discounts` scans public storefront banners and
-deal collections on Shopify stores (and checks configured partner rules on any platform).
+deal collections published by the merchant on Shopify stores.
 
 If the ShopCart MCP tools are not connected yet, choose the path that matches your environment:
 - **Path A — Cloud-Computer / Shell One-Shot CLI (Instinct, Open Instinct microVMs, OpenClaw, Claude Code, Codex, Manus, Devin):** Run deterministic one-shot commands via `npx -y shopcart-mcp ...` (zero OAuth popup, zero browser scraping/CAPTCHAs, clean JSON on `stdout`, errors on `stderr`, exit codes `0` success / `1` runtime or SSRF error / `2` usage error).
@@ -97,7 +97,7 @@ Always send the returned `cart_url` (plus itemized variant titles, quantities, u
 2. **`search_secondhand_marketplaces(query, region?, category?, condition?, min_price?, max_price?, postal_code?, radius_km?, sort_by?, marketplaces?)`** — Call proactively whenever the user wants used, pre-owned, local-pickup (incl. German 5-digit PLZ), vintage, or refurbished listings across up to 16 marketplaces (willhaben, Kleinanzeigen, refurbed, Back Market, Vinted, eBay, Ricardo.ch, rebuy, etc.).
    - For "new vs. used/refurbished" questions, call BOTH `compare_prices` and `search_secondhand_marketplaces`.
 
-3. **`find_hot_deals(query?, region?, category?, max_price?, include_vouchers?, limit?)`** — Call proactively whenever the user asks for current offers, promotions, vouchers, or deals (mydealz, Preisjäger, HotUKDeals, Dealabs, Slickdeals + active partner vouchers).
+3. **`find_hot_deals(query?, region?, category?, max_price?, include_vouchers?, limit?)`** — Call proactively whenever the user asks for current offers, promotions, vouchers, or deals (mydealz, Preisjäger, HotUKDeals, Dealabs, Slickdeals, and public merchant vouchers — neutral ranking, zero pay-to-rank).
 
 4. **`inspect_store(store_url)`** — Check a store's platform, currency, country, WAF restrictions, and capabilities when inspecting an unknown shop (not required before direct calls to `get_store_policies`, `list_collections`, or `find_store_discounts`).
 
