@@ -138,16 +138,21 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
     expect(order.every((pos) => pos > 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
 
-    // No developer jargon above the fold (hero)
+    // Default Claude tab above the fold speaks pure shopper language (no developer jargon visible on initial load)
     const hero = de.text.slice(de.text.indexOf('id="top"'), de.text.indexOf('id="demo"'));
-    expect(hero).not.toMatch(/OAuth|npx|RFC|JSON|stdio|server\.json/);
+    const defaultClaudePanel = hero.slice(
+      hero.indexOf('id="connect-hero-panel-claude"'),
+      hero.indexOf('id="connect-hero-panel-chatgpt"')
+    );
+    expect(defaultClaudePanel).not.toMatch(/OAuth|npx|RFC|JSON|stdio|server\.json/);
 
     // Shopping moments on the wave instead of RFC codes; brand always lowercase
     expect(hero).toContain("Warenkorb bereit ✓");
     expect(hero).toContain("Checkout-Link");
     expect(de.text).not.toMatch(/Wals\.pro|WALS\.PRO/);
+    expect(de.text).not.toMatch(/odoo/i);
 
-    const en = await request(app).get("/?lang=en").expect(200);
+    const en = await request(app).get("/en").expect(200);
     expect(en.headers["content-language"]).toBe("en");
     expect(en.text).toContain("Let Claude, ChatGPT &amp; Gemini");
     expect(en.text).toContain("fill your shopping cart.");
@@ -160,9 +165,10 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
     expect(en.text).toContain("AI shopping assistant");
     expect(en.text).toContain("For developers &amp; self-hosting");
     expect(en.text).not.toMatch(/Wals\.pro|WALS\.PRO/);
+    expect(en.text).not.toMatch(/odoo/i);
   });
 
-  it("offers an honest 2-click connect plus prefilled start-prompt deeplinks into Claude, ChatGPT & Perplexity, in the hero and after the demo", async () => {
+  it("renders the streamlined 4-tab Connect client switcher (Claude default, ChatGPT, Cursor/CLI, Other MCP) in DE & EN with strict CSP and WAI-ARIA", async () => {
     const { app, config } = makeLandingApp();
     const expectedDe = buildStartPrompt(config, "de");
     expect(expectedDe).toContain("Verbinde ShopCart (https://shopcart.wals.pro/mcp) für mich");
@@ -170,46 +176,110 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
     expect(expectedDe).toContain("Wunsch-Shop");
 
     const de = await request(app).get("/?lang=de").expect(200);
-    expect(de.text.match(/data-launcher/g)).toHaveLength(2);
-    expect(de.text.match(/Lass meine KI das einrichten/g)?.length).toBeGreaterThanOrEqual(2);
-    for (const label of [
-      "Mit Claude verbinden",
-      "Mit ChatGPT verbinden",
-      "Mit Gemini verbinden",
-      "In Claude starten",
-      "In ChatGPT starten",
-      "In Perplexity starten",
-      "Startprompt für jede andere KI kopieren"
+    const en = await request(app).get("/en").expect(200);
+    const enQuery = await request(app).get("/?lang=en").expect(200);
+    expect(en.text).toBe(enQuery.text);
+
+    // /en/guides overview route resolves cleanly for the EN "Other MCP clients" link
+    await request(app).get("/en/guides").expect(200);
+
+    // Both hero and post-demo connect switchers are rendered cleanly
+    expect(de.text.match(/data-connect-switcher/g)).toHaveLength(2);
+    expect(en.text.match(/data-connect-switcher/g)).toHaveLength(2);
+
+    // Verify 4 accessible tabs per switcher, Claude active by default (SSR-visible), others hidden="until-found"
+    for (const { html, lang } of [
+      { html: de.text, lang: "de" as const },
+      { html: en.text, lang: "en" as const }
     ]) {
-      expect(de.text.match(new RegExp(`<span>${label}</span>`, "g"))).toHaveLength(2);
+      const heroStart = html.indexOf('id="start"');
+      const heroEnd = html.indexOf('<ul class="trust-strip">');
+      const switcher = html.slice(heroStart, heroEnd);
+
+      // 4 WAI-ARIA tabs with aria-controls & aria-selected
+      expect(switcher.match(/role="tab"/g)).toHaveLength(4);
+      expect(switcher.match(/role="tabpanel"/g)).toHaveLength(4);
+      expect(switcher).toContain('role="tablist"');
+      expect(switcher).toContain(
+        'id="connect-hero-tab-claude" class="connect-tab" aria-selected="true" aria-controls="connect-hero-panel-claude" tabindex="0"'
+      );
+      expect(switcher).toContain(
+        'id="connect-hero-tab-chatgpt" class="connect-tab" aria-selected="false" aria-controls="connect-hero-panel-chatgpt" tabindex="-1"'
+      );
+      expect(switcher).toContain(
+        'id="connect-hero-tab-cli" class="connect-tab" aria-selected="false" aria-controls="connect-hero-panel-cli" tabindex="-1"'
+      );
+      expect(switcher).toContain(
+        'id="connect-hero-tab-other" class="connect-tab" aria-selected="false" aria-controls="connect-hero-panel-other" tabindex="-1"'
+      );
+
+      // Default Claude panel is SSR-visible (not hidden), other 3 panels have hidden="until-found"
+      expect(switcher).toContain(
+        '<div role="tabpanel" id="connect-hero-panel-claude" aria-labelledby="connect-hero-tab-claude">'
+      );
+      expect(switcher.match(/hidden="until-found"/g)).toHaveLength(3);
+
+      // Default Claude tab: 1 direct primary CTA to Claude Directory, free tier 20 calls/day, collapsed <details> for manual & .mcpb
+      const claudePanel = switcher.slice(
+        switcher.indexOf('id="connect-hero-panel-claude"'),
+        switcher.indexOf('id="connect-hero-panel-chatgpt"')
+      );
+      expect(claudePanel).toContain('href="https://claude.ai/directory/shopcart-mcp"');
+      expect(claudePanel).toContain('data-track-event="connect_ai_click" data-track-client="claude" data-track-location="hero"');
+      expect(claudePanel.match(/class="btn-connect-primary"/g)).toHaveLength(1);
+      expect(claudePanel).toContain("<details class=\"connect-details\">");
+      expect(claudePanel).not.toContain("<details class=\"connect-details\" open");
+      expect(claudePanel).toContain('href="/downloads/shopcart-mcp.mcpb" download');
+      expect(claudePanel).toContain('data-track-event="download_mcpb" data-track-source="hero"');
+      expect(claudePanel).toContain('data-copy-target="connect-hero-url-claude"');
+
+      if (lang === "de") {
+        expect(claudePanel).toContain("<span>In Claude verbinden</span>");
+        expect(claudePanel).toMatch(/20(?:\s|&nbsp;)Calls\/Tag/);
+        expect(claudePanel).toContain("Manuelle Einrichtung oder Claude Desktop (.mcpb)");
+        expect(switcher).toContain("Andere MCP-Clients");
+        expect(switcher).toContain('href="/guides"');
+        expect(switcher).toContain('data-copied-label="Kopiert ✓"');
+      } else {
+        expect(claudePanel).toContain("<span>Connect in Claude</span>");
+        expect(claudePanel).toMatch(/20(?:\s|&nbsp;)calls\/day/);
+        expect(claudePanel).toContain("Manual setup or Claude Desktop (.mcpb)");
+        expect(switcher).toContain("Other MCP clients");
+        expect(switcher).toContain('href="/en/guides"');
+        expect(switcher).toContain('data-copied-label="Copied ✓"');
+      }
+
+      // ChatGPT panel: endpoint + copy button + honest "In review" notice
+      const chatgptPanel = switcher.slice(
+        switcher.indexOf('id="connect-hero-panel-chatgpt"'),
+        switcher.indexOf('id="connect-hero-panel-cli"')
+      );
+      expect(chatgptPanel).toContain('id="connect-hero-url-chatgpt">https://shopcart.wals.pro/mcp</code>');
+      expect(chatgptPanel).toContain('data-copy-target="connect-hero-url-chatgpt"');
+      expect(chatgptPanel).toContain("In review");
+
+      // Cursor / Claude Code / CLI panel: compact npx command + copy button + claude mcp add + Cursor link
+      const cliPanel = switcher.slice(
+        switcher.indexOf('id="connect-hero-panel-cli"'),
+        switcher.indexOf('id="connect-hero-panel-other"')
+      );
+      expect(cliPanel).toContain('id="connect-hero-cmd-cli">npx -y shopcart-mcp</code>');
+      expect(cliPanel).toContain('data-copy-target="connect-hero-cmd-cli"');
+      expect(cliPanel).toContain("claude mcp add --transport http shopcart https://shopcart.wals.pro/mcp");
+
+      // Other MCP clients panel: endpoint + copy button + guides link
+      const otherPanel = switcher.slice(switcher.indexOf('id="connect-hero-panel-other"'));
+      expect(otherPanel).toContain('id="connect-hero-url-other">https://shopcart.wals.pro/mcp</code>');
+      expect(otherPanel).toContain('data-copy-target="connect-hero-url-other"');
+      expect(otherPanel).toContain('role="status" aria-live="polite" data-copy-live');
+
+      // Zero inline scripts, inline styles, or inline handlers
+      expect(switcher).not.toMatch(/<script| style="| on[a-z]+="/i);
     }
 
-    // Step 1 "Einmalig verbinden": copies the connector URL and opens the AI's connector settings.
-    // No fake "1-click install" promise: neither Claude nor ChatGPT lets a website install a custom connector.
-    expect(
-      de.text.match(
-        /data-connect="claude" data-connect-url="https:\/\/shopcart\.wals\.pro\/mcp"[^>]*href="https:\/\/claude\.ai\/settings\/connectors" target="_blank" rel="noopener"/g
-      )
-    ).toHaveLength(2);
-    expect(
-      de.text.match(
-        /data-connect="chatgpt" data-connect-url="https:\/\/shopcart\.wals\.pro\/mcp"[^>]*href="https:\/\/chatgpt\.com\/#settings\/Connectors" target="_blank" rel="noopener"/g
-      )
-    ).toHaveLength(2);
-    expect(de.text).toContain("Link kopiert ✓ – einfach in Claude einfügen &amp; verbinden.");
-    expect(de.text.match(/data-connect-status role="status" aria-live="polite"/g)).toHaveLength(2);
-    expect(de.text.indexOf("Einmalig verbinden")).toBeLessThan(de.text.indexOf("Sofort losshoppen"));
-    expect(de.text).not.toMatch(/1[- ]Klick[- ]Connect|automatisch installiert/i);
+    // Helper functions and start-prompt links remain intact for Use Cases section
     const encoded = encodePrompt(expectedDe);
     expect(encoded).not.toMatch(/['()"<>&\s]/);
-    expect(de.text).toContain(`href="https://claude.ai/new?q=${encoded}"`);
-    expect(de.text).toContain(`href="https://chatgpt.com/?q=${encoded}"`);
-    expect(de.text).toContain(`href="https://www.perplexity.ai/search?q=${encoded}"`);
-    expect(de.text).toContain('data-copied-label="Kopiert ✓"');
-    expect(de.text).toContain('data-copy-target="mcp-url-hero"');
-    expect(de.text).toContain('<code class="url-copy-value" id="mcp-url-hero">https://shopcart.wals.pro/mcp</code>');
-
-    // Wish chips make the prompt concrete; every chip carries a full prompt tail
     const deWishes = getWishes("de");
     expect(deWishes.map((w) => w.label)).toEqual([
       "SNOCKS Socken-Bundle",
@@ -217,31 +287,17 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
       "PURELEI Geschenk unter 50 €",
       "Eigener Wunsch-Shop"
     ]);
-    for (const wish of deWishes) {
-      expect(de.text).toContain(`>${wish.label}</button>`);
-      expect(wish.tail.length).toBeGreaterThan(20);
-    }
     expect(buildAiLinks(buildStartPrompt(config, "de", deWishes[0]!.tail)).claude).toMatch(
       /^https:\/\/claude\.ai\/new\?q=Verbinde%20ShopCart%20%28https%3A%2F%2Fshopcart\.wals\.pro%2Fmcp%29/
     );
+    expect(getWishes("en").map((w) => w.label)).toEqual([
+      "Allbirds sneakers",
+      "Holiday gift under $50",
+      "SNOCKS bundle",
+      "My own store"
+    ]);
 
-    const en = await request(app).get("/?lang=en").expect(200);
-    const expectedEn = buildStartPrompt(config, "en");
-    expect(en.text).toContain(`href="https://claude.ai/new?q=${encodePrompt(expectedEn)}"`);
-    expect(en.text).toContain(`href="https://chatgpt.com/?q=${encodePrompt(expectedEn)}"`);
-    expect(en.text.match(/Let my AI set this up for me/g)?.length).toBeGreaterThanOrEqual(2);
-    for (const label of [
-      "Connect to Claude",
-      "Connect to ChatGPT",
-      "Connect to Gemini",
-      "Start in Claude",
-      "Start in ChatGPT"
-    ]) {
-      expect(en.text.match(new RegExp(`<span>${label}</span>`, "g"))).toHaveLength(2);
-    }
-    expect(en.text).toContain("Link copied ✓ – just paste it into Claude and connect.");
-
-    // Native 1-click install deeplinks only where the app supports them (developer section)
+    // Native 1-click install deeplinks
     const install = buildInstallLinks(config);
     expect(install.cursor).toMatch(/^cursor:\/\/anysphere\.cursor-deeplink\/mcp\/install\?name=shopcart&config=[A-Za-z0-9%]+$/);
     const cursorConfig = decodeURIComponent(install.cursor.split("config=")[1]!);
@@ -257,17 +313,9 @@ describe("Landing page, static assets, CSP & demo video embeds", () => {
     const devSection = en.text.slice(en.text.indexOf('id="developers"'));
     expect(devSection).toContain(`href="${install.cursor.replace(/&/g, "&amp;")}"`);
     expect(devSection).toContain("Install in VS Code");
-    // Claude Desktop extension (.mcpb): offered in the launcher (hero + after demo) and in the developer section
+    // Claude Desktop extension (.mcpb): inside collapsed <details> (hero + demo) and in developer section
     expect(en.text.match(/href="\/downloads\/shopcart-mcp\.mcpb" download/g)).toHaveLength(3);
     await request(app).get("/downloads/shopcart-mcp.mcpb").expect(200);
-    expect(en.text.slice(0, en.text.indexOf('id="developers"'))).not.toContain("cursor://");
-    expect(getWishes("en").map((w) => w.label)).toEqual([
-      "Allbirds sneakers",
-      "Holiday gift under $50",
-      "SNOCKS bundle",
-      "My own store"
-    ]);
-    expect(en.text).toContain('data-copied-label="Copied ✓"');
   });
 
   it("shows all 7 connected platforms in an honest capability matrix plus the comfort features (DE + EN)", async () => {

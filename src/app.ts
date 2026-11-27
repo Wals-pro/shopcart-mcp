@@ -387,8 +387,7 @@ export function createApp(deps: CreateAppDeps): Express {
   const landingCsp = buildLandingCsp(config.ga4MeasurementId);
   const legalCsp = buildLegalCsp(config.ga4MeasurementId);
 
-  app.get("/", (req, res) => {
-    const lang = detectLang(req.query.lang, req.headers["accept-language"]);
+  const sendLanding = (res: Response, lang: "de" | "en"): void => {
     res.setHeader("Content-Security-Policy", landingCsp);
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
@@ -405,6 +404,15 @@ export function createApp(deps: CreateAppDeps): Express {
       ].join(", ")
     );
     res.status(200).type("html").send(renderLandingPage(config, lang));
+  };
+
+  app.get("/", (req, res) => {
+    const lang = detectLang(req.query.lang, req.headers["accept-language"]);
+    sendLanding(res, lang);
+  });
+
+  app.get("/en", (_req, res) => {
+    sendLanding(res, "en");
   });
 
   // 8b. Agent discovery files: llms.txt, llms-full.txt, robots.txt, sitemap.xml

@@ -8,20 +8,17 @@ import {
 } from "./analytics.js";
 import { renderFaviconHeadLinks, renderShopCartWordmark, renderSparkCartSvg } from "./brand.js";
 import {
-  AI_LINK_BASES,
+  CLAUDE_DIRECTORY_URL,
   CONNECT_SETTINGS_URLS,
   EXAMPLE_PRICES_VERIFIED_DE,
   EXAMPLE_PRICES_VERIFIED_EN,
   buildAiLinks,
   buildInstallLinks,
   buildJsonLd,
-  buildStartPrompt,
-  defaultPromptTail,
   formatPromoEnd,
   getFaq,
   getHowTo,
   getUseCases,
-  getWishes,
   serializeJsonLd,
   startPromptHead,
   taskTail
@@ -364,111 +361,103 @@ function getHeroChips(lang: Lang): Array<{ t: string; k: "item" | "price" | "rea
       ];
 }
 
-function renderLauncher(config: AppConfig, lang: Lang, slot: "hero" | "demo"): string {
+function renderConnectSwitcher(config: AppConfig, lang: Lang, slot: "hero" | "demo"): string {
   const de = lang === "de";
   const mcpUrl = `${config.appOrigin}/mcp`;
-  const head = startPromptHead(config, lang);
-  const defaultTail = defaultPromptTail(lang);
-  const prompt = buildStartPrompt(config, lang);
-  const links = buildAiLinks(prompt);
-  const wishes = getWishes(lang);
+  const freeLimit = config.freeDailyLimit;
+  const installLinks = buildInstallLinks(config);
   const copied = de ? "Kopiert ✓" : "Copied ✓";
-
-  const connectHintClaude = de
-    ? "Link kopiert ✓ – einfach in Claude einfügen & verbinden."
-    : "Link copied ✓ – just paste it into Claude and connect.";
-  const connectHintChatgpt = de
-    ? "Link kopiert ✓ – in ChatGPT: Einstellungen → Connectors → eigenen Connector hinzufügen (Plus/Pro)."
-    : "Link copied ✓ – in ChatGPT: Settings → Connectors → add a custom connector (Plus/Pro).";
-  const connectHintGemini = de
-    ? "Link kopiert ✓ – in Google Gemini: Einstellungen → Verbundene Apps → Eigene Apps → App hinzufügen (persönliches Google-Konto & Aktivitäten speichern aktiv)."
-    : "Link copied ✓ – in Google Gemini: Settings → Connected Apps → Custom apps → Add a custom app (personal Google account & Keep Activity enabled).";
-  const connectHintFailed = de
-    ? "Kopieren hat nicht geklappt – bitte den Link unten manuell kopieren."
-    : "Copying didn't work – please copy the link below manually.";
-
   const trackLocation = slot === "hero" ? "hero" : "one_click";
+  const guidesHref = de ? "/guides" : "/en/guides";
+  const claudeCodeCmd = `claude mcp add --transport http shopcart ${mcpUrl}`;
 
   return `<div
-    class="launcher launcher-${slot}"
+    class="connect-card connect-card-${slot}"
     ${slot === "hero" ? 'id="start"' : ""}
-    data-launcher
-    data-prompt-head="${escapeHtml(head)}"
-    data-default-tail="${escapeHtml(defaultTail)}"
+    data-connect-switcher
+    data-tabs-root
   >
-    <div class="launcher-head">
-      <span class="launcher-title">${de ? "Lass meine KI das einrichten" : "Let my AI set this up for me"}</span>
-      <span class="launcher-hint">${de ? "2 Klicks, null Technik." : "2 clicks, zero tech."}</span>
+    <div class="connect-tablist" role="tablist" aria-label="${de ? "KI-Client auswählen" : "Choose AI client"}">
+      <button type="button" role="tab" id="connect-${slot}-tab-claude" class="connect-tab" aria-selected="true" aria-controls="connect-${slot}-panel-claude" tabindex="0" data-track-event="setup_tab_select" data-track-client="claude">Claude</button>
+      <button type="button" role="tab" id="connect-${slot}-tab-chatgpt" class="connect-tab" aria-selected="false" aria-controls="connect-${slot}-panel-chatgpt" tabindex="-1" data-track-event="setup_tab_select" data-track-client="chatgpt">ChatGPT</button>
+      <button type="button" role="tab" id="connect-${slot}-tab-cli" class="connect-tab" aria-selected="false" aria-controls="connect-${slot}-panel-cli" tabindex="-1" data-track-event="setup_tab_select" data-track-client="cursor">Cursor / Claude Code / CLI</button>
+      <button type="button" role="tab" id="connect-${slot}-tab-other" class="connect-tab" aria-selected="false" aria-controls="connect-${slot}-panel-other" tabindex="-1" data-track-event="setup_tab_select" data-track-client="generic">${de ? "Andere MCP-Clients" : "Other MCP clients"}</button>
     </div>
 
-    <div class="launch-step">
-      <div class="launch-step-head">
-        <span class="launch-step-num" aria-hidden="true">1</span>
-        <span class="launch-step-title">${de ? "Einmalig verbinden" : "Connect once"}</span>
+    <div class="connect-panels">
+      <div role="tabpanel" id="connect-${slot}-panel-claude" aria-labelledby="connect-${slot}-tab-claude">
+        <div class="connect-panel-body">
+          <div class="connect-primary-row">
+            <a class="btn-connect-primary" href="${CLAUDE_DIRECTORY_URL}" target="_blank" rel="noopener noreferrer" data-track-event="connect_ai_click" data-track-client="claude" data-track-location="${trackLocation}">
+              <span>${de ? "In Claude verbinden" : "Connect in Claude"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
+            </a>
+          </div>
+          <p class="connect-note">${
+            de
+              ? `1-Klick im Claude Directory – nach 1× Web-Connect auch in der Claude Mobile App. Gratis: <strong>${freeLimit}&nbsp;Calls/Tag</strong>.`
+              : `1-click in the Claude Directory — after connecting once on web, it also works in the Claude mobile app. Free: <strong>${freeLimit}&nbsp;calls/day</strong>.`
+          }</p>
+          <details class="connect-details">
+            <summary>${de ? "Manuelle Einrichtung oder Claude Desktop (.mcpb)" : "Manual setup or Claude Desktop (.mcpb)"}</summary>
+            <div class="connect-details-body">
+              <div class="connect-copy-row connect-copy-row-compact">
+                <code class="connect-code" id="connect-${slot}-url-claude">${escapeHtml(mcpUrl)}</code>
+                <button type="button" class="copy-mini" data-copy-target="connect-${slot}-url-claude" data-copied-label="${copied}" data-track-event="copy_setup_snippet" data-track-client="claude" data-track-snippet-type="mcp_url">${de ? "URL kopieren" : "Copy URL"}</button>
+              </div>
+              <p class="connect-details-sub">
+                <a class="connect-inline-link" href="/downloads/shopcart-mcp.mcpb" download data-track-event="download_mcpb" data-track-source="${trackLocation}">${
+                  de ? "Claude Desktop (.mcpb) herunterladen ↓" : "Download Claude Desktop (.mcpb) ↓"
+                }</a>
+              </p>
+            </div>
+          </details>
+        </div>
       </div>
-      <div class="launch-grid launch-grid-3">
-        <a class="btn-launch btn-launch-primary" data-connect="claude" data-connect-url="${escapeHtml(mcpUrl)}" data-connect-hint="${escapeHtml(connectHintClaude)}" data-connect-failed="${escapeHtml(connectHintFailed)}" data-track-event="connect_ai_click" data-track-client="claude" data-track-location="${trackLocation}" href="${CONNECT_SETTINGS_URLS.claude}" target="_blank" rel="noopener">
-          <span>${de ? "Mit Claude verbinden" : "Connect to Claude"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
-        </a>
-        <a class="btn-launch btn-launch-primary" data-connect="chatgpt" data-connect-url="${escapeHtml(mcpUrl)}" data-connect-hint="${escapeHtml(connectHintChatgpt)}" data-connect-failed="${escapeHtml(connectHintFailed)}" data-track-event="connect_ai_click" data-track-client="chatgpt" data-track-location="${trackLocation}" href="${CONNECT_SETTINGS_URLS.chatgpt}" target="_blank" rel="noopener">
-          <span>${de ? "Mit ChatGPT verbinden" : "Connect to ChatGPT"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
-        </a>
-        <a class="btn-launch btn-launch-primary" data-connect="gemini" data-connect-url="${escapeHtml(mcpUrl)}" data-connect-hint="${escapeHtml(connectHintGemini)}" data-connect-failed="${escapeHtml(connectHintFailed)}" data-track-event="connect_ai_click" data-track-client="gemini" data-track-location="${trackLocation}" href="${CONNECT_SETTINGS_URLS.gemini}" target="_blank" rel="noopener">
-          <span>${de ? "Mit Gemini verbinden" : "Connect to Gemini"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
-        </a>
+
+      <div role="tabpanel" id="connect-${slot}-panel-chatgpt" aria-labelledby="connect-${slot}-tab-chatgpt" hidden="until-found">
+        <div class="connect-panel-body">
+          <div class="connect-copy-row">
+            <code class="connect-code" id="connect-${slot}-url-chatgpt">${escapeHtml(mcpUrl)}</code>
+            <button type="button" class="btn-connect-primary btn-connect-copy" data-copy-target="connect-${slot}-url-chatgpt" data-copied-label="${copied}" data-track-event="copy_setup_snippet" data-track-client="chatgpt" data-track-snippet-type="mcp_url"><span>${de ? "Endpoint kopieren" : "Copy endpoint"}</span></button>
+          </div>
+          <p class="connect-note">${
+            de
+              ? `In ChatGPT unter <strong>Einstellungen → Apps / Connectors</strong> als Custom MCP eintragen (OAuth). OpenAI Directory: <span class="connect-badge-review">In review</span> · Gratis: <strong>${freeLimit} Calls/Tag</strong>. `
+              : `Add as a Custom MCP in ChatGPT under <strong>Settings → Apps / Connectors</strong> (OAuth). OpenAI Directory: <span class="connect-badge-review">In review</span> · Free: <strong>${freeLimit} calls/day</strong>. `
+          }<a class="connect-inline-link" href="${CONNECT_SETTINGS_URLS.chatgpt}" target="_blank" rel="noopener noreferrer" data-track-event="connect_ai_click" data-track-client="chatgpt" data-track-location="${trackLocation}">${de ? "ChatGPT öffnen ↗" : "Open ChatGPT ↗"}</a></p>
+        </div>
       </div>
-      <p class="connect-status" data-connect-status role="status" aria-live="polite">${
-        de
-          ? "Kopiert deinen ShopCart-Link und öffnet die Connector-Einstellungen: einfügen, fertig."
-          : "Copies your ShopCart link and opens the connector settings: paste it, done."
-      }</p>
-      <div class="url-copy">
-        <span class="url-copy-label">${de ? "Dein Link:" : "Your link:"}</span>
-        <code class="url-copy-value" id="mcp-url-${slot}">${escapeHtml(mcpUrl)}</code>
-        <button type="button" class="copy-mini" data-copy-target="mcp-url-${slot}" data-copied-label="${copied}" data-track-event="copy_setup_snippet" data-track-client="generic" data-track-snippet-type="mcp_url">${
-          de ? "URL kopieren" : "Copy URL"
-        }</button>
-        <a class="desktop-link" href="/downloads/shopcart-mcp.mcpb" download data-track-event="download_mcpb" data-track-source="${trackLocation}">${
-          de ? "Claude Desktop? 1-Klick-Erweiterung laden" : "Claude Desktop? Get the 1-click extension"
-        } <span aria-hidden="true">↓</span></a>
+
+      <div role="tabpanel" id="connect-${slot}-panel-cli" aria-labelledby="connect-${slot}-tab-cli" hidden="until-found">
+        <div class="connect-panel-body">
+          <div class="connect-copy-row">
+            <code class="connect-code" id="connect-${slot}-cmd-cli">npx -y shopcart-mcp</code>
+            <button type="button" class="btn-connect-primary btn-connect-copy" data-copy-target="connect-${slot}-cmd-cli" data-copied-label="${copied}" data-track-event="copy_setup_snippet" data-track-client="local" data-track-snippet-type="oneshot_cli"><span>${de ? "Befehl kopieren" : "Copy command"}</span></button>
+          </div>
+          <p class="connect-note">${
+            de
+              ? `Lokal per stdio (MIT, unbegrenzt) – oder für Claude Code gehostet: <code class="connect-inline-code">${escapeHtml(claudeCodeCmd)}</code> · `
+              : `Local stdio (MIT, unlimited) — or hosted for Claude Code: <code class="connect-inline-code">${escapeHtml(claudeCodeCmd)}</code> · `
+          }<a class="connect-inline-link" href="${escapeHtml(installLinks.cursor)}" data-track-event="connect_ai_click" data-track-client="cursor" data-track-location="${trackLocation}">${de ? "In Cursor installieren ↗" : "Install in Cursor ↗"}</a></p>
+        </div>
+      </div>
+
+      <div role="tabpanel" id="connect-${slot}-panel-other" aria-labelledby="connect-${slot}-tab-other" hidden="until-found">
+        <div class="connect-panel-body">
+          <div class="connect-copy-row">
+            <code class="connect-code" id="connect-${slot}-url-other">${escapeHtml(mcpUrl)}</code>
+            <button type="button" class="btn-connect-primary btn-connect-copy" data-copy-target="connect-${slot}-url-other" data-copied-label="${copied}" data-track-event="copy_setup_snippet" data-track-client="generic" data-track-snippet-type="mcp_url"><span>${de ? "Endpoint kopieren" : "Copy endpoint"}</span></button>
+          </div>
+          <p class="connect-note">${
+            de
+              ? `Für Google Gemini, Windsurf, Perplexity, Mistral &amp; jeden Streamable-HTTP-MCP-Client (OAuth 2.1 · <strong>${freeLimit} Calls/Tag</strong> gratis). `
+              : `For Google Gemini, Windsurf, Perplexity, Mistral &amp; any Streamable HTTP MCP client (OAuth 2.1 · <strong>${freeLimit} calls/day</strong> free). `
+          }<a class="connect-inline-link" href="${guidesHref}">${de ? "Alle Anleitungen →" : "All guides →"}</a></p>
+        </div>
       </div>
     </div>
 
-    <div class="launch-step">
-      <div class="launch-step-head">
-        <span class="launch-step-num" aria-hidden="true">2</span>
-        <span class="launch-step-title">${de ? "Sofort losshoppen" : "Start shopping"}</span>
-        <span class="launch-step-note">${de ? "Wunsch antippen ist optional" : "Picking a wish is optional"}</span>
-      </div>
-      <div class="wish-chips" role="group" aria-label="${de ? "Wunsch auswählen (optional)" : "Pick a wish (optional)"}">
-        ${wishes
-          .map(
-            (w, idx) =>
-              `<button type="button" class="wish-chip" data-wish-tail="${escapeHtml(w.tail)}" data-track-event="try_prompt_click" data-track-prompt-id="${slot}_wish_${idx + 1}" aria-pressed="false">${escapeHtml(w.label)}</button>`
-          )
-          .join("\n        ")}
-      </div>
-      <div class="launch-grid">
-        <a class="btn-launch btn-launch-start" data-ai-link="claude" data-ai-base="${AI_LINK_BASES.claude}" data-track-event="connect_ai_click" data-track-client="claude" data-track-location="${trackLocation}" href="${escapeHtml(links.claude)}" target="_blank" rel="noopener">
-          <span>${de ? "In Claude starten" : "Start in Claude"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
-        </a>
-        <a class="btn-launch btn-launch-start" data-ai-link="chatgpt" data-ai-base="${AI_LINK_BASES.chatgpt}" data-track-event="connect_ai_click" data-track-client="chatgpt" data-track-location="${trackLocation}" href="${escapeHtml(links.chatgpt)}" target="_blank" rel="noopener">
-          <span>${de ? "In ChatGPT starten" : "Start in ChatGPT"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
-        </a>
-      </div>
-      <div class="launch-more">
-        <a class="btn-launch btn-launch-ghost" data-ai-link="perplexity" data-ai-base="${AI_LINK_BASES.perplexity}" data-track-event="connect_ai_click" data-track-client="perplexity" data-track-location="${trackLocation}" href="${escapeHtml(links.perplexity)}" target="_blank" rel="noopener">
-          <span>${de ? "In Perplexity starten" : "Start in Perplexity"}</span><span class="btn-arrow" aria-hidden="true">↗</span>
-        </a>
-        <button type="button" class="btn-launch btn-launch-ghost" data-copy-prompt data-copied-label="${copied}" data-track-event="copy_setup_snippet" data-track-client="generic" data-track-snippet-type="prompt">
-          <span>${de ? "Startprompt für jede andere KI kopieren" : "Copy start prompt for any other AI"}</span>
-        </button>
-      </div>
-      <details class="prompt-peek">
-        <summary>${de ? "Startprompt ansehen" : "View start prompt"}</summary>
-        <p class="prompt-preview" data-prompt-preview>${escapeHtml(prompt)}</p>
-      </details>
-    </div>
+    <span class="visually-hidden" role="status" aria-live="polite" data-copy-live></span>
   </div>`;
 }
 
@@ -841,7 +830,7 @@ ${
             : "Tell your AI what you're looking for — it finds real products, sizes, and prices in online stores and hands you a ready-to-review cart link. You stay in full control of checkout."
         }</p>
 
-        ${renderLauncher(config, lang, "hero")}
+        ${renderConnectSwitcher(config, lang, "hero")}
 
         <ul class="trust-strip">
           <li>${de ? "Du bezahlst immer selbst im Shop" : "You always pay in the store yourself"}</li>
@@ -920,7 +909,7 @@ ${
 
       <div class="demo-cta">
         <h3 class="demo-cta-title">${de ? "Jetzt mit deinem eigenen Wunsch ausprobieren" : "Now try it with your own wish"}</h3>
-        ${renderLauncher(config, lang, "demo")}
+        ${renderConnectSwitcher(config, lang, "demo")}
       </div>
     </div>
   </section>
