@@ -1,15 +1,19 @@
 import { timingSafeEqualStr } from "../auth/crypto.js";
-import type {
-  EmailAuthChallengeRecord,
-  EmailChallengeVerifyResult,
-  OAuthClientRecord,
-  OAuthCodeRecord,
-  OAuthTokenRecord,
-  RefreshRotationResult,
-  RotateRefreshTokenParams,
-  StorageBackend,
-  UserRecord,
-  WebSessionRecord
+import {
+  computeStripeWebhookUserTransition,
+  normalizeDeletedStripeSubscriptionIds,
+  type EmailAuthChallengeRecord,
+  type EmailChallengeVerifyResult,
+  type OAuthClientRecord,
+  type OAuthCodeRecord,
+  type OAuthTokenRecord,
+  type RefreshRotationResult,
+  type RotateRefreshTokenParams,
+  type StorageBackend,
+  type StripeWebhookUpdateParams,
+  type StripeWebhookUpdateResult,
+  type UserRecord,
+  type WebSessionRecord
 } from "./types.js";
 
 export class MemoryStore implements StorageBackend {
@@ -48,7 +52,13 @@ export class MemoryStore implements StorageBackend {
 
   async createUser(user: UserRecord): Promise<boolean> {
     if (this.users.has(user.id)) return false;
-    this.users.set(user.id, { ...user });
+    this.users.set(user.id, {
+      ...user,
+      lastStripeEventCreated: user.lastStripeEventCreated ?? null,
+      deletedStripeSubscriptionIds: normalizeDeletedStripeSubscriptionIds(
+        user.deletedStripeSubscriptionIds
+      )
+    });
     return true;
   }
 
@@ -58,7 +68,15 @@ export class MemoryStore implements StorageBackend {
   ): Promise<void> {
     const existing = this.users.get(userId);
     if (!existing) return;
-    this.users.set(userId, { ...existing, ...patch, updatedAt: new Date() });
+    this.users.set(userId, {
+      ...existing,
+      ...patch,
+      deletedStripeSubscriptionIds:
+        patch.deletedStripeSubscriptionIds !== undefined
+          ? normalizeDeletedStripeSubscriptionIds(patch.deletedStripeSubscriptionIds)
+          : existing.deletedStripeSubscriptionIds ?? [],
+      updatedAt: new Date()
+    });
   }
 
   async getOAuthClient(clientId: string): Promise<OAuthClientRecord | null> {
@@ -315,5 +333,28 @@ export class MemoryStore implements StorageBackend {
 
   async releaseStripeEvent(eventId: string): Promise<void> {
     this.stripeEvents.delete(eventId);
+  }
+
+  async applyStripeWebhookUpdate(
+    userId: string,
+    params: StripeWebhookUpdateParams
+  ): Promise<StripeWebhookUpdateResult> {
+    const existing = this.users.get(userId);
+    if (!existing) {
+      return { applied: false, reason: "user_not_found" };
+    }
+    const { result, patch } = computeStripeWebhookUserTransition(existing, params);
+    if (patch) {
+      this.users.set(userId, {
+        ...existing,
+        ...patch,
+        deletedStripeSubscriptionIds:
+          patch.deletedStripeSubscriptionIds !== undefined
+            ? normalizeDeletedStripeSubscriptionIds(patch.deletedStripeSubscriptionIds)
+            : existing.deletedStripeSubscriptionIds ?? [],
+        updatedAt: new Date()
+      });
+    }
+    return result;
   }
 }
