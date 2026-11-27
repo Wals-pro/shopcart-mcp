@@ -902,4 +902,176 @@ describe("OAuth 2.1 compliance & MCP auth", () => {
     );
     expect(normalizeFormActionOrigin("http://[::1]:8080/callback")).toBe("http://[::1]:8080");
   });
+
+  it("prevents leftmost X-Forwarded-For spoofing from bypassing per-IP rate limits on POST /oauth/register and POST /billing/login", async () => {
+    const { app } = makeTestApp();
+
+    // 1. DCR rate limit (30 / 15 min): rotating leftmost XFF entries with the same rightmost proxy-appended IP
+    for (let i = 1; i <= 30; i++) {
+      await request(app)
+        .post("/oauth/register")
+        .set("X-Forwarded-For", `198.51.100.${i}, 203.0.113.10`)
+        .send({
+          client_name: `Client ${i}`,
+          redirect_uris: ["https://partner.example/oauth/cb"]
+        })
+        .expect(201);
+    }
+
+    const blockedDcr = await request(app)
+      .post("/oauth/register")
+      .set("X-Forwarded-For", "198.51.100.99, 203.0.113.10")
+      .send({
+        client_name: "Client 31",
+        redirect_uris: ["https://partner.example/oauth/cb"]
+      })
+      .expect(429);
+    expect(blockedDcr.body.error).toBe("too_many_requests");
+
+    // A genuinely different rightmost client IP is still allowed (buckets are per trusted client key)
+    await request(app)
+      .post("/oauth/register")
+      .set("X-Forwarded-For", "198.51.100.1, 203.0.113.20")
+      .send({
+        client_name: "Other IP Client",
+        redirect_uris: ["https://partner.example/oauth/cb"]
+      })
+      .expect(201);
+
+    // 2. Billing OTP IP rate limit (15 / 10 min): rotating leftmost XFF entries with distinct emails
+    const loginPage = await request(app).get("/billing/login?lang=en").expect(200);
+    const billingCsrf = loginPage.text.match(/name="_csrf" value="([^"]+)"/)![1]!;
+
+    for (let i = 1; i <= 15; i++) {
+      await request(app)
+        .post("/billing/login")
+        .set("Origin", "https://shopcart.wals.pro")
+        .set("X-Forwarded-For", `198.51.100.${i}, 203.0.113.10`)
+        .type("form")
+        .send({
+          _csrf: billingCsrf,
+          lang: "en",
+          email: `user${i}@example.com`
+        })
+        .expect(200);
+    }
+
+    const blockedBilling = await request(app)
+      .post("/billing/login")
+      .set("Origin", "https://shopcart.wals.pro")
+      .set("X-Forwarded-For", "198.51.100.99, 203.0.113.10")
+      .type("form")
+      .send({
+        _csrf: billingCsrf,
+        lang: "en",
+        email: "user16@example.com"
+      })
+      .expect(429);
+    expect(blockedBilling.text).toContain("Too many code requests");
+  });
+
+  it("rejects duplicate or non-string RFC 8707 resource parameters fail-closed on /oauth/authorize and /oauth/token", async () => {
+    const { app } = makeTestApp();
+    const redirectUri = "https://partner.example/oauth/cb";
+    const reg = await request(app)
+      .post("/oauth/register")
+      .send({
+        client_name: "Resource Hardening Test",
+        redirect_uris: [redirectUri],
+        token_endpoint_auth_method: "none"
+      })
+      .expect(201);
+    const clientId = reg.body.client_id as string;
+    const verifier = "verifier_resource_hardening_0123456789_ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const challenge = sha256Base64Url(verifier);
+
+    // 1. GET /oauth/authorize with duplicate resource (canonical + evil) -> 303 error=invalid_target
+    const dupMixed = await request(app)
+      .get(
+        `/oauth/authorize?response_type=code&client_id=${encodeURIComponent(clientId)}` +
+          `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+          `&code_challenge=${encodeURIComponent(challenge)}&code_challenge_method=S256` +
+          `&state=st_dup1` +
+          `&resource=${encodeURIComponent("https://shopcart.wals.pro/mcp")}` +
+          `&resource=${encodeURIComponent("https://evil.example/mcp")}`
+      )
+      .expect(303);
+    const dupMixedUrl = new URL(dupMixed.headers.location!);
+    expect(dupMixedUrl.origin + dupMixedUrl.pathname).toBe(redirectUri);
+    expect(dupMixedUrl.searchParams.get("error")).toBe("invalid_target");
+    expect(dupMixedUrl.searchParams.get("state")).toBe("st_dup1");
+    expect(dupMixedUrl.searchParams.get("iss")).toBe("https://shopcart.wals.pro");
+
+    // 2. GET /oauth/authorize with two foreign resources -> 303 error=invalid_target
+    const dupForeign = await request(app)
+      .get(
+        `/oauth/authorize?response_type=code&client_id=${encodeURIComponent(clientId)}` +
+          `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+          `&code_challenge=${encodeURIComponent(challenge)}&code_challenge_method=S256` +
+          `&state=st_dup2` +
+          `&resource=${encodeURIComponent("https://evil1.example/mcp")}` +
+          `&resource=${encodeURIComponent("https://evil2.example/mcp")}`
+      )
+      .expect(303);
+    const dupForeignUrl = new URL(dupForeign.headers.location!);
+    expect(dupForeignUrl.searchParams.get("error")).toBe("invalid_target");
+    expect(dupForeignUrl.searchParams.get("state")).toBe("st_dup2");
+
+    // 3. POST /oauth/authorize with duplicate urlencoded resource field -> 303 error=invalid_target
+    const dupPostAuth = await request(app)
+      .post("/oauth/authorize")
+      .set("Content-Type", "application/x-www-form-urlencoded")
+      .send(
+        `step=email&client_id=${encodeURIComponent(clientId)}` +
+          `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+          `&code_challenge=${encodeURIComponent(challenge)}&code_challenge_method=S256` +
+          `&state=st_dup_post` +
+          `&resource=${encodeURIComponent("https://shopcart.wals.pro/mcp")}` +
+          `&resource=${encodeURIComponent("https://evil.example/mcp")}`
+      )
+      .expect(303);
+    const dupPostUrl = new URL(dupPostAuth.headers.location!);
+    expect(dupPostUrl.origin + dupPostUrl.pathname).toBe(redirectUri);
+    expect(dupPostUrl.searchParams.get("error")).toBe("invalid_target");
+    expect(dupPostUrl.searchParams.get("state")).toBe("st_dup_post");
+
+    // 4. POST /oauth/token with duplicate urlencoded resource field -> 400 invalid_target
+    const dupTokForm = await request(app)
+      .post("/oauth/token")
+      .set("Content-Type", "application/x-www-form-urlencoded")
+      .send(
+        `grant_type=authorization_code&client_id=${encodeURIComponent(clientId)}` +
+          `&code=sc_code_dummy&redirect_uri=${encodeURIComponent(redirectUri)}` +
+          `&code_verifier=${encodeURIComponent(verifier)}` +
+          `&resource=${encodeURIComponent("https://shopcart.wals.pro/mcp")}` +
+          `&resource=${encodeURIComponent("https://evil.example/mcp")}`
+      )
+      .expect(400);
+    expect(dupTokForm.body.error).toBe("invalid_target");
+
+    // 5. POST /oauth/token with JSON array / object resource -> 400 invalid_target
+    const dupTokJsonArr = await request(app)
+      .post("/oauth/token")
+      .send({
+        grant_type: "refresh_token",
+        client_id: clientId,
+        refresh_token: "sc_rt_dummy",
+        resource: ["https://shopcart.wals.pro/mcp", "https://evil.example/mcp"]
+      })
+      .expect(400);
+    expect(dupTokJsonArr.body.error).toBe("invalid_target");
+
+    const dupTokJsonObj = await request(app)
+      .post("/oauth/token")
+      .send({
+        grant_type: "authorization_code",
+        client_id: clientId,
+        code: "sc_code_dummy",
+        redirect_uri: redirectUri,
+        code_verifier: verifier,
+        resource: { href: "https://shopcart.wals.pro/mcp" }
+      })
+      .expect(400);
+    expect(dupTokJsonObj.body.error).toBe("invalid_target");
+  });
 });
