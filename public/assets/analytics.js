@@ -29,6 +29,7 @@
     "magento",
     "bigcommerce",
     "amazon",
+    "ucp",
     "jsonld",
     "unknown"
   ]);
