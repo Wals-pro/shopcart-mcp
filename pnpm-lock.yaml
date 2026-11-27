@@ -21,8 +21,8 @@ importers:
         specifier: ^10.6.1
         version: 10.6.1
       stripe:
-        specifier: ^17.7.0
-        version: 17.7.0
+        specifier: ^23.2.0
+        version: 23.2.0(@types/node@22.20.5)
       undici:
         specifier: ^8.13.1
         version: 8.13.1
@@ -1246,9 +1246,14 @@ packages:
     resolution: {integrity: sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A==}
     engines: {node: '>=8'}
 
-  stripe@17.7.0:
-    resolution: {integrity: sha512-aT2BU9KkizY9SATf14WhhYVv2uOapBWX0OFWF4xvcj1mPaNotlSc2CsxpS4DS46ZueSppmCF5BX1sNYBtwBvfw==}
-    engines: {node: '>=12.*'}
+  stripe@23.2.0:
+    resolution: {integrity: sha512-0W0J4yA9qFO2rnF61v8Y62OiO2SmAR+Cv04VJaFUMpCxiq8lG5bxEYbeSMSpMDR9ofFZGd+Z/iUIgSFbOolmUw==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@types/node': '>=20'
+    peerDependenciesMeta:
+      '@types/node':
+        optional: true
 
   superagent@10.4.2:
     resolution: {integrity: sha512-u+PFV+VKiAKKzJqnCvveNya3N+pR/8jUZs/ek6jRfE41fpSCNdFY61L7NYmSgB6I9TTFM50ywoPXRKgw2k3wKw==}
@@ -2524,10 +2529,9 @@ snapshots:
     dependencies:
       ansi-regex: 5.0.1
 
-  stripe@17.7.0:
-    dependencies:
+  stripe@23.2.0(@types/node@22.20.5):
+    optionalDependencies:
       '@types/node': 22.20.5
-      qs: 6.17.1
 
   superagent@10.4.2:
     dependencies:

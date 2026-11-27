@@ -107,6 +107,46 @@ export async function createBillingPortalSession(
   return { url: session.url };
 }
 
+const MAX_STRIPE_UNIX_SECONDS = 253402300799; // 9999-12-31T23:59:59Z (valid JS Date & Firestore Timestamp bound)
+
+/**
+ * Extract subscription period end across both Stripe API >= 2025-03-31.basil
+ * (`items.data[].current_period_end`) and legacy pre-basil webhook payloads
+ * (top-level `current_period_end`).
+ */
+export function extractSubscriptionPeriodEnd(sub: Stripe.Subscription): Date | null {
+  const items = Array.isArray(sub.items?.data) ? sub.items.data : [];
+  let maxItemEnd = 0;
+  for (const item of items) {
+    const candidate: unknown = item?.current_period_end;
+    if (
+      typeof candidate === "number" &&
+      Number.isFinite(candidate) &&
+      candidate > maxItemEnd &&
+      candidate <= MAX_STRIPE_UNIX_SECONDS
+    ) {
+      maxItemEnd = candidate;
+    }
+  }
+  if (maxItemEnd > 0) {
+    return new Date(maxItemEnd * 1000);
+  }
+
+  // Fallback for webhook endpoints pinned to pre-2025-03-31.basil API versions
+  const legacyEnd: unknown = (sub as unknown as { current_period_end?: unknown })
+    .current_period_end;
+  if (
+    typeof legacyEnd === "number" &&
+    Number.isFinite(legacyEnd) &&
+    legacyEnd > 0 &&
+    legacyEnd <= MAX_STRIPE_UNIX_SECONDS
+  ) {
+    return new Date(legacyEnd * 1000);
+  }
+
+  return null;
+}
+
 function mapStripeSubscriptionState(
   subStatus: string,
   periodEnd: Date | null,
@@ -156,25 +196,106 @@ export async function processStripeWebhook(
     return { received: true, duplicate: true, type: event.type };
   }
 
+  const eventCreated =
+    typeof event.created === "number" && Number.isFinite(event.created) && event.created > 0
+      ? Math.floor(event.created)
+      : Math.floor(Date.now() / 1000);
+
   try {
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
-        const userId = session.client_reference_id ?? session.metadata?.user_id;
-        const customerId = typeof session.customer === "string" ? session.customer : null;
         const subscriptionId =
           typeof session.subscription === "string" ? session.subscription : null;
+        if (session.mode !== "subscription" || !subscriptionId) {
+          break;
+        }
 
+        const userId = session.client_reference_id ?? session.metadata?.user_id;
+        const customerId = typeof session.customer === "string" ? session.customer : null;
+        let user = userId ? await store.getUserById(userId) : null;
+        if (!user && customerId) {
+          user = await store.getUserByStripeCustomerId(customerId);
+        }
+        if (!user) break;
+
+        if (
+          session.payment_status === "paid" ||
+          session.payment_status === "no_payment_required"
+        ) {
+          await store.applyStripeWebhookUpdate(user.id, {
+            eventCreated,
+            kind: "activate",
+            plan: "pro",
+            status: "active",
+            stripeCustomerId: customerId,
+            subscriptionId
+          });
+        } else if (customerId && !user.stripeCustomerId) {
+          // Delayed payment method (payment_status === "unpaid"): bind customer without granting Pro
+          await store.applyStripeWebhookUpdate(user.id, {
+            eventCreated,
+            kind: "bind_customer",
+            stripeCustomerId: customerId
+          });
+        }
+        break;
+      }
+
+      case "checkout.session.async_payment_succeeded": {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const subscriptionId =
+          typeof session.subscription === "string" ? session.subscription : null;
+        if (session.mode !== "subscription" || !subscriptionId) {
+          break;
+        }
+        if (
+          session.payment_status !== "paid" &&
+          session.payment_status !== "no_payment_required"
+        ) {
+          break;
+        }
+
+        const userId = session.client_reference_id ?? session.metadata?.user_id;
+        const customerId = typeof session.customer === "string" ? session.customer : null;
         let user = userId ? await store.getUserById(userId) : null;
         if (!user && customerId) {
           user = await store.getUserByStripeCustomerId(customerId);
         }
         if (user) {
-          await store.updateUser(user.id, {
+          await store.applyStripeWebhookUpdate(user.id, {
+            eventCreated,
+            kind: "activate",
             plan: "pro",
             status: "active",
-            stripeCustomerId: customerId ?? user.stripeCustomerId,
-            stripeSubscriptionId: subscriptionId ?? user.stripeSubscriptionId
+            stripeCustomerId: customerId,
+            subscriptionId
+          });
+        }
+        break;
+      }
+
+      case "checkout.session.async_payment_failed": {
+        const session = event.data.object as Stripe.Checkout.Session;
+        if (session.mode !== "subscription") {
+          break;
+        }
+        const subscriptionId =
+          typeof session.subscription === "string" ? session.subscription : null;
+        const userId = session.client_reference_id ?? session.metadata?.user_id;
+        const customerId = typeof session.customer === "string" ? session.customer : null;
+        let user = userId ? await store.getUserById(userId) : null;
+        if (!user && customerId) {
+          user = await store.getUserByStripeCustomerId(customerId);
+        }
+        if (user) {
+          await store.applyStripeWebhookUpdate(user.id, {
+            eventCreated,
+            kind: "payment_failed",
+            plan: "free",
+            status: "past_due",
+            stripeCustomerId: customerId,
+            subscriptionId
           });
         }
         break;
@@ -189,13 +310,15 @@ export async function processStripeWebhook(
           (customerId ? await store.getUserByStripeCustomerId(customerId) : null);
 
         if (user) {
-          const periodEnd = sub.current_period_end ? new Date(sub.current_period_end * 1000) : null;
+          const periodEnd = extractSubscriptionPeriodEnd(sub);
           const mapped = mapStripeSubscriptionState(sub.status, periodEnd);
-          await store.updateUser(user.id, {
+          await store.applyStripeWebhookUpdate(user.id, {
+            eventCreated,
+            kind: "subscription_update",
             plan: mapped.plan,
             status: mapped.status,
-            stripeCustomerId: customerId ?? user.stripeCustomerId,
-            stripeSubscriptionId: sub.id,
+            stripeCustomerId: customerId,
+            subscriptionId: sub.id,
             currentPeriodEnd: periodEnd
           });
         }
@@ -211,10 +334,10 @@ export async function processStripeWebhook(
           (customerId ? await store.getUserByStripeCustomerId(customerId) : null);
 
         if (user) {
-          await store.updateUser(user.id, {
-            plan: "free",
-            status: "canceled",
-            stripeSubscriptionId: null
+          await store.applyStripeWebhookUpdate(user.id, {
+            eventCreated,
+            kind: "subscription_delete",
+            subscriptionId: sub.id
           });
         }
         break;
@@ -225,7 +348,11 @@ export async function processStripeWebhook(
         const customerId = typeof invoice.customer === "string" ? invoice.customer : null;
         const user = customerId ? await store.getUserByStripeCustomerId(customerId) : null;
         if (user) {
-          await store.updateUser(user.id, { status: "past_due" });
+          await store.applyStripeWebhookUpdate(user.id, {
+            eventCreated,
+            kind: "payment_failed",
+            status: "past_due"
+          });
         }
         break;
       }

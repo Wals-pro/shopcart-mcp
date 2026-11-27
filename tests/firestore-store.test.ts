@@ -398,4 +398,77 @@ describe("FirestoreStore security hardening", () => {
     // Retry can now claim the event cleanly
     expect(await store.claimStripeEvent("evt_123", "customer.subscription.deleted")).toBe(true);
   });
+
+  it("applyStripeWebhookUpdate executes transactionally with tombstone and monotonic watermark protection", async () => {
+    const db = new FakeFirestore();
+    const store = new FirestoreStore("test-project", db as unknown as Firestore);
+    const now = new Date();
+
+    await store.createUser({
+      id: "user_fs_wh_1",
+      email: "fs@example.de",
+      passwordHash: "",
+      passwordSalt: "",
+      plan: "free",
+      status: "active",
+      stripeCustomerId: "cus_fs_1",
+      stripeSubscriptionId: null,
+      currentPeriodEnd: null,
+      createdAt: now,
+      updatedAt: now
+    });
+
+    // 1. Delete sub_1 at T=105 -> sets canceled, clears periodEnd, adds tombstone
+    const delRes = await store.applyStripeWebhookUpdate("user_fs_wh_1", {
+      eventCreated: 105,
+      kind: "subscription_delete",
+      subscriptionId: "sub_1"
+    });
+    expect(delRes).toEqual({ applied: true });
+    let loaded = (await store.getUserById("user_fs_wh_1"))!;
+    expect(loaded.plan).toBe("free");
+    expect(loaded.status).toBe("canceled");
+    expect(loaded.currentPeriodEnd).toBeNull();
+    expect(loaded.lastStripeEventCreated).toBe(105);
+    expect(loaded.deletedStripeSubscriptionIds).toEqual(["sub_1"]);
+
+    // 2. Stale activate for sub_1 at T=100 -> rejected (subscription_deleted)
+    const staleRes = await store.applyStripeWebhookUpdate("user_fs_wh_1", {
+      eventCreated: 100,
+      kind: "activate",
+      plan: "pro",
+      status: "active",
+      subscriptionId: "sub_1",
+      stripeCustomerId: "cus_fs_1"
+    });
+    expect(staleRes).toEqual({ applied: false, reason: "subscription_deleted" });
+
+    // 3. Even a future-timestamped update for tombstoned sub_1 at T=200 -> rejected!
+    const tombRes = await store.applyStripeWebhookUpdate("user_fs_wh_1", {
+      eventCreated: 200,
+      kind: "subscription_update",
+      plan: "pro",
+      status: "active",
+      subscriptionId: "sub_1",
+      currentPeriodEnd: new Date(1900000000 * 1000)
+    });
+    expect(tombRes).toEqual({ applied: false, reason: "subscription_deleted" });
+
+    // 4. Genuine resubscription with new sub_2 at T=200 -> applied!
+    const resubRes = await store.applyStripeWebhookUpdate("user_fs_wh_1", {
+      eventCreated: 200,
+      kind: "activate",
+      plan: "pro",
+      status: "active",
+      subscriptionId: "sub_2",
+      stripeCustomerId: "cus_fs_1"
+    });
+    expect(resubRes).toEqual({ applied: true });
+    loaded = (await store.getUserById("user_fs_wh_1"))!;
+    expect(loaded.plan).toBe("pro");
+    expect(loaded.status).toBe("active");
+    expect(loaded.stripeSubscriptionId).toBe("sub_2");
+    expect(loaded.lastStripeEventCreated).toBe(200);
+    expect(loaded.deletedStripeSubscriptionIds).toEqual(["sub_1"]);
+  });
 });

@@ -105,6 +105,8 @@ export async function ensureUserByEmail(
     stripeCustomerId: null,
     stripeSubscriptionId: null,
     currentPeriodEnd: null,
+    lastStripeEventCreated: null,
+    deletedStripeSubscriptionIds: [],
     createdAt: now,
     updatedAt: now
   };

@@ -1,17 +1,21 @@
 import { Firestore, Timestamp } from "@google-cloud/firestore";
 import { sha256Hex, timingSafeEqualStr } from "../auth/crypto.js";
-import type {
-  EmailAuthChallengeRecord,
-  EmailChallengeVerifyResult,
-  OAuthChallengeParams,
-  OAuthClientRecord,
-  OAuthCodeRecord,
-  OAuthTokenRecord,
-  RefreshRotationResult,
-  RotateRefreshTokenParams,
-  StorageBackend,
-  UserRecord,
-  WebSessionRecord
+import {
+  computeStripeWebhookUserTransition,
+  normalizeDeletedStripeSubscriptionIds,
+  type EmailAuthChallengeRecord,
+  type EmailChallengeVerifyResult,
+  type OAuthChallengeParams,
+  type OAuthClientRecord,
+  type OAuthCodeRecord,
+  type OAuthTokenRecord,
+  type RefreshRotationResult,
+  type RotateRefreshTokenParams,
+  type StorageBackend,
+  type StripeWebhookUpdateParams,
+  type StripeWebhookUpdateResult,
+  type UserRecord,
+  type WebSessionRecord
 } from "./types.js";
 
 const GRPC_NOT_FOUND = 5;
@@ -99,6 +103,14 @@ export class FirestoreStore implements StorageBackend {
       stripeSubscriptionId:
         typeof data.stripeSubscriptionId === "string" ? data.stripeSubscriptionId : null,
       currentPeriodEnd: toNullableDate(data.currentPeriodEnd),
+      lastStripeEventCreated:
+        typeof data.lastStripeEventCreated === "number" &&
+        Number.isFinite(data.lastStripeEventCreated)
+          ? data.lastStripeEventCreated
+          : null,
+      deletedStripeSubscriptionIds: normalizeDeletedStripeSubscriptionIds(
+        data.deletedStripeSubscriptionIds
+      ),
       createdAt: toDate(data.createdAt),
       updatedAt: toDate(data.updatedAt)
     };
@@ -142,6 +154,10 @@ export class FirestoreStore implements StorageBackend {
           currentPeriodEnd: user.currentPeriodEnd
             ? Timestamp.fromDate(user.currentPeriodEnd)
             : null,
+          lastStripeEventCreated: user.lastStripeEventCreated ?? null,
+          deletedStripeSubscriptionIds: normalizeDeletedStripeSubscriptionIds(
+            user.deletedStripeSubscriptionIds
+          ),
           createdAt: Timestamp.fromDate(user.createdAt),
           updatedAt: Timestamp.fromDate(user.updatedAt)
         });
@@ -723,5 +739,36 @@ export class FirestoreStore implements StorageBackend {
         throw err;
       }
     }
+  }
+
+  async applyStripeWebhookUpdate(
+    userId: string,
+    params: StripeWebhookUpdateParams
+  ): Promise<StripeWebhookUpdateResult> {
+    if (!isSafeFirestoreDocId(userId)) {
+      return { applied: false, reason: "user_not_found" };
+    }
+    const ref = this.db.collection("users").doc(userId);
+    return this.db.runTransaction(async (tx): Promise<StripeWebhookUpdateResult> => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) {
+        return { applied: false, reason: "user_not_found" };
+      }
+      const existing = this.mapUser(snap.id, snap.data()!);
+      const { result, patch } = computeStripeWebhookUserTransition(existing, params);
+      if (patch) {
+        const update: Record<string, unknown> = {
+          ...patch,
+          updatedAt: Timestamp.fromDate(new Date())
+        };
+        if ("currentPeriodEnd" in patch) {
+          update.currentPeriodEnd = patch.currentPeriodEnd
+            ? Timestamp.fromDate(patch.currentPeriodEnd)
+            : null;
+        }
+        tx.update(ref, update);
+      }
+      return result;
+    });
   }
 }

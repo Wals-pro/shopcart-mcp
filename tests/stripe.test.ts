@@ -5,7 +5,10 @@ import { createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import {
   createProCheckoutSession,
+  extractSubscriptionPeriodEnd,
+  processStripeWebhook,
   resolveStripeLocale,
+  StripeWebhookSignatureError,
   type BillingStripeClient
 } from "../src/billing/stripe.js";
 import { createCsrfPair, hashPassword, sha256Hex } from "../src/auth/crypto.js";
@@ -420,14 +423,14 @@ describe("Stripe checkout polish (locale + allow_promotion_codes)", () => {
     });
     await store.createUser(user);
 
-    const origUpdateUser = store.updateUser.bind(store);
+    const origApply = store.applyStripeWebhookUpdate.bind(store);
     let failOnce = true;
-    store.updateUser = async (userId, patch) => {
+    store.applyStripeWebhookUpdate = async (userId, params) => {
       if (failOnce) {
         failOnce = false;
         throw new Error("Simulated Firestore DEADLINE_EXCEEDED internal detail");
       }
-      return origUpdateUser(userId, patch);
+      return origApply(userId, params);
     };
 
     const app = createApp({ config, store });
@@ -435,6 +438,7 @@ describe("Stripe checkout polish (locale + allow_promotion_codes)", () => {
     const payload = JSON.stringify({
       id: "evt_sub_deleted_retry_1",
       object: "event",
+      created: 1700000100,
       type: "customer.subscription.deleted",
       data: {
         object: {
@@ -495,5 +499,647 @@ describe("Stripe checkout polish (locale + allow_promotion_codes)", () => {
       duplicate: true,
       type: "customer.subscription.deleted"
     });
+  });
+
+  it("extracts current_period_end across basil+/endive (single & multi-item max), legacy pre-basil, and invalid payloads", () => {
+    const t1 = 1800000000;
+    const t2 = 1805000000;
+
+    // 1. Basil+/endive multi-item subscription -> picks max item current_period_end
+    const basilSub = {
+      id: "sub_basil_1",
+      items: {
+        object: "list",
+        data: [
+          { id: "si_1", current_period_end: t1 },
+          { id: "si_2", current_period_end: t2 }
+        ]
+      }
+    } as unknown as Stripe.Subscription;
+    expect(extractSubscriptionPeriodEnd(basilSub)?.getTime()).toBe(t2 * 1000);
+
+    // 2. Legacy pre-basil subscription (top-level current_period_end, empty items)
+    const legacySub = {
+      id: "sub_legacy_1",
+      current_period_end: t1,
+      items: { object: "list", data: [] }
+    } as unknown as Stripe.Subscription;
+    expect(extractSubscriptionPeriodEnd(legacySub)?.getTime()).toBe(t1 * 1000);
+
+    // 3. Missing / invalid / zero / negative / NaN / overflow (> 9999-12-31) period end -> null
+    const badSub = {
+      id: "sub_bad_1",
+      current_period_end: -5,
+      items: {
+        object: "list",
+        data: [
+          { id: "si_nan", current_period_end: Number.NaN },
+          { id: "si_inf", current_period_end: Number.POSITIVE_INFINITY },
+          { id: "si_overflow", current_period_end: 253402300800 },
+          { id: "si_zero", current_period_end: 0 }
+        ]
+      }
+    } as unknown as Stripe.Subscription;
+    expect(extractSubscriptionPeriodEnd(badSub)).toBeNull();
+
+    const overflowLegacy = {
+      id: "sub_overflow_legacy",
+      current_period_end: 1e15,
+      items: { object: "list", data: [] }
+    } as unknown as Stripe.Subscription;
+    expect(extractSubscriptionPeriodEnd(overflowLegacy)).toBeNull();
+
+    // 4. Exact upper bound (253402300799 = 9999-12-31T23:59:59Z) is accepted
+    const maxBoundSub = {
+      id: "sub_max_bound",
+      items: { object: "list", data: [{ id: "si_max", current_period_end: 253402300799 }] }
+    } as unknown as Stripe.Subscription;
+    expect(extractSubscriptionPeriodEnd(maxBoundSub)?.toISOString()).toBe(
+      "9999-12-31T23:59:59.000Z"
+    );
+  });
+
+  it("verifies Stripe 23 HMAC signatures and processes checkout.session.completed, basil+ & legacy customer.subscription.updated, and invoice.payment_failed", async () => {
+    const webhookSecret = "whsec_test_stripe23_full_coverage_secret";
+    const config = loadConfig({
+      APP_ORIGIN: "https://shopcart.wals.pro",
+      SESSION_SECRET: "e".repeat(40),
+      STRIPE_SECRET_KEY: "sk_test_dummy",
+      STRIPE_WEBHOOK_SECRET: webhookSecret,
+      STRIPE_PRO_PRICE_ID: "price_pro_eur_9"
+    });
+    const store = new MemoryStore();
+    const user = makeUser({
+      id: "user_wh_1",
+      email: "webhook@example.de",
+      plan: "free",
+      status: "active",
+      stripeCustomerId: "cus_wh_1",
+      stripeSubscriptionId: null,
+      currentPeriodEnd: null
+    });
+    await store.createUser(user);
+
+    const app = createApp({ config, store });
+    const stripeHelper = new Stripe("sk_test_dummy");
+
+    const sign = (eventObj: Record<string, unknown>) => {
+      const payload = JSON.stringify(eventObj);
+      const sig = stripeHelper.webhooks.generateTestHeaderString({
+        payload,
+        secret: webhookSecret
+      });
+      return { payload, sig };
+    };
+
+    // 1. Missing signature -> StripeWebhookSignatureError / HTTP 400
+    await expect(
+      processStripeWebhook(Buffer.from("{}"), undefined, config, store)
+    ).rejects.toBeInstanceOf(StripeWebhookSignatureError);
+    await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .send("{}")
+      .expect(400);
+
+    // 2. checkout.session.completed (mode=subscription, payment_status=paid) activates Pro + duplicate is idempotent
+    const checkoutEv = sign({
+      id: "evt_checkout_1",
+      object: "event",
+      created: 1700000100,
+      api_version: "2026-11-18.endive",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_test_1",
+          object: "checkout.session",
+          mode: "subscription",
+          payment_status: "paid",
+          client_reference_id: user.id,
+          customer: "cus_wh_1",
+          subscription: "sub_wh_1",
+          metadata: { user_id: user.id }
+        }
+      }
+    });
+    const rCheckout = await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", checkoutEv.sig)
+      .send(checkoutEv.payload)
+      .expect(200);
+    expect(rCheckout.body).toEqual({ received: true, type: "checkout.session.completed" });
+    let u = (await store.getUserById(user.id))!;
+    expect(u.plan).toBe("pro");
+    expect(u.status).toBe("active");
+    expect(u.stripeSubscriptionId).toBe("sub_wh_1");
+
+    const rCheckoutDup = await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", checkoutEv.sig)
+      .send(checkoutEv.payload)
+      .expect(200);
+    expect(rCheckoutDup.body).toEqual({
+      received: true,
+      duplicate: true,
+      type: "checkout.session.completed"
+    });
+
+    // 3. customer.subscription.updated (basil+/endive format: items.data[].current_period_end)
+    const futureSec = Math.floor(Date.now() / 1000) + 7 * 24 * 3600;
+    const pastSec = Math.floor(Date.now() / 1000) - 3600;
+
+    // 3a. trialing with multi-item max
+    const subTrial = sign({
+      id: "evt_sub_trial_basil",
+      object: "event",
+      created: 1700000110,
+      api_version: "2026-11-18.endive",
+      type: "customer.subscription.updated",
+      data: {
+        object: {
+          id: "sub_wh_1",
+          object: "subscription",
+          customer: "cus_wh_1",
+          status: "trialing",
+          metadata: { user_id: user.id },
+          items: {
+            object: "list",
+            data: [
+              { id: "si_a", current_period_end: futureSec - 100 },
+              { id: "si_b", current_period_end: futureSec }
+            ]
+          }
+        }
+      }
+    });
+    await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", subTrial.sig)
+      .send(subTrial.payload)
+      .expect(200);
+    u = (await store.getUserById(user.id))!;
+    expect(u.plan).toBe("pro");
+    expect(u.status).toBe("trialing");
+    expect(u.currentPeriodEnd?.getTime()).toBe(futureSec * 1000);
+
+    // 3b. past_due still in grace period (basil+ item period end in future -> stays pro)
+    const subGrace = sign({
+      id: "evt_sub_pastdue_grace_basil",
+      object: "event",
+      created: 1700000120,
+      api_version: "2026-11-18.endive",
+      type: "customer.subscription.updated",
+      data: {
+        object: {
+          id: "sub_wh_1",
+          object: "subscription",
+          customer: "cus_wh_1",
+          status: "past_due",
+          metadata: { user_id: user.id },
+          items: { object: "list", data: [{ id: "si_a", current_period_end: futureSec }] }
+        }
+      }
+    });
+    await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", subGrace.sig)
+      .send(subGrace.payload)
+      .expect(200);
+    u = (await store.getUserById(user.id))!;
+    expect(u.plan).toBe("pro");
+    expect(u.status).toBe("past_due");
+
+    // 3c. past_due with expired period end (basil+ -> downgraded to free)
+    const subExpired = sign({
+      id: "evt_sub_pastdue_expired_basil",
+      object: "event",
+      created: 1700000130,
+      api_version: "2026-11-18.endive",
+      type: "customer.subscription.updated",
+      data: {
+        object: {
+          id: "sub_wh_1",
+          object: "subscription",
+          customer: "cus_wh_1",
+          status: "past_due",
+          metadata: { user_id: user.id },
+          items: { object: "list", data: [{ id: "si_a", current_period_end: pastSec }] }
+        }
+      }
+    });
+    await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", subExpired.sig)
+      .send(subExpired.payload)
+      .expect(200);
+    u = (await store.getUserById(user.id))!;
+    expect(u.plan).toBe("free");
+    expect(u.status).toBe("past_due");
+    expect(u.currentPeriodEnd?.getTime()).toBe(pastSec * 1000);
+
+    // 4. Legacy pre-basil customer.subscription.updated (top-level current_period_end)
+    const subLegacy = sign({
+      id: "evt_sub_active_legacy",
+      object: "event",
+      created: 1700000140,
+      api_version: "2025-02-24.acacia",
+      type: "customer.subscription.updated",
+      data: {
+        object: {
+          id: "sub_wh_1",
+          object: "subscription",
+          customer: "cus_wh_1",
+          status: "past_due",
+          current_period_end: futureSec,
+          metadata: { user_id: user.id },
+          items: { object: "list", data: [] }
+        }
+      }
+    });
+    await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", subLegacy.sig)
+      .send(subLegacy.payload)
+      .expect(200);
+    u = (await store.getUserById(user.id))!;
+    expect(u.plan).toBe("pro");
+    expect(u.status).toBe("past_due");
+    expect(u.currentPeriodEnd?.getTime()).toBe(futureSec * 1000);
+
+    // 5. Missing period_end -> currentPeriodEnd = null
+    const subNoPeriod = sign({
+      id: "evt_sub_active_noperiod",
+      object: "event",
+      created: 1700000150,
+      api_version: "2026-11-18.endive",
+      type: "customer.subscription.updated",
+      data: {
+        object: {
+          id: "sub_wh_1",
+          object: "subscription",
+          customer: "cus_wh_1",
+          status: "active",
+          metadata: { user_id: user.id },
+          items: { object: "list", data: [] }
+        }
+      }
+    });
+    await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", subNoPeriod.sig)
+      .send(subNoPeriod.payload)
+      .expect(200);
+    u = (await store.getUserById(user.id))!;
+    expect(u.plan).toBe("pro");
+    expect(u.status).toBe("active");
+    expect(u.currentPeriodEnd).toBeNull();
+
+    // 6. invoice.payment_failed -> marks user past_due by stripeCustomerId
+    const invFailed = sign({
+      id: "evt_inv_failed_1",
+      object: "event",
+      created: 1700000160,
+      api_version: "2026-11-18.endive",
+      type: "invoice.payment_failed",
+      data: {
+        object: {
+          id: "in_test_1",
+          object: "invoice",
+          customer: "cus_wh_1"
+        }
+      }
+    });
+    await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", invFailed.sig)
+      .send(invFailed.payload)
+      .expect(200);
+    u = (await store.getUserById(user.id))!;
+    expect(u.status).toBe("past_due");
+  });
+
+  it("blocks unpaid and non-subscription checkout sessions from granting Pro and handles async_payment_succeeded / async_payment_failed", async () => {
+    const webhookSecret = "whsec_test_unpaid_checkout_guard_secret";
+    const config = loadConfig({
+      APP_ORIGIN: "https://shopcart.wals.pro",
+      SESSION_SECRET: "f".repeat(40),
+      STRIPE_SECRET_KEY: "sk_test_dummy",
+      STRIPE_WEBHOOK_SECRET: webhookSecret,
+      STRIPE_PRO_PRICE_ID: "price_pro_eur_9"
+    });
+    const store = new MemoryStore();
+    const user = makeUser({
+      id: "user_async_1",
+      email: "sepa@example.de",
+      plan: "free",
+      status: "active",
+      stripeCustomerId: null,
+      stripeSubscriptionId: null
+    });
+    await store.createUser(user);
+
+    const app = createApp({ config, store });
+    const stripeHelper = new Stripe("sk_test_dummy");
+    const postEvent = async (eventObj: Record<string, unknown>) => {
+      const payload = JSON.stringify(eventObj);
+      const sig = stripeHelper.webhooks.generateTestHeaderString({
+        payload,
+        secret: webhookSecret
+      });
+      return request(app)
+        .post("/webhooks/stripe")
+        .set("Content-Type", "application/json")
+        .set("Stripe-Signature", sig)
+        .send(payload)
+        .expect(200);
+    };
+
+    // 1. mode=setup -> ignored, stays free
+    await postEvent({
+      id: "evt_mode_setup",
+      object: "event",
+      created: 1700000100,
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_setup_1",
+          object: "checkout.session",
+          mode: "setup",
+          payment_status: "no_payment_required",
+          client_reference_id: user.id,
+          customer: "cus_sepa_1",
+          subscription: null
+        }
+      }
+    });
+    let u = (await store.getUserById(user.id))!;
+    expect(u.plan).toBe("free");
+    expect(u.stripeCustomerId).toBeNull();
+
+    // 2. mode=payment -> ignored, stays free
+    await postEvent({
+      id: "evt_mode_payment",
+      object: "event",
+      created: 1700000105,
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_pay_1",
+          object: "checkout.session",
+          mode: "payment",
+          payment_status: "paid",
+          client_reference_id: user.id,
+          customer: "cus_sepa_1",
+          subscription: "sub_bogus"
+        }
+      }
+    });
+    u = (await store.getUserById(user.id))!;
+    expect(u.plan).toBe("free");
+
+    // 3. mode=subscription, payment_status=unpaid (SEPA pending) -> binds customer only, NO Pro grant!
+    await postEvent({
+      id: "evt_sub_unpaid",
+      object: "event",
+      created: 1700000110,
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_sepa_1",
+          object: "checkout.session",
+          mode: "subscription",
+          payment_status: "unpaid",
+          client_reference_id: user.id,
+          customer: "cus_sepa_1",
+          subscription: "sub_sepa_1"
+        }
+      }
+    });
+    u = (await store.getUserById(user.id))!;
+    expect(u.plan).toBe("free");
+    expect(u.status).toBe("active");
+    expect(u.stripeCustomerId).toBe("cus_sepa_1");
+    expect(u.stripeSubscriptionId).toBeNull();
+
+    // 4. async_payment_failed -> keeps plan=free, marks status=past_due
+    await postEvent({
+      id: "evt_async_failed",
+      object: "event",
+      created: 1700000120,
+      type: "checkout.session.async_payment_failed",
+      data: {
+        object: {
+          id: "cs_sepa_1",
+          object: "checkout.session",
+          mode: "subscription",
+          payment_status: "unpaid",
+          client_reference_id: user.id,
+          customer: "cus_sepa_1",
+          subscription: "sub_sepa_1"
+        }
+      }
+    });
+    u = (await store.getUserById(user.id))!;
+    expect(u.plan).toBe("free");
+    expect(u.status).toBe("past_due");
+
+    // 5. async_payment_succeeded (mode=subscription, payment_status=paid) -> grants Pro
+    await postEvent({
+      id: "evt_async_succeeded",
+      object: "event",
+      created: 1700000130,
+      type: "checkout.session.async_payment_succeeded",
+      data: {
+        object: {
+          id: "cs_sepa_2",
+          object: "checkout.session",
+          mode: "subscription",
+          payment_status: "paid",
+          client_reference_id: user.id,
+          customer: "cus_sepa_1",
+          subscription: "sub_sepa_2"
+        }
+      }
+    });
+    u = (await store.getUserById(user.id))!;
+    expect(u.plan).toBe("pro");
+    expect(u.status).toBe("active");
+    expect(u.stripeSubscriptionId).toBe("sub_sepa_2");
+  });
+
+  it("prevents out-of-order and same-second webhook entitlement resurrection after cancel while allowing genuine resubscription", async () => {
+    const webhookSecret = "whsec_test_out_of_order_guard_secret";
+    const config = loadConfig({
+      APP_ORIGIN: "https://shopcart.wals.pro",
+      SESSION_SECRET: "g".repeat(40),
+      STRIPE_SECRET_KEY: "sk_test_dummy",
+      STRIPE_WEBHOOK_SECRET: webhookSecret,
+      STRIPE_PRO_PRICE_ID: "price_pro_eur_9"
+    });
+    const store = new MemoryStore();
+    const user = makeUser({
+      id: "user_ooo_1",
+      email: "ooo@example.de",
+      plan: "free",
+      status: "active",
+      stripeCustomerId: "cus_ooo_1",
+      stripeSubscriptionId: null
+    });
+    await store.createUser(user);
+
+    const origApply = store.applyStripeWebhookUpdate.bind(store);
+    let failCheckoutOnce = true;
+    store.applyStripeWebhookUpdate = async (userId, params) => {
+      if (failCheckoutOnce && params.kind === "activate" && params.subscriptionId === "sub_1") {
+        failCheckoutOnce = false;
+        throw new Error("Simulated transient storage error on T=100 checkout");
+      }
+      return origApply(userId, params);
+    };
+
+    const app = createApp({ config, store });
+    const stripeHelper = new Stripe("sk_test_dummy");
+    const sign = (eventObj: Record<string, unknown>) => {
+      const payload = JSON.stringify(eventObj);
+      const sig = stripeHelper.webhooks.generateTestHeaderString({
+        payload,
+        secret: webhookSecret
+      });
+      return { payload, sig };
+    };
+
+    // 1. T=100 checkout.session.completed (sub_1) fails transiently -> 500 + claim released
+    const checkoutT100 = sign({
+      id: "evt_ooo_checkout_100",
+      object: "event",
+      created: 100,
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_ooo_1",
+          object: "checkout.session",
+          mode: "subscription",
+          payment_status: "paid",
+          client_reference_id: user.id,
+          customer: "cus_ooo_1",
+          subscription: "sub_1"
+        }
+      }
+    });
+    await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", checkoutT100.sig)
+      .send(checkoutT100.payload)
+      .expect(500);
+
+    // 2. T=105 customer.subscription.deleted (sub_1) arrives -> cancels + tombstones sub_1
+    const deleteT105 = sign({
+      id: "evt_ooo_delete_105",
+      object: "event",
+      created: 105,
+      type: "customer.subscription.deleted",
+      data: {
+        object: {
+          id: "sub_1",
+          object: "subscription",
+          customer: "cus_ooo_1",
+          status: "canceled",
+          metadata: { user_id: user.id }
+        }
+      }
+    });
+    await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", deleteT105.sig)
+      .send(deleteT105.payload)
+      .expect(200);
+    let u = (await store.getUserById(user.id))!;
+    expect(u.plan).toBe("free");
+    expect(u.status).toBe("canceled");
+    expect(u.currentPeriodEnd).toBeNull();
+    expect(u.deletedStripeSubscriptionIds).toContain("sub_1");
+
+    // 3. Delayed retry of T=100 checkout.session.completed (sub_1) MUST NOT resurrect Pro!
+    await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", checkoutT100.sig)
+      .send(checkoutT100.payload)
+      .expect(200);
+    u = (await store.getUserById(user.id))!;
+    expect(u.plan).toBe("free");
+    expect(u.status).toBe("canceled");
+
+    // 4. Delayed T=101 AND same-second T=105 customer.subscription.updated (sub_1, active) MUST NOT resurrect Pro!
+    for (const [id, created] of [
+      ["evt_ooo_update_101", 101],
+      ["evt_ooo_update_105_same_sec", 105]
+    ] as const) {
+      const upd = sign({
+        id,
+        object: "event",
+        created,
+        type: "customer.subscription.updated",
+        data: {
+          object: {
+            id: "sub_1",
+            object: "subscription",
+            customer: "cus_ooo_1",
+            status: "active",
+            metadata: { user_id: user.id },
+            items: { object: "list", data: [{ id: "si_1", current_period_end: 1900000000 }] }
+          }
+        }
+      });
+      await request(app)
+        .post("/webhooks/stripe")
+        .set("Content-Type", "application/json")
+        .set("Stripe-Signature", upd.sig)
+        .send(upd.payload)
+        .expect(200);
+      u = (await store.getUserById(user.id))!;
+      expect(u.plan).toBe("free");
+      expect(u.status).toBe("canceled");
+    }
+
+    // 5. Genuine resubscription with NEW subscription sub_2 at T=200 cleanly activates Pro!
+    const resubT200 = sign({
+      id: "evt_ooo_resub_200",
+      object: "event",
+      created: 200,
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_ooo_2",
+          object: "checkout.session",
+          mode: "subscription",
+          payment_status: "paid",
+          client_reference_id: user.id,
+          customer: "cus_ooo_1",
+          subscription: "sub_2"
+        }
+      }
+    });
+    await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", resubT200.sig)
+      .send(resubT200.payload)
+      .expect(200);
+    u = (await store.getUserById(user.id))!;
+    expect(u.plan).toBe("pro");
+    expect(u.status).toBe("active");
+    expect(u.stripeSubscriptionId).toBe("sub_2");
+    expect(u.lastStripeEventCreated).toBe(200);
   });
 });
