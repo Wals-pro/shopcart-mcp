@@ -45,8 +45,10 @@
         copyPrompt: "Prompt kopieren",
         copiedPrompt: "Kopiert ✓",
         copyFailed: "Kopieren fehlgeschlagen",
-        storefrontMcpTag: "Shopify Storefront MCP aktiv",
-        storefrontUcpTag: "Shopify UCP aktiv",
+        shopifyMcpTag: "Shopify Storefront MCP aktiv",
+        shopifyUcpTag: "Shopify UCP aktiv",
+        storefrontMcpTag: "Storefront MCP aktiv",
+        universalUcpTag: "Universal UCP aktiv",
         wafTag: "WAF / Bot-Regeln erkannt",
         currencyTag: (c) => `Währung: ${c}`,
         countryTag: (c) => `Land: ${c}`,
@@ -80,8 +82,10 @@
         copyPrompt: "Copy prompt",
         copiedPrompt: "Copied ✓",
         copyFailed: "Copy failed",
-        storefrontMcpTag: "Shopify Storefront MCP active",
-        storefrontUcpTag: "Shopify UCP active",
+        shopifyMcpTag: "Shopify Storefront MCP active",
+        shopifyUcpTag: "Shopify UCP active",
+        storefrontMcpTag: "Storefront MCP active",
+        universalUcpTag: "Universal UCP active",
         wafTag: "WAF / bot rules detected",
         currencyTag: (c) => `Currency: ${c}`,
         countryTag: (c) => `Country: ${c}`,
@@ -304,11 +308,21 @@
     if (data.store?.country) {
       metaTags.appendChild(el("span", "sc-meta-tag", COPY.countryTag(data.store.country)));
     }
-    if (data.store?.storefrontMcp) {
-      metaTags.appendChild(el("span", "sc-meta-tag", COPY.storefrontMcpTag));
-    }
-    if (data.store?.storefrontUcp) {
-      metaTags.appendChild(el("span", "sc-meta-tag", COPY.storefrontUcpTag));
+    const isShopify = data.platform === "shopify";
+    if (isShopify) {
+      if (data.store?.storefrontMcp) {
+        metaTags.appendChild(el("span", "sc-meta-tag", COPY.shopifyMcpTag));
+      }
+      if (data.store?.storefrontUcp) {
+        metaTags.appendChild(el("span", "sc-meta-tag", COPY.shopifyUcpTag));
+      }
+    } else {
+      if (data.store?.storefrontUcp) {
+        metaTags.appendChild(el("span", "sc-meta-tag", COPY.universalUcpTag));
+      }
+      if (data.store?.storefrontMcp) {
+        metaTags.appendChild(el("span", "sc-meta-tag", COPY.storefrontMcpTag));
+      }
     }
     if (data.store?.wafRestricted) {
       metaTags.appendChild(el("span", "sc-meta-tag", COPY.wafTag));

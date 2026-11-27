@@ -390,8 +390,8 @@ ${promoBarHtml}
           <h3>${de ? "Shop-System &amp; Erreichbarkeit" : "Platform &amp; reachability"}</h3>
           <p>${
             de
-              ? "Erkennt Shopify (inkl. Storefront MCP &amp; UCP), WooCommerce, Shopware 6, Magento 2, BigCommerce, Amazon oder Schema.org/JSON-LD sowie WAF-Regeln."
-              : "Detects Shopify (incl. Storefront MCP &amp; UCP), WooCommerce, Shopware 6, Magento 2, BigCommerce, Amazon, or Schema.org/JSON-LD plus WAF rules."
+              ? "Erkennt Shopify (inkl. Storefront MCP &amp; UCP), WooCommerce, Shopware 6, Magento 2, BigCommerce, Amazon, Universal UCP (/.well-known/ucp) oder Schema.org/JSON-LD sowie WAF-Regeln."
+              : "Detects Shopify (incl. Storefront MCP &amp; UCP), WooCommerce, Shopware 6, Magento 2, BigCommerce, Amazon, Universal UCP (/.well-known/ucp), or Schema.org/JSON-LD plus WAF rules."
           }</p>
         </article>
         <article class="sc-mini-card">

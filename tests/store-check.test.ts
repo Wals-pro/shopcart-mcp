@@ -39,6 +39,10 @@ const ANALYTICS_JS_SOURCE = fs.readFileSync(
   path.join(REPO_ROOT, "public", "assets", "analytics.js"),
   "utf8"
 );
+const STORE_CHECK_JS_SOURCE = fs.readFileSync(
+  path.join(REPO_ROOT, "public", "assets", "store-check.js"),
+  "utf8"
+);
 
 function makeMockAdapter(opts: {
   platform: StoreInfo["platform"];
@@ -177,6 +181,7 @@ describe("Storefront Self-Check Pages (/check & /en/check), Navigation, SEO & CS
 
     // Independence disclaimer & subtle optional wals.pro footer note
     expect(de.text).toContain(INDEPENDENCE_DISCLAIMER.de);
+    expect(de.text).toContain("Universal UCP (/.well-known/ucp)");
     expect(de.text).toContain("Du willst deinen Shop für KI-Shopping optimieren?");
     expect(de.text).toContain('href="https://wals.pro" target="_blank" rel="noopener noreferrer">Mehr über wals.pro</a>');
 
@@ -186,6 +191,7 @@ describe("Storefront Self-Check Pages (/check & /en/check), Navigation, SEO & CS
     expect(en.text).toContain('<link rel="canonical" href="https://shopcart.wals.pro/en/check">');
     expect(en.text).toContain('href="/check" hreflang="de"');
     expect(en.text).toContain(INDEPENDENCE_DISCLAIMER.en);
+    expect(en.text).toContain("Universal UCP (/.well-known/ucp)");
     expect(en.text).toContain("Want to optimize your store for AI shopping?");
     expect(en.text).toContain('href="https://wals.pro" target="_blank" rel="noopener noreferrer">Learn more at wals.pro</a>');
     const inlineScriptsEn = en.text.match(/<script(?![^>]*\bsrc=)[^>]*>/gi) ?? [];
@@ -363,6 +369,510 @@ describe("Storefront Self-Check Core Assessment & Platform Mapping (DE & EN)", (
     expect(unreachable.status).toBe("not_publicly_readable");
     expect(unreachable.statusLabel).toBe("Not publicly readable");
   });
+
+  it("maps Non-Shopify Universal UCP stores accurately across capability variants (DE & EN) with zero Shopify false positives", () => {
+    const makeUcpStore = (overrides: Partial<StoreInfo> = {}): StoreInfo => ({
+      platform: "ucp",
+      origin: "https://www.hans-natur.de",
+      name: "Hans Natur Handels GmbH & Co. KG",
+      currency: "EUR",
+      country: null,
+      myshopifyDomain: null,
+      wafRestricted: false,
+      capabilities: {
+        predictiveSearch: false,
+        productCatalogJson: false,
+        storefrontMcp: true,
+        storefrontMcpTools: [],
+        storefrontUcp: true,
+        storefrontUcpEndpoint: "https://www.hans-natur.de/ucp/mcp",
+        ucp: true,
+        ucpVersion: "2026-04-08",
+        ucpCapabilities: ["dev.ucp.shopping.catalog.search", "dev.ucp.shopping.catalog.lookup"],
+        ucpCheckoutHandoff: false,
+        ucpCatalogSearch: false,
+        jsonLdProduct: true
+      },
+      ucp: {
+        supported: true,
+        manifestUrl: "https://www.hans-natur.de/.well-known/ucp",
+        version: "2026-04-08",
+        capabilities: ["dev.ucp.shopping.catalog.search", "dev.ucp.shopping.catalog.lookup"],
+        services: {
+          "dev.ucp.shopping": {
+            version: "2026-04-08",
+            mcpEndpoint: "https://www.hans-natur.de/ucp/mcp"
+          }
+        },
+        endpoints: { mcp: "https://www.hans-natur.de/ucp/mcp" },
+        checkoutHandoffSupported: false,
+        catalogSearchSupported: false,
+        liabilityModel: "zero_liability_handoff"
+      },
+      ...overrides
+    });
+
+    // 1. Discovery + MCP only (hans-natur.de live shape) — DE & EN
+    for (const lang of ["de", "en"] as const) {
+      const res = buildStoreCheckAssessment({
+        requestedOrigin: "https://hans-natur.de",
+        requestedDomain: "hans-natur.de",
+        store: makeUcpStore(),
+        productUrl: null,
+        productResult: null,
+        productError: null,
+        policyProbe: null,
+        discountProbe: null,
+        lang
+      });
+
+      expect(res.platform).toBe("ucp");
+      expect(res.platformLabel).toBe("Universal UCP");
+      expect(res.platformLabel).not.toMatch(/Nicht erkannt|Not detected/i);
+      expect(res.status).toBe("partially_readable");
+      expect(res.store.storefrontUcp).toBe(true);
+      expect(res.store.storefrontMcp).toBe(true);
+      expect(res.store.ucpVersion).toBe("2026-04-08");
+      expect(res.store.ucpCheckoutHandoff).toBe(false);
+      expect(res.store.ucpCatalogSearch).toBe(false);
+
+      const capState = Object.fromEntries(res.capabilities.map((c) => [c.key, c.state]));
+      expect(capState).toEqual({
+        product_search: "limited",
+        variants_sizes: "limited",
+        prices_availability: "limited",
+        store_policies: "unsupported",
+        cart_links: "limited",
+        discount_codes: "unsupported"
+      });
+      // No Shopify false positives in summary, hints, or example prompt
+      expect(res.statusSummary).not.toMatch(/shopify/i);
+      expect(res.examplePrompt.text).not.toMatch(/shopify/i);
+      expect(res.hints.map((h) => `${h.title} ${h.text}`).join(" ")).not.toMatch(/shopify/i);
+      expect(res.hints.some((h) => h.text.includes("continue_url"))).toBe(true);
+      expect(res.hints.some((h) => h.text.includes("JSON-LD"))).toBe(true);
+    }
+
+    // 2. Universal UCP with checkout handoff (continue_url) but no catalog search & no MCP — DE & EN
+    for (const lang of ["de", "en"] as const) {
+      const checkoutOnly = buildStoreCheckAssessment({
+        requestedOrigin: "https://checkout-ucp.example",
+        requestedDomain: "checkout-ucp.example",
+        store: makeUcpStore({
+          origin: "https://checkout-ucp.example",
+          name: "Checkout UCP Store",
+          capabilities: {
+            predictiveSearch: false,
+            productCatalogJson: false,
+            storefrontMcp: false,
+            storefrontMcpTools: [],
+            storefrontUcp: true,
+            ucp: true,
+            ucpVersion: "2026-01-11",
+            ucpCapabilities: ["dev.ucp.shopping.checkout"],
+            ucpCheckoutHandoff: true,
+            ucpCatalogSearch: false,
+            jsonLdProduct: true
+          },
+          ucp: {
+            supported: true,
+            manifestUrl: "https://checkout-ucp.example/.well-known/ucp",
+            version: "2026-01-11",
+            capabilities: ["dev.ucp.shopping.checkout"],
+            services: {},
+            endpoints: { rest: "https://checkout-ucp.example/ucp/v1" },
+            checkoutHandoffSupported: true,
+            catalogSearchSupported: false,
+            liabilityModel: "zero_liability_handoff"
+          }
+        }),
+        productUrl: null,
+        productResult: null,
+        productError: null,
+        policyProbe: null,
+        discountProbe: null,
+        lang
+      });
+
+      expect(checkoutOnly.platformLabel).toBe("Universal UCP");
+      expect(checkoutOnly.status).toBe("ai_ready");
+      expect(checkoutOnly.store.storefrontUcp).toBe(true);
+      expect(checkoutOnly.store.storefrontMcp).toBe(false);
+      expect(checkoutOnly.store.ucpCheckoutHandoff).toBe(true);
+      const capState = Object.fromEntries(checkoutOnly.capabilities.map((c) => [c.key, c.state]));
+      expect(capState.cart_links).toBe("supported");
+      expect(capState.discount_codes).toBe("limited");
+      expect(capState.product_search).toBe("limited");
+      expect(checkoutOnly.capabilities.find((c) => c.key === "cart_links")?.detail).toContain("continue_url");
+      // Must not tell merchant to add checkout handoff when already enabled
+      expect(checkoutOnly.hints.some((h) => h.title.includes("continue_url"))).toBe(false);
+    }
+
+    // 3. Full Universal UCP (catalog search + checkout handoff + MCP) — DE & EN
+    for (const lang of ["de", "en"] as const) {
+      const fullUcp = buildStoreCheckAssessment({
+        requestedOrigin: "https://full-ucp.example",
+        requestedDomain: "full-ucp.example",
+        store: makeUcpStore({
+          origin: "https://full-ucp.example",
+          name: "Full UCP Store",
+          capabilities: {
+            predictiveSearch: true,
+            productCatalogJson: false,
+            storefrontMcp: true,
+            storefrontMcpTools: [],
+            storefrontUcp: true,
+            ucp: true,
+            ucpVersion: "2026-01-11",
+            ucpCapabilities: ["dev.ucp.shopping.catalog", "dev.ucp.shopping.checkout"],
+            ucpCheckoutHandoff: true,
+            ucpCatalogSearch: true,
+            jsonLdProduct: true
+          },
+          ucp: {
+            supported: true,
+            manifestUrl: "https://full-ucp.example/.well-known/ucp",
+            version: "2026-01-11",
+            capabilities: ["dev.ucp.shopping.catalog", "dev.ucp.shopping.checkout"],
+            services: {},
+            endpoints: {
+              rest: "https://full-ucp.example/ucp/v1",
+              mcp: "https://full-ucp.example/ucp/mcp"
+            },
+            checkoutHandoffSupported: true,
+            catalogSearchSupported: true,
+            liabilityModel: "zero_liability_handoff"
+          }
+        }),
+        productUrl: null,
+        productResult: null,
+        productError: null,
+        policyProbe: null,
+        discountProbe: null,
+        lang
+      });
+
+      expect(fullUcp.status).toBe("ai_ready");
+      expect(fullUcp.platformLabel).toBe("Universal UCP");
+      const capState = Object.fromEntries(fullUcp.capabilities.map((c) => [c.key, c.state]));
+      expect(capState).toEqual({
+        product_search: "supported",
+        variants_sizes: "supported",
+        prices_availability: "supported",
+        store_policies: "unsupported",
+        cart_links: "supported",
+        discount_codes: "limited"
+      });
+      expect(fullUcp.hints).toHaveLength(1);
+      expect(fullUcp.hints[0]!.title).toMatch(/Universal UCP/);
+    }
+
+    // 4. Universal UCP + verified productCheck upgrades prices & variants to supported
+    const ucpWithProduct = buildStoreCheckAssessment({
+      requestedOrigin: "https://hans-natur.de",
+      requestedDomain: "hans-natur.de",
+      store: makeUcpStore(),
+      productUrl: "https://www.hans-natur.de/bio-schurwolle-body",
+      productResult: {
+        store_origin: "https://www.hans-natur.de",
+        currency: "EUR",
+        product: {
+          id: "p1",
+          handle: "bio-schurwolle-body",
+          title: "Bio Schurwolle Body",
+          vendor: "Hans Natur",
+          product_type: "Baby",
+          description_text: "Wolle/Seide",
+          sku: "HN-100",
+          gtin: "4260000000099",
+          available: true,
+          availability: "InStock",
+          price_min: { amount: 24.9, formatted: "24,90 €", currency: "EUR" },
+          price_max: { amount: 24.9, formatted: "24,90 €", currency: "EUR" },
+          metadata_source: "jsonld",
+          url: "https://www.hans-natur.de/bio-schurwolle-body",
+          options: [{ name: "Größe", values: ["62/68", "74/80"] }],
+          images: [],
+          variants: [
+            {
+              id: "v1",
+              title: "62/68",
+              sku: "HN-100-62",
+              available: true,
+              price: { amount: 24.9, formatted: "24,90 €", currency: "EUR" },
+              compare_at_price: null,
+              option_values: ["62/68"]
+            },
+            {
+              id: "v2",
+              title: "74/80",
+              sku: "HN-100-74",
+              available: true,
+              price: { amount: 24.9, formatted: "24,90 €", currency: "EUR" },
+              compare_at_price: null,
+              option_values: ["74/80"]
+            }
+          ]
+        }
+      },
+      productError: null,
+      policyProbe: null,
+      discountProbe: null,
+      lang: "de"
+    });
+    expect(ucpWithProduct.capabilities.find((c) => c.key === "prices_availability")?.state).toBe("supported");
+    expect(ucpWithProduct.capabilities.find((c) => c.key === "variants_sizes")?.state).toBe("supported");
+
+    // 5. WAF-restricted Universal UCP stays partially_readable (manifest readable, HTML restricted)
+    const ucpWaf = buildStoreCheckAssessment({
+      requestedOrigin: "https://waf-ucp.example",
+      requestedDomain: "waf-ucp.example",
+      store: makeUcpStore({ origin: "https://waf-ucp.example", wafRestricted: true }),
+      productUrl: null,
+      productResult: null,
+      productError: null,
+      policyProbe: null,
+      discountProbe: null,
+      lang: "en"
+    });
+    expect(ucpWaf.status).toBe("partially_readable");
+    expect(ucpWaf.platformLabel).toBe("Universal UCP");
+    expect(ucpWaf.statusSummary).toMatch(/WAF/i);
+  });
+
+  it("renders accurate platform-aware pills in store-check.js (DE & EN): Shopify vs Universal UCP vs non-UCP", async () => {
+    const runStoreCheckClient = async (lang: "de" | "en", payload: Record<string, unknown>) => {
+      class FakeNode {
+        tagName: string;
+        className = "";
+        textContent = "";
+        id = "";
+        hidden = false;
+        disabled = false;
+        type = "";
+        value = "";
+        dataset: Record<string, string> = {};
+        attrs = new Map<string, string>();
+        children: FakeNode[] = [];
+        listeners = new Map<string, Array<(ev: any) => void>>();
+
+        constructor(tag: string) {
+          this.tagName = tag.toUpperCase();
+        }
+        get childNodes() {
+          return this.children;
+        }
+        appendChild(child: FakeNode) {
+          this.children.push(child);
+          return child;
+        }
+        replaceChildren(...nodes: FakeNode[]) {
+          this.children = [...nodes];
+        }
+        getAttribute(name: string) {
+          return this.attrs.get(name) ?? null;
+        }
+        setAttribute(name: string, val: string) {
+          this.attrs.set(name, val);
+        }
+        removeAttribute(name: string) {
+          this.attrs.delete(name);
+        }
+        addEventListener(type: string, fn: (ev: any) => void) {
+          const list = this.listeners.get(type) ?? [];
+          list.push(fn);
+          this.listeners.set(type, list);
+        }
+        classList = {
+          add: () => undefined,
+          remove: () => undefined
+        };
+        setCustomValidity() {}
+        focus() {}
+        querySelector() {
+          return null;
+        }
+        findByClass(cls: string): FakeNode[] {
+          const hits: FakeNode[] = [];
+          const classes = this.className.split(/\s+/).filter(Boolean);
+          if (classes.includes(cls)) hits.push(this);
+          for (const child of this.children) {
+            hits.push(...child.findByClass(cls));
+          }
+          return hits;
+        }
+      }
+      class FakeForm extends FakeNode {}
+      class FakeInput extends FakeNode {}
+      class FakeButton extends FakeNode {}
+
+      const form = new FakeForm("form");
+      form.id = "store-check-form";
+      form.setAttribute("data-lang", lang);
+      const storeInput = new FakeInput("input");
+      storeInput.id = "sc-store-url";
+      storeInput.value = "example.com";
+      const productInput = new FakeInput("input");
+      productInput.id = "sc-product-url";
+      const submitBtn = new FakeButton("button");
+      submitBtn.id = "sc-submit-btn";
+      const formAlert = new FakeNode("div");
+      formAlert.id = "sc-form-alert";
+      const loadingSection = new FakeNode("section");
+      loadingSection.id = "sc-loading";
+      const resultSection = new FakeNode("section");
+      resultSection.id = "sc-result";
+
+      const byId = new Map<string, FakeNode>([
+        ["store-check-form", form],
+        ["sc-store-url", storeInput],
+        ["sc-product-url", productInput],
+        ["sc-submit-btn", submitBtn],
+        ["sc-form-alert", formAlert],
+        ["sc-loading", loadingSection],
+        ["sc-result", resultSection]
+      ]);
+
+      const fakeDocument = {
+        body: new FakeNode("body"),
+        getElementById: (id: string) => byId.get(id) ?? null,
+        createElement: (tag: string) => new FakeNode(tag),
+        dispatchEvent: () => true
+      };
+
+      const ctx = vm.createContext({
+        window: {
+          setTimeout: () => 0,
+          clearTimeout: () => undefined
+        },
+        document: fakeDocument,
+        navigator: {},
+        Element: FakeNode,
+        HTMLElement: FakeNode,
+        HTMLFormElement: FakeForm,
+        HTMLInputElement: FakeInput,
+        HTMLButtonElement: FakeButton,
+        CustomEvent: class CustomEvent {
+          type: string;
+          detail: unknown;
+          constructor(type: string, init?: { detail?: unknown }) {
+            this.type = type;
+            this.detail = init?.detail;
+          }
+        },
+        fetch: async () => ({
+          ok: true,
+          status: 200,
+          json: async () => payload
+        }),
+        WeakSet,
+        Array,
+        Object,
+        String,
+        Boolean,
+        JSON
+      });
+
+      vm.runInContext(STORE_CHECK_JS_SOURCE, ctx);
+      const submitHandlers = form.listeners.get("submit") ?? [];
+      expect(submitHandlers.length).toBe(1);
+      await submitHandlers[0]!({ preventDefault: () => undefined });
+
+      return {
+        platformPill: resultSection.findByClass("sc-platform-pill").map((n) => n.textContent),
+        metaTags: resultSection.findByClass("sc-meta-tag").map((n) => n.textContent)
+      };
+    };
+
+    // Non-Shopify Universal UCP with MCP + UCP (hans-natur.de)
+    const ucpMcpDe = await runStoreCheckClient("de", {
+      status: "partially_readable",
+      statusLabel: "Eingeschränkt lesbar",
+      platform: "ucp",
+      platformLabel: "Universal UCP",
+      store: { domain: "www.hans-natur.de", currency: "EUR", storefrontMcp: true, storefrontUcp: true },
+      capabilities: []
+    });
+    expect(ucpMcpDe.platformPill).toEqual(["Universal UCP"]);
+    expect(ucpMcpDe.metaTags).toEqual(["Währung: EUR", "Universal UCP aktiv", "Storefront MCP aktiv"]);
+    expect(ucpMcpDe.metaTags.join(" ")).not.toMatch(/Shopify/i);
+
+    const ucpMcpEn = await runStoreCheckClient("en", {
+      status: "partially_readable",
+      statusLabel: "Partially readable",
+      platform: "ucp",
+      platformLabel: "Universal UCP",
+      store: { domain: "www.hans-natur.de", currency: "EUR", storefrontMcp: true, storefrontUcp: true },
+      capabilities: []
+    });
+    expect(ucpMcpEn.platformPill).toEqual(["Universal UCP"]);
+    expect(ucpMcpEn.metaTags).toEqual(["Currency: EUR", "Universal UCP active", "Storefront MCP active"]);
+    expect(ucpMcpEn.metaTags.join(" ")).not.toMatch(/Shopify/i);
+
+    // Non-Shopify Universal UCP without MCP (REST-only UCP)
+    const ucpNoMcpEn = await runStoreCheckClient("en", {
+      status: "ai_ready",
+      statusLabel: "AI-Ready",
+      platform: "ucp",
+      platformLabel: "Universal UCP",
+      store: { domain: "rest-ucp.example", currency: "EUR", storefrontMcp: false, storefrontUcp: true },
+      capabilities: []
+    });
+    expect(ucpNoMcpEn.metaTags).toEqual(["Currency: EUR", "Universal UCP active"]);
+
+    // Shopify + UCP (allbirds.com) keeps Shopify-specific labels
+    const shopifyUcpDe = await runStoreCheckClient("de", {
+      status: "ai_ready",
+      statusLabel: "AI-Ready",
+      platform: "shopify",
+      platformLabel: "Shopify",
+      store: { domain: "www.allbirds.com", currency: "USD", country: "US", storefrontMcp: true, storefrontUcp: true },
+      capabilities: []
+    });
+    expect(shopifyUcpDe.metaTags).toEqual([
+      "Währung: USD",
+      "Land: US",
+      "Shopify Storefront MCP aktiv",
+      "Shopify UCP aktiv"
+    ]);
+
+    const shopifyUcpEn = await runStoreCheckClient("en", {
+      status: "ai_ready",
+      statusLabel: "AI-Ready",
+      platform: "shopify",
+      platformLabel: "Shopify",
+      store: { domain: "www.allbirds.com", currency: "USD", country: "US", storefrontMcp: true, storefrontUcp: true },
+      capabilities: []
+    });
+    expect(shopifyUcpEn.metaTags).toEqual([
+      "Currency: USD",
+      "Country: US",
+      "Shopify Storefront MCP active",
+      "Shopify UCP active"
+    ]);
+
+    // Shopify without UCP (snocks.com-like without UCP) shows no UCP tag
+    const shopifyNoUcpDe = await runStoreCheckClient("de", {
+      status: "ai_ready",
+      statusLabel: "AI-Ready",
+      platform: "shopify",
+      platformLabel: "Shopify",
+      store: { domain: "snocks.com", currency: "EUR", country: "DE", storefrontMcp: true, storefrontUcp: false },
+      capabilities: []
+    });
+    expect(shopifyNoUcpDe.metaTags).toEqual(["Währung: EUR", "Land: DE", "Shopify Storefront MCP aktiv"]);
+
+    // Non-UCP / JSON-LD (on.com) shows neither MCP nor UCP tag
+    const jsonLdEn = await runStoreCheckClient("en", {
+      status: "partially_readable",
+      statusLabel: "Partially readable",
+      platform: "jsonld",
+      platformLabel: "Schema.org / JSON-LD",
+      store: { domain: "www.on.com", currency: "USD", storefrontMcp: false, storefrontUcp: false },
+      capabilities: []
+    });
+    expect(jsonLdEn.metaTags).toEqual(["Currency: USD"]);
+  });
 });
 
 describe("POST /api/store-check — Security, Abuse Hardening & Functional API", () => {
@@ -472,6 +982,71 @@ describe("POST /api/store-check — Security, Abuse Hardening & Functional API",
     expect(res.body.productCheck.product.variants[0].sku).toBe("SKU-1");
     expect(res.body.examplePrompt.text).toContain("Sneaker Socken");
     expect(res.body.disclaimer).toBe(INDEPENDENCE_DISCLAIMER.de);
+  });
+
+  it("returns clean Universal UCP assessment via POST /api/store-check (DE & EN) without Shopify false positives", async () => {
+    const ucpAdapter = makeMockAdapter({
+      platform: "ucp",
+      store: {
+        platform: "ucp",
+        origin: "https://www.hans-natur.de",
+        name: "Hans Natur Handels GmbH & Co. KG",
+        currency: "EUR",
+        country: null,
+        myshopifyDomain: null,
+        wafRestricted: false,
+        capabilities: {
+          predictiveSearch: false,
+          productCatalogJson: false,
+          storefrontMcp: true,
+          storefrontMcpTools: [],
+          storefrontUcp: true,
+          storefrontUcpEndpoint: "https://www.hans-natur.de/ucp/mcp",
+          ucp: true,
+          ucpVersion: "2026-04-08",
+          ucpCapabilities: ["dev.ucp.shopping.catalog.search", "dev.ucp.shopping.catalog.lookup"],
+          ucpCheckoutHandoff: false,
+          ucpCatalogSearch: false,
+          jsonLdProduct: true
+        },
+        ucp: {
+          supported: true,
+          manifestUrl: "https://www.hans-natur.de/.well-known/ucp",
+          version: "2026-04-08",
+          capabilities: ["dev.ucp.shopping.catalog.search", "dev.ucp.shopping.catalog.lookup"],
+          services: {},
+          endpoints: { mcp: "https://www.hans-natur.de/ucp/mcp" },
+          checkoutHandoffSupported: false,
+          catalogSearchSupported: false,
+          liabilityModel: "zero_liability_handoff"
+        }
+      }
+    });
+
+    const { app } = makeTestApp({ adapters: [ucpAdapter] });
+
+    for (const lang of ["de", "en"] as const) {
+      const res = await request(app)
+        .post("/api/store-check")
+        .set("Origin", "https://shopcart.wals.pro")
+        .set("Sec-Fetch-Site", "same-origin")
+        .set("Content-Type", "application/json")
+        .send({ storeUrl: "hans-natur.de", lang })
+        .expect(200);
+
+      expect(res.body.platform).toBe("ucp");
+      expect(res.body.platformLabel).toBe("Universal UCP");
+      expect(res.body.status).toBe("partially_readable");
+      expect(res.body.store.domain).toBe("www.hans-natur.de");
+      expect(res.body.store.storefrontUcp).toBe(true);
+      expect(res.body.store.storefrontMcp).toBe(true);
+      expect(res.body.store.ucpVersion).toBe("2026-04-08");
+      expect(res.body.store.ucpCheckoutHandoff).toBe(false);
+      expect(res.body.store.ucpCatalogSearch).toBe(false);
+      expect(res.body.capabilities).toHaveLength(6);
+      expect(res.body.capabilities.filter((c: { state: string }) => c.state === "unsupported")).toHaveLength(2);
+      expect(res.body.statusSummary).not.toMatch(/shopify/i);
+    }
   });
 
   it("rejects wrong Content-Type (415), oversized bodies (413), malformed JSON (400), and cross-origin CSRF (403)", async () => {
@@ -1429,5 +2004,26 @@ describe("GA4 Consent Integration for storefront_self_check_run (Zero Pre-Consen
       has_product_url: true
     });
     expect(JSON.stringify(checkEvent[2])).not.toContain("secret-merchant.example");
+
+    // Verify Universal UCP platform is allowlisted in GA4 store_check event (not collapsed to "unknown")
+    gtagCalls.length = 0;
+    for (const fn of listeners.get("shopcart:store_check_run") ?? []) {
+      fn({
+        detail: {
+          platform: "ucp",
+          status: "partially_readable",
+          has_product_url: false
+        }
+      });
+    }
+    const ucpEvent = gtagCalls.find((c) => c[0] === "event" && c[1] === "storefront_self_check_run");
+    expect(ucpEvent).toBeDefined();
+    expect(ucpEvent[2]).toEqual({
+      page_location: "https://shopcart.wals.pro/check",
+      page_referrer: "",
+      platform: "ucp",
+      status: "partially_readable",
+      has_product_url: false
+    });
   });
 });

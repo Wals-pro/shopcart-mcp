@@ -107,6 +107,9 @@ export interface StoreCheckResult {
     wafRestricted: boolean;
     storefrontMcp: boolean;
     storefrontUcp: boolean;
+    ucpVersion?: string | null;
+    ucpCheckoutHandoff?: boolean;
+    ucpCatalogSearch?: boolean;
   };
   capabilities: StoreCheckCapability[];
   productCheck: StoreCheckProductSummary | null;
@@ -658,6 +661,8 @@ function getPlatformLabel(platform: StoreCheckPlatform, lang: Lang): string {
       return "BigCommerce";
     case "amazon":
       return "Amazon";
+    case "ucp":
+      return "Universal UCP";
     case "jsonld":
       return "Schema.org / JSON-LD";
     default:
@@ -744,7 +749,18 @@ export function buildStoreCheckAssessment(params: {
   const country = sanitizeOptionalDisplayText(store?.country, 12);
   const wafRestricted = Boolean(store?.wafRestricted);
   const storefrontMcp = Boolean(store?.capabilities?.storefrontMcp);
-  const storefrontUcp = Boolean(store?.capabilities?.storefrontUcp);
+  const ucpSupported = Boolean(store?.ucp?.supported || store?.capabilities?.ucp);
+  const storefrontUcp = Boolean(store?.capabilities?.storefrontUcp || ucpSupported);
+  const ucpVersion = sanitizeOptionalDisplayText(
+    store?.ucp?.version ?? store?.capabilities?.ucpVersion,
+    32
+  );
+  const ucpCheckoutHandoff = Boolean(
+    store?.capabilities?.ucpCheckoutHandoff ?? store?.ucp?.checkoutHandoffSupported
+  );
+  const ucpCatalogSearch = Boolean(
+    store?.capabilities?.ucpCatalogSearch ?? store?.ucp?.catalogSearchSupported
+  );
 
   // Format optional product check safely
   let productCheck: StoreCheckProductSummary | null = null;
@@ -843,6 +859,8 @@ export function buildStoreCheckAssessment(params: {
     status = !wafRestricted && Boolean(store.capabilities.magentoGraphql) ? "ai_ready" : "partially_readable";
   } else if (platform === "amazon") {
     status = "partially_readable";
+  } else if (platform === "ucp") {
+    status = !wafRestricted && (ucpCatalogSearch || ucpCheckoutHandoff) ? "ai_ready" : "partially_readable";
   } else {
     // Universal JSON-LD
     if (wafRestricted) {
@@ -858,6 +876,9 @@ export function buildStoreCheckAssessment(params: {
     store,
     currency,
     wafRestricted,
+    storefrontMcp,
+    ucpCatalogSearch,
+    ucpCheckoutHandoff,
     policyProbe,
     discountProbe,
     productCheck,
@@ -869,6 +890,10 @@ export function buildStoreCheckAssessment(params: {
     platform,
     status,
     wafRestricted,
+    storefrontMcp,
+    ucpVersion,
+    ucpCatalogSearch,
+    ucpCheckoutHandoff,
     canonicalDomain,
     lang
   });
@@ -878,6 +903,8 @@ export function buildStoreCheckAssessment(params: {
     platform,
     store,
     wafRestricted,
+    ucpCatalogSearch,
+    ucpCheckoutHandoff,
     policyProbe,
     productCheck,
     lang
@@ -887,6 +914,8 @@ export function buildStoreCheckAssessment(params: {
   const examplePrompt = buildExamplePrompt({
     platform,
     canonicalDomain,
+    ucpCatalogSearch,
+    ucpCheckoutHandoff,
     productTitle: productCheck?.ok ? productCheck.product?.title ?? null : null,
     productUrl: productCheck?.ok ? productUrl : null,
     lang
@@ -906,7 +935,14 @@ export function buildStoreCheckAssessment(params: {
       country,
       wafRestricted,
       storefrontMcp,
-      storefrontUcp
+      storefrontUcp,
+      ...(ucpSupported
+        ? {
+            ucpVersion,
+            ucpCheckoutHandoff,
+            ucpCatalogSearch
+          }
+        : {})
     },
     capabilities,
     productCheck,
@@ -921,10 +957,24 @@ function buildStatusSummary(params: {
   platform: StoreCheckPlatform;
   status: StoreCheckStatus;
   wafRestricted: boolean;
+  storefrontMcp: boolean;
+  ucpVersion: string | null;
+  ucpCatalogSearch: boolean;
+  ucpCheckoutHandoff: boolean;
   canonicalDomain: string;
   lang: Lang;
 }): string {
-  const { platform, status, wafRestricted, canonicalDomain, lang } = params;
+  const {
+    platform,
+    status,
+    wafRestricted,
+    storefrontMcp,
+    ucpVersion,
+    ucpCatalogSearch,
+    ucpCheckoutHandoff,
+    canonicalDomain,
+    lang
+  } = params;
   const de = lang === "de";
 
   if (status === "not_publicly_readable") {
@@ -964,6 +1014,22 @@ function buildStatusSummary(params: {
         ? `Öffentliche Magento-2-GraphQL-Storefront erkannt: Produktsuche, Varianten, Preise, Bestand und direkte Produktlinks sind öffentlich lesbar.`
         : `Public Magento 2 GraphQL storefront detected: product search, variants, prices, stock, and verified direct product links are publicly readable.`;
     }
+    if (platform === "ucp") {
+      const verSuffix = ucpVersion ? ` (UCP v${ucpVersion})` : "";
+      if (ucpCatalogSearch && ucpCheckoutHandoff) {
+        return de
+          ? `Universal-UCP-Shop erkannt${verSuffix}: Öffentliche UCP-Katalogsuche, Live-Produktdaten (UCP / JSON-LD) und Zero-Liability-Checkout-Handoff (continue_url) sind über /.well-known/ucp aktiv.`
+          : `Universal UCP store detected${verSuffix}: public UCP catalog search, live product data (UCP / JSON-LD), and zero-liability checkout handoff (continue_url) are active via /.well-known/ucp.`;
+      }
+      if (ucpCatalogSearch) {
+        return de
+          ? `Universal-UCP-Shop erkannt${verSuffix}: Öffentliche UCP-Katalogsuche sowie Live-Preise und Varianten (UCP / JSON-LD) sind über /.well-known/ucp lesbar; Übergabe erfolgt per geprüften Produktlinks.`
+          : `Universal UCP store detected${verSuffix}: public UCP catalog search plus live prices and variants (UCP / JSON-LD) are readable via /.well-known/ucp; handoff uses verified product links.`;
+      }
+      return de
+        ? `Universal-UCP-Shop erkannt${verSuffix}: Zero-Liability-Checkout-Handoff (continue_url) ist über /.well-known/ucp aktiv; Produktseiten lassen sich per Produkt-URL über Schema.org/JSON-LD live prüfen.`
+        : `Universal UCP store detected${verSuffix}: zero-liability checkout handoff (continue_url) is active via /.well-known/ucp; product pages can be verified live per product URL via Schema.org/JSON-LD.`;
+    }
   }
 
   // partially_readable
@@ -976,6 +1042,17 @@ function buildStatusSummary(params: {
     return de
       ? `Amazon-Marktplatz erkannt: Offizielle Multi-Artikel-Warenkorb-Links per ASIN funktionieren; Live-Katalogsuche erfordert im Self-Hosting eigene API-Zugangsdaten.`
       : `Amazon marketplace detected: official multi-item cart links by ASIN work; live catalog search requires your own API credentials when self-hosting.`;
+  }
+  if (platform === "ucp") {
+    const verSuffix = ucpVersion ? `, v${ucpVersion}` : "";
+    if (wafRestricted) {
+      return de
+        ? `Universal-UCP-Manifest (/.well-known/ucp${verSuffix}) erkannt, aber Storefront-Seiten sind teils per WAF oder Bot-Schutz eingeschränkt.`
+        : `Universal UCP manifest (/.well-known/ucp${verSuffix}) detected, but storefront pages are partially restricted by WAF or bot protection.`;
+    }
+    return de
+      ? `Universal-UCP-Manifest (/.well-known/ucp${verSuffix}) erkannt${storefrontMcp ? " inkl. Storefront-MCP-Endpunkt" : ""}. Produktseiten lassen sich per Produkt-URL über Schema.org/JSON-LD live prüfen; eine öffentliche UCP-Katalogsuche oder Checkout-Handoff (continue_url) ist im Manifest derzeit nicht aktiv.`
+      : `Universal UCP manifest (/.well-known/ucp${verSuffix}) detected${storefrontMcp ? " with a Storefront MCP endpoint" : ""}. Product pages can be verified live per product URL via Schema.org/JSON-LD; public UCP catalog search or checkout handoff (continue_url) is not currently active in the manifest.`;
   }
   if (platform === "jsonld") {
     return de
@@ -993,12 +1070,27 @@ function buildCapabilities(params: {
   store: StoreInfo | null;
   currency: string | null;
   wafRestricted: boolean;
+  storefrontMcp: boolean;
+  ucpCatalogSearch: boolean;
+  ucpCheckoutHandoff: boolean;
   policyProbe: PolicyProbeSummary | null;
   discountProbe: DiscountProbeSummary | null;
   productCheck: StoreCheckProductSummary | null;
   lang: Lang;
 }): StoreCheckCapability[] {
-  const { platform, store, currency, wafRestricted, policyProbe, discountProbe, productCheck, lang } = params;
+  const {
+    platform,
+    store,
+    currency,
+    wafRestricted,
+    storefrontMcp,
+    ucpCatalogSearch,
+    ucpCheckoutHandoff,
+    policyProbe,
+    discountProbe,
+    productCheck,
+    lang
+  } = params;
   const de = lang === "de";
   const make = (
     key: StoreCheckCapability["key"],
@@ -1135,6 +1227,24 @@ function buildCapabilities(params: {
     searchEn = store.capabilities.liveSearch
       ? "Live search active via configured API integration."
       : "No hosted live search; ASINs or product URLs can be passed directly.";
+  } else if (platform === "ucp") {
+    if (ucpCatalogSearch && !wafRestricted) {
+      searchState = "supported";
+      searchDe = "Öffentliche UCP-Katalogsuche über /.well-known/ucp aktiv (inkl. Schema.org/JSON-LD-Fallback).";
+      searchEn = "Public UCP catalog search active via /.well-known/ucp (with Schema.org/JSON-LD fallback).";
+    } else if (wafRestricted) {
+      searchState = "limited";
+      searchDe = "UCP-Manifest (/.well-known/ucp) erkannt, aber Storefront-Abrufe sind teils per WAF eingeschränkt.";
+      searchEn = "UCP manifest (/.well-known/ucp) detected, but storefront requests are partially WAF-restricted.";
+    } else if (storefrontMcp) {
+      searchState = "limited";
+      searchDe = "UCP-Manifest (/.well-known/ucp) und Storefront-MCP-Endpunkt erkannt; Produktprüfung über ShopCart erfolgt per Produkt-URL (Schema.org/JSON-LD).";
+      searchEn = "UCP manifest (/.well-known/ucp) and Storefront MCP endpoint detected; product verification in ShopCart runs via direct product URL (Schema.org/JSON-LD).";
+    } else {
+      searchState = "limited";
+      searchDe = "UCP-Manifest (/.well-known/ucp) erkannt, ohne öffentlichen UCP-Suchendpunkt — Produktprüfung per Produkt-URL (Schema.org/JSON-LD).";
+      searchEn = "UCP manifest (/.well-known/ucp) detected without a public UCP search endpoint — product verification runs via direct product URL (Schema.org/JSON-LD).";
+    }
   }
 
   // 2. Variants / sizes
@@ -1155,6 +1265,24 @@ function buildCapabilities(params: {
     variantsState = "limited";
     variantsDe = "Je ASIN eindeutig identifizierbar; Variantenwechsel erfolgt über Produkt-URLs.";
     variantsEn = "Identified per ASIN; variant selection relies on specific product URLs.";
+  } else if (platform === "ucp") {
+    if (ucpCatalogSearch && !wafRestricted) {
+      variantsState = "supported";
+      variantsDe = "Varianten, Optionen und IDs sind über UCP-Produktdaten sowie Schema.org/JSON-LD live auslesbar.";
+      variantsEn = "Variants, options, and IDs can be read live via UCP product data and Schema.org/JSON-LD.";
+    } else if (productCheck?.ok && (productCheck.product?.variantCount ?? 0) > 1) {
+      variantsState = "supported";
+      variantsDe = `Im Produkt-Check wurden ${productCheck.product!.variantCount} Varianten über UCP / Schema.org JSON-LD erkannt.`;
+      variantsEn = `${productCheck.product!.variantCount} variants were detected via UCP / Schema.org JSON-LD in the product check.`;
+    } else if (wafRestricted) {
+      variantsState = "limited";
+      variantsDe = "Storefront-Seiten sind teils WAF-geschützt; Varianten sind nur bei zugänglichen Produktdaten auslesbar.";
+      variantsEn = "Storefront pages are partially WAF-protected; variants are only readable when product data is accessible.";
+    } else {
+      variantsState = "limited";
+      variantsDe = "Per Produkt-URL auslesbar, sofern Produktseiten Schema.org ProductGroup/hasVariant- oder UCP-Daten enthalten.";
+      variantsEn = "Readable per product URL when product pages expose Schema.org ProductGroup/hasVariant or UCP data.";
+    }
   } else if (platform === "jsonld") {
     if (productCheck?.ok && (productCheck.product?.variantCount ?? 0) > 1) {
       variantsState = "supported";
@@ -1189,6 +1317,28 @@ function buildCapabilities(params: {
     priceEn = store.capabilities.liveSearch
       ? "Live prices & availability available via API."
       : "Final price and availability are confirmed directly on Amazon's confirmation page.";
+  } else if (platform === "ucp") {
+    if (ucpCatalogSearch && !wafRestricted) {
+      priceState = "supported";
+      priceDe = `Live-Preise${currency ? ` (${currency})` : ""} und Verfügbarkeit sind über UCP und Schema.org/JSON-LD direkt lesbar.`;
+      priceEn = `Live prices${currency ? ` (${currency})` : ""} and availability are directly readable via UCP and Schema.org/JSON-LD.`;
+    } else if (productCheck?.ok && productCheck.product?.price) {
+      priceState = "supported";
+      priceDe = `Live-Preis (${productCheck.product.price}) und Verfügbarkeit im Produkt-Check bestätigt.`;
+      priceEn = `Live price (${productCheck.product.price}) and availability confirmed in the product check.`;
+    } else if (productCheck && !productCheck.ok) {
+      priceState = "unsupported";
+      priceDe = "Auf der geprüften Produktseite wurden keine lesbaren Preis- oder Angebotsdaten gefunden.";
+      priceEn = "No readable price or offer data was found on the checked product page.";
+    } else {
+      priceState = "limited";
+      priceDe = currency
+        ? `Per Produkt-URL über Schema.org/JSON-LD live prüfbar (${currency}, sofern auf der Produktseite gepflegt).`
+        : "Per Produkt-URL über Schema.org/JSON-LD live prüfbar (sofern auf der Produktseite gepflegt).";
+      priceEn = currency
+        ? `Verifiable live per product URL via Schema.org/JSON-LD (${currency}, when present on the product page).`
+        : "Verifiable live per product URL via Schema.org/JSON-LD (when present on the product page).";
+    }
   } else if (platform === "jsonld") {
     if (productCheck?.ok && productCheck.product?.price) {
       priceState = "supported";
@@ -1229,6 +1379,10 @@ function buildCapabilities(params: {
       policiesDe = "Versand- & Rückgaberegeln können über /policies und Storefront MCP gelesen werden.";
       policiesEn = "Shipping & return policies can be read via /policies and Storefront MCP.";
     }
+  } else if (platform === "ucp") {
+    policiesState = "unsupported";
+    policiesDe = "Automatische Versand- & Rückgabe-Auswertung wird über Universal UCP aktuell noch nicht unterstützt.";
+    policiesEn = "Automated shipping & return policy extraction is not yet supported for Universal UCP.";
   }
 
   // 5. Direct cart links (/cart/...)
@@ -1243,6 +1397,16 @@ function buildCapabilities(params: {
     cartState = "supported";
     cartDe = "Offizieller Multi-Artikel-Bestätigungslink (/gp/aws/cart/add.html).";
     cartEn = "Official multi-item confirmation link (/gp/aws/cart/add.html).";
+  } else if (platform === "ucp") {
+    if (ucpCheckoutHandoff) {
+      cartState = "supported";
+      cartDe = "Zero-Liability UCP-Checkout-Handoff (continue_url) über /.well-known/ucp deklariert — Übergabe direkt an den Shop-Checkout.";
+      cartEn = "Zero-liability UCP checkout handoff (continue_url) declared via /.well-known/ucp — hands off directly to merchant checkout.";
+    } else {
+      cartState = "limited";
+      cartDe = "Kein UCP-Checkout-Handoff (continue_url) im Manifest deklariert — ShopCart liefert geprüfte direkte Produktlinks.";
+      cartEn = "No UCP checkout handoff (continue_url) declared in the manifest — ShopCart returns verified direct product links.";
+    }
   } else if (platform === "woocommerce") {
     cartState = "limited";
     cartDe = "Add-to-Cart-Link pro Artikel (?add-to-cart=...) — bei mehreren Artikeln nacheinander anklickbar.";
@@ -1281,6 +1445,10 @@ function buildCapabilities(params: {
       discountDe = "Öffentlich beworbene Rabattcodes können erkannt und direkt an den /cart/-Link übergeben werden.";
       discountEn = "Publicly advertised discount codes can be detected and passed directly via the /cart/ link.";
     }
+  } else if (platform === "ucp" && ucpCheckoutHandoff) {
+    discountState = "limited";
+    discountDe = "Keine automatische Rabattcode-Suche; ein vom Nutzer genannter Code kann beim UCP-Checkout-Handoff übergeben werden.";
+    discountEn = "No automatic promo code discovery; a user-supplied code can be passed during UCP checkout handoff.";
   }
 
   return [
@@ -1297,11 +1465,22 @@ function buildActionableHints(params: {
   platform: StoreCheckPlatform;
   store: StoreInfo | null;
   wafRestricted: boolean;
+  ucpCatalogSearch: boolean;
+  ucpCheckoutHandoff: boolean;
   policyProbe: PolicyProbeSummary | null;
   productCheck: StoreCheckProductSummary | null;
   lang: Lang;
 }): StoreCheckHint[] {
-  const { platform, store, wafRestricted, policyProbe, productCheck, lang } = params;
+  const {
+    platform,
+    store,
+    wafRestricted,
+    ucpCatalogSearch,
+    ucpCheckoutHandoff,
+    policyProbe,
+    productCheck,
+    lang
+  } = params;
   const de = lang === "de";
   const hints: StoreCheckHint[] = [];
 
@@ -1347,6 +1526,33 @@ function buildActionableHints(params: {
         ? `Unter den Standard-Shopify-Pfaden fehlen öffentlich lesbare ${missingLabel}. Wenn sie in den Shopify-Einstellungen unter „Richtlinien“ gepflegt sind, können KI-Assistenten Versandkosten und Rückgabefristen direkt vor dem Checkout beantworten.`
         : `Publicly readable ${missingLabel} were not found on the standard Shopify policy paths. Publishing them under Shopify Settings → Policies lets AI assistants answer shipping and return questions accurately before checkout.`
     });
+  }
+
+  if (platform === "ucp") {
+    if (!ucpCheckoutHandoff) {
+      hints.push({
+        title: de ? "Optional: UCP Checkout-Handoff (continue_url) ergänzen" : "Optional: Add UCP checkout handoff (continue_url)",
+        text: de
+          ? "Dein /.well-known/ucp-Manifest wird bereits erkannt. Wenn du zusätzlich die Capability dev.ucp.shopping.checkout mit einem REST-Endpunkt (POST /checkout-sessions → continue_url) anbietest, können KI-Assistenten direkt an deinen Checkout übergeben."
+          : "Your /.well-known/ucp manifest is already discovered cleanly. Adding the dev.ucp.shopping.checkout capability with a REST endpoint (POST /checkout-sessions → continue_url) lets AI assistants hand shoppers off directly to your checkout."
+      });
+    }
+    if (!ucpCatalogSearch) {
+      hints.push({
+        title: de ? "Produktdaten per Schema.org/JSON-LD pflegen & testen" : "Maintain & verify Schema.org/JSON-LD product data",
+        text: de
+          ? "Da über /.well-known/ucp aktuell kein öffentlicher UCP-Suchendpunkt aktiv ist, liest ShopCart Preis, Währung, Lagerstatus, SKU/GTIN und Varianten per Produkt-URL aus Schema.org Product/ProductGroup-JSON-LD. Teste am besten eine konkrete Produkt-URL im optionalen Feld oben."
+          : "Because no public UCP search endpoint is currently active via /.well-known/ucp, ShopCart reads price, currency, stock availability, SKU/GTIN, and variants per product URL from Schema.org Product/ProductGroup JSON-LD. Test a concrete product URL in the optional field above."
+      });
+    }
+    if (ucpCheckoutHandoff && ucpCatalogSearch && !wafRestricted) {
+      hints.push({
+        title: de ? "Universal UCP aktiv — Zero-Liability-Checkout bereit" : "Universal UCP active — zero-liability checkout ready",
+        text: de
+          ? "Katalogsuche und Checkout-Handoff (continue_url) über /.well-known/ucp sind aktiv. ShopCart verarbeitet dabei keine Zahlungs- oder Kundendaten; die Kaufabwicklung bleibt vollständig bei deinem Shop."
+          : "Catalog search and checkout handoff (continue_url) via /.well-known/ucp are active. ShopCart never processes payment or buyer PII; checkout stays 100% with your store."
+      });
+    }
   }
 
   if (platform === "jsonld") {
@@ -1409,11 +1615,21 @@ function buildActionableHints(params: {
 function buildExamplePrompt(params: {
   platform: StoreCheckPlatform;
   canonicalDomain: string;
+  ucpCatalogSearch: boolean;
+  ucpCheckoutHandoff: boolean;
   productTitle: string | null;
   productUrl: string | null;
   lang: Lang;
 }): { heading: string; text: string } {
-  const { platform, canonicalDomain, productTitle, productUrl, lang } = params;
+  const {
+    platform,
+    canonicalDomain,
+    ucpCatalogSearch,
+    ucpCheckoutHandoff,
+    productTitle,
+    productUrl,
+    lang
+  } = params;
   const de = lang === "de";
   const heading = de
     ? "Teste deinen Shop jetzt in Claude / ChatGPT / Gemini"
@@ -1444,6 +1660,25 @@ function buildExamplePrompt(params: {
     const text = de
       ? `Nutze ShopCart MCP (https://shopcart.wals.pro/mcp): Erstelle mir aus meinen Wunsch-ASINs auf ${canonicalDomain} einen offiziellen Multi-Artikel-Warenkorb-Link zum Prüfen im Browser.`
       : `Use ShopCart MCP (https://shopcart.wals.pro/mcp): Build an official multi-item cart link on ${canonicalDomain} from my chosen ASINs so I can review and check out in my browser.`;
+    return { heading, text };
+  }
+
+  if (platform === "ucp") {
+    if (ucpCatalogSearch && ucpCheckoutHandoff) {
+      const text = de
+        ? `Nutze ShopCart MCP (https://shopcart.wals.pro/mcp): Prüfe ${canonicalDomain} (Universal UCP), suche lieferbare Produkte, verifiziere Preis und Bestand und erstelle mir einen Checkout-Handoff-Link.`
+        : `Use ShopCart MCP (https://shopcart.wals.pro/mcp): Inspect ${canonicalDomain} (Universal UCP), search in-stock products, verify live price and stock, and build a checkout handoff link.`;
+      return { heading, text };
+    }
+    if (ucpCheckoutHandoff) {
+      const text = de
+        ? `Nutze ShopCart MCP (https://shopcart.wals.pro/mcp): Prüfe ${canonicalDomain} mit inspect_store, verifiziere für meine Produkt-URL Live-Preis und Verfügbarkeit und erstelle mir einen UCP-Checkout-Handoff-Link.`
+        : `Use ShopCart MCP (https://shopcart.wals.pro/mcp): Inspect ${canonicalDomain} with inspect_store, verify live price and stock for my product URL, and build a UCP checkout handoff link.`;
+      return { heading, text };
+    }
+    const text = de
+      ? `Nutze ShopCart MCP (https://shopcart.wals.pro/mcp): Prüfe ${canonicalDomain} (Universal UCP) mit inspect_store und verifiziere mir für eine konkrete Produkt-URL Live-Preis, Verfügbarkeit und Varianten.`
+      : `Use ShopCart MCP (https://shopcart.wals.pro/mcp): Inspect ${canonicalDomain} (Universal UCP) with inspect_store and verify live price, stock availability, and variants for a concrete product URL.`;
     return { heading, text };
   }
 
