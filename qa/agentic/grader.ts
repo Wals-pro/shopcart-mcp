@@ -3,7 +3,12 @@ import type {
   ArgAssertion,
   ArgCheckOutcome,
   EvalMode,
+  GapSeverity,
   ModeSummaryMetrics,
+  ProductGap,
+  ProductGapAggregate,
+  ProductGapCategory,
+  RoutingGap,
   ScenarioGrade,
   ScenarioRunResult,
   TokenUsage,
@@ -53,9 +58,10 @@ export function extractUrlsFromText(text: string): string[] {
 }
 
 function parseLocaleNumber(raw: string): number | null {
-  const normalized = raw.includes(",") && !raw.includes(".")
-    ? raw.replace(",", ".")
-    : raw.replace(/,/g, "");
+  const normalized =
+    raw.includes(",") && !raw.includes(".")
+      ? raw.replace(",", ".")
+      : raw.replace(/,/g, "");
   const parsed = Number.parseFloat(normalized);
   return Number.isFinite(parsed) ? Math.round(parsed * 100) / 100 : null;
 }
@@ -75,14 +81,17 @@ export function extractPricesFromText(text: string): Array<{ raw: string; amount
 }
 
 /**
- * Extracts all numeric prices and URLs from a tool's JSON/text response for grounding verification.
+ * Extracts all numeric prices, URLs, and structured capability signals from a tool's response
+ * for grounding verification and automated product-gap detection.
  */
 export function extractToolOutputFacts(resultText: string): {
   urls: string[];
   prices: number[];
+  payloadSignals: NonNullable<ToolCallTrace["payloadSignals"]>;
 } {
   const urls = new Set<string>(extractUrlsFromText(resultText));
   const prices = new Set<number>();
+  const payloadSignals: NonNullable<ToolCallTrace["payloadSignals"]> = {};
 
   for (const p of extractPricesFromText(resultText)) {
     prices.add(p.amount);
@@ -90,6 +99,51 @@ export function extractToolOutputFacts(resultText: string): {
 
   try {
     const parsed: unknown = JSON.parse(resultText);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const obj = parsed as Record<string, unknown>;
+      if (Array.isArray(obj.live_offers)) {
+        payloadSignals.liveOffersCount = obj.live_offers.length;
+      }
+      if (Array.isArray(obj.live_vouchers)) {
+        payloadSignals.liveVouchersCount = obj.live_vouchers.length;
+      }
+      if (Array.isArray(obj.live_deals)) {
+        payloadSignals.liveDealsCount = obj.live_deals.length;
+      }
+      if (typeof obj.total_matches === "number") {
+        payloadSignals.directoryMatchesCount = obj.total_matches;
+      }
+      if (Array.isArray(obj.matches) && obj.visual_query_summary) {
+        payloadSignals.visualMatchesCount = obj.matches.length;
+      }
+      if (typeof obj.waf_restricted === "boolean") {
+        payloadSignals.wafRestricted = obj.waf_restricted;
+      }
+      if (
+        obj.store &&
+        typeof obj.store === "object" &&
+        typeof (obj.store as Record<string, unknown>).wafRestricted === "boolean"
+      ) {
+        payloadSignals.wafRestricted = Boolean(
+          (obj.store as Record<string, unknown>).wafRestricted
+        );
+      }
+      if (typeof obj.handoff_tier === "string") {
+        payloadSignals.handoffTier = obj.handoff_tier;
+      }
+      if (Array.isArray(obj.marketplaces) && obj.marketplaces.length > 0) {
+        const anyLive = obj.marketplaces.some(
+          (m) =>
+            m &&
+            typeof m === "object" &&
+            (m as Record<string, unknown>).live_api_configured === true
+        );
+        payloadSignals.liveApiConfigured = anyLive;
+      }
+      payloadSignals.hasShippingCost =
+        "shipping_cost" in obj || "total_with_shipping" in obj || "estimated_shipping" in obj;
+    }
+
     const visit = (node: unknown, keyHint?: string): void => {
       if (node === null || node === undefined) return;
       if (typeof node === "string") {
@@ -125,7 +179,8 @@ export function extractToolOutputFacts(resultText: string): {
 
   return {
     urls: Array.from(urls),
-    prices: Array.from(prices)
+    prices: Array.from(prices),
+    payloadSignals
   };
 }
 
@@ -161,13 +216,19 @@ function evaluateArgMatch(
     }
     case "regex": {
       if (typeof value !== "string") {
-        return { passed: false, reason: `Expected string matching /${match.pattern}/, got ${typeof value}` };
+        return {
+          passed: false,
+          reason: `Expected string matching /${match.pattern}/, got ${typeof value}`
+        };
       }
       const re = new RegExp(match.pattern, match.flags ?? "i");
       const ok = re.test(value);
       return ok
         ? { passed: true }
-        : { passed: false, reason: `Value '${value}' did not match /${match.pattern}/${match.flags ?? "i"}` };
+        : {
+            passed: false,
+            reason: `Value '${value}' did not match /${match.pattern}/${match.flags ?? "i"}`
+          };
     }
     case "non_empty_string": {
       const ok = typeof value === "string" && value.trim().length > 0;
@@ -276,16 +337,182 @@ function hasReadOnlyDisclaimer(response: string): boolean {
   return READ_ONLY_DISCLAIMER_PATTERNS.some((re) => re.test(response));
 }
 
+const SIZE_FILTER_PROMPT_RE = /\b(größe|groesse|size)\s*([0-9]{2}|xs|s|m|l|xl|xxl)\b/i;
+
+/**
+ * Detects real product/capability limits encountered during scenario execution
+ * (distinct from routing/prompting defects).
+ */
+export function detectProductGaps(
+  scenario: AgenticScenario,
+  toolCalls: ToolCallTrace[]
+): ProductGap[] {
+  if (scenario.forbidShopcartTools) return [];
+
+  const gaps: ProductGap[] = [];
+  const seen = new Set<ProductGapCategory>();
+
+  const pushGap = (gap: Omit<ProductGap, "id" | "scenarioId" | "journey">) => {
+    if (seen.has(gap.category)) return;
+    seen.add(gap.category);
+    gaps.push({
+      id: `${scenario.id}:${gap.category}`,
+      scenarioId: scenario.id,
+      journey: scenario.title,
+      ...gap
+    });
+  };
+
+  for (const call of toolCalls) {
+    const sig = call.payloadSignals;
+    if (!sig) continue;
+
+    if (call.toolName === "compare_prices" && sig.liveOffersCount === 0) {
+      pushGap({
+        category: "live_price_data",
+        severity: "high",
+        affectedTools: ["compare_prices"],
+        observedBehavior:
+          "compare_prices returned 0 live_offers (only Tier-B comparison portal deep-links) — assistant cannot quote concrete live prices or cheapest merchant directly.",
+        candidateFeature:
+          "Integrate live price-offer APIs (Kelkoo, Awin feeds, Geizhals/idealo partner feeds, or UCP merchant price feeds) to return structured live prices alongside deep-links."
+      });
+    }
+
+    if (
+      call.toolName === "find_hot_deals" &&
+      sig.liveVouchersCount === 0 &&
+      sig.liveDealsCount === 0
+    ) {
+      pushGap({
+        category: "live_price_data",
+        severity: "high",
+        affectedTools: ["find_hot_deals"],
+        observedBehavior:
+          "find_hot_deals returned 0 live_vouchers and 0 live_deals (only Tier-B community search links) — no concrete deal prices or voucher codes surfaced directly.",
+        candidateFeature:
+          "Connect live deal/voucher feeds (Awin Publisher Promotions / curated deal feed) so find_hot_deals returns concrete active offers with expiry & savings."
+      });
+    }
+
+    if (
+      (call.toolName === "compare_prices" || call.toolName === "create_cart_link") &&
+      sig.hasShippingCost === false
+    ) {
+      pushGap({
+        category: "shipping_and_total_cost",
+        severity: "high",
+        affectedTools: [call.toolName],
+        observedBehavior: `${call.toolName} response does not include normalized shipping costs or landed total price (item + shipping).`,
+        candidateFeature:
+          "Compute estimated shipping cost and landed total price (auto-checking free-shipping thresholds) in compare_prices and create_cart_link."
+      });
+    }
+
+    if (
+      call.toolName === "search_secondhand_marketplaces" &&
+      sig.liveApiConfigured === false
+    ) {
+      pushGap({
+        category: "secondhand_live_listings",
+        severity: "medium",
+        affectedTools: ["search_secondhand_marketplaces"],
+        observedBehavior:
+          "search_secondhand_marketplaces returned search_handoff links only (live_api_configured=false) with no live used/refurbished price ranges or listing counts.",
+        candidateFeature:
+          "Add official eBay Browse API / Back Market / refurbed partner feeds to provide real secondhand price bands and warranty grades inline."
+      });
+    }
+
+    if (call.toolName === "discover_stores" && sig.directoryMatchesCount === 0) {
+      pushGap({
+        category: "directory_coverage",
+        severity: "medium",
+        affectedTools: ["discover_stores"],
+        observedBehavior: `discover_stores returned 0 curated directory matches for query '${String(call.input.query ?? "")}'.`,
+        candidateFeature:
+          "Expand curated DACH/EU store directory (toys/family, home, electronics, niche apparel) and add store-check verified auto-indexing."
+      });
+    }
+
+    if (call.toolName === "match_visual_product" && sig.visualMatchesCount === 0) {
+      pushGap({
+        category: "visual_discovery",
+        severity: "medium",
+        affectedTools: ["match_visual_product"],
+        observedBehavior:
+          "match_visual_product returned 0 matches without explicit target_stores and had to ask the agent to fall back to web_search.",
+        candidateFeature:
+          "Auto-resolve candidate target_stores internally via discover_stores when target_stores is omitted in match_visual_product."
+      });
+    }
+
+    if (sig.wafRestricted === true) {
+      pushGap({
+        category: "storefront_waf_resilience",
+        severity: "medium",
+        affectedTools: [call.toolName],
+        observedBehavior: `${call.toolName} encountered waf_restricted=true, limiting catalog browsing capabilities.`,
+        candidateFeature:
+          "Add UCP/Storefront-MCP/affiliate-feed fallback routing for WAF-protected merchants."
+      });
+    }
+
+    if (call.toolName === "search_products" && SIZE_FILTER_PROMPT_RE.test(scenario.userPrompt)) {
+      pushGap({
+        category: "catalog_variant_filter",
+        severity: "medium",
+        affectedTools: ["search_products"],
+        observedBehavior:
+          "User specified a concrete size upfront, but search_products lacks size/variant filtering and returns no variant IDs, requiring extra get_product round-trips.",
+        candidateFeature:
+          "Support optional size/color/variant filtering or top-variant availability previews directly in search_products."
+      });
+    }
+
+    if (call.toolName === "get_product") {
+      pushGap({
+        category: "delivery_and_reviews",
+        severity: "low",
+        affectedTools: ["get_product"],
+        observedBehavior:
+          "get_product does not expose product ratings, review counts, or per-SKU delivery ETA.",
+        candidateFeature:
+          "Extract public Schema.org AggregateRating and OfferShippingDetails (delivery ETA) where available."
+      });
+    }
+  }
+
+  if (scenario.category === "combo") {
+    pushGap({
+      category: "multi_store_cart",
+      severity: "medium",
+      affectedTools: ["compare_prices", "search_secondhand_marketplaces", "create_cart_link"],
+      observedBehavior:
+        "No unified cross-store / new-vs-used total-cost comparison or multi-store basket summary exists in a single tool.",
+      candidateFeature:
+        "Introduce a cross-merchant comparison & multi-store basket summary capability comparing landed new vs. refurbished totals."
+    });
+  }
+
+  return gaps;
+}
+
 export function gradeScenarioRun(
   scenario: AgenticScenario,
   toolCalls: ToolCallTrace[],
-  finalResponse: string
+  finalResponse: string,
+  mode: EvalMode = "pure-mcp"
 ): ScenarioGrade {
   const failureReasons: string[] = [];
+  const routingGaps: RoutingGap[] = [];
   const shopcartCalls = toolCalls.filter((c) => c.isShopcartTool);
   const webSearchCalls = toolCalls.filter((c) => c.isWebSearch);
   const shopcartToolNamesCalled = shopcartCalls.map((c) => c.toolName);
+  const allToolsCalled = toolCalls.map((c) => c.toolName);
   const shopcartSet = new Set(shopcartToolNamesCalled);
+  const expectedToolList =
+    scenario.requiredTools.length > 0 ? scenario.requiredTools : (scenario.anyOfTools ?? []);
 
   // 1. False Positive & Tool Selection
   let falsePositive = false;
@@ -295,23 +522,49 @@ export function gradeScenarioRun(
     if (shopcartCalls.length > 0) {
       falsePositive = true;
       toolSelectionPassed = false;
-      failureReasons.push(
-        `False positive: called ShopCart tool(s) [${shopcartToolNamesCalled.join(", ")}] on non-shopping prompt`
-      );
+      const msg = `False positive: called ShopCart tool(s) [${shopcartToolNamesCalled.join(", ")}] on non-shopping prompt`;
+      failureReasons.push(msg);
+      routingGaps.push({
+        kind: "false_positive",
+        severity: "high",
+        scenarioId: scenario.id,
+        mode,
+        expectedTools: [],
+        actualTools: allToolsCalled,
+        summary: msg
+      });
     }
   } else {
     const missingRequired = scenario.requiredTools.filter((t) => !shopcartSet.has(t));
     if (missingRequired.length > 0) {
       toolSelectionPassed = false;
-      failureReasons.push(`Missing required ShopCart tool(s): ${missingRequired.join(", ")}`);
+      const msg = `Missing required ShopCart tool(s): ${missingRequired.join(", ")}`;
+      failureReasons.push(msg);
+      routingGaps.push({
+        kind: "missing_tool",
+        severity: "high",
+        scenarioId: scenario.id,
+        mode,
+        expectedTools: expectedToolList,
+        actualTools: allToolsCalled,
+        summary: msg
+      });
     }
     if (scenario.anyOfTools && scenario.anyOfTools.length > 0) {
       const hitAny = scenario.anyOfTools.some((t) => shopcartSet.has(t));
       if (!hitAny) {
         toolSelectionPassed = false;
-        failureReasons.push(
-          `Expected at least one of [${scenario.anyOfTools.join(", ")}], called [${shopcartToolNamesCalled.join(", ") || "none"}]`
-        );
+        const msg = `Expected at least one of [${scenario.anyOfTools.join(", ")}], called [${shopcartToolNamesCalled.join(", ") || "none"}]`;
+        failureReasons.push(msg);
+        routingGaps.push({
+          kind: "missing_tool",
+          severity: "high",
+          scenarioId: scenario.id,
+          mode,
+          expectedTools: expectedToolList,
+          actualTools: allToolsCalled,
+          summary: msg
+        });
       }
     }
   }
@@ -319,7 +572,6 @@ export function gradeScenarioRun(
   // 2. Web Search Escape
   let webSearchEscaped = false;
   if (!scenario.allowWebSearch && !scenario.forbidShopcartTools && webSearchCalls.length > 0) {
-    // Allow web_search ONLY if it happens strictly AFTER `match_visual_product` returned suggested_web_queries.
     const firstVisualIdx = toolCalls.findIndex((c) => c.toolName === "match_visual_product");
     const hasEscapeBeforeVisual =
       scenario.category !== "visual" ||
@@ -328,10 +580,36 @@ export function gradeScenarioRun(
 
     if (hasEscapeBeforeVisual) {
       webSearchEscaped = true;
-      failureReasons.push(
-        `Escaped to web_search (${webSearchCalls.length} call(s)) on a shopping scenario`
-      );
+      const msg = `Escaped to web_search (${webSearchCalls.length} call(s)) on a shopping scenario`;
+      failureReasons.push(msg);
+      routingGaps.push({
+        kind: "web_search_escape",
+        severity: "high",
+        scenarioId: scenario.id,
+        mode,
+        expectedTools: expectedToolList,
+        actualTools: allToolsCalled,
+        summary: msg
+      });
     }
+  }
+
+  // 2b. Proactive Triggering ("Ohne-Zuruf")
+  const proactiveScenario = Boolean(scenario.proactiveNoPromptCue);
+  const proactiveTriggered = proactiveScenario
+    ? toolSelectionPassed && !webSearchEscaped && shopcartCalls.length > 0
+    : false;
+
+  if (proactiveScenario && !proactiveTriggered) {
+    routingGaps.push({
+      kind: "missed_proactive_trigger",
+      severity: "high",
+      scenarioId: scenario.id,
+      mode,
+      expectedTools: expectedToolList,
+      actualTools: allToolsCalled,
+      summary: `Failed to proactively trigger ShopCart on natural prompt without explicit tool cue (called: ${allToolsCalled.join(", ") || "none"})`
+    });
   }
 
   // 3. Argument Accuracy
@@ -344,9 +622,20 @@ export function gradeScenarioRun(
 
   for (const outcome of argCheckOutcomes) {
     if (!outcome.passed) {
-      failureReasons.push(
-        `Arg check failed (${outcome.tool}.${outcome.field}): ${outcome.reason ?? outcome.description}`
-      );
+      const msg = `Arg check failed (${outcome.tool}.${outcome.field}): ${outcome.reason ?? outcome.description}`;
+      failureReasons.push(msg);
+      // Only log wrong_argument routing gap if the tool itself WAS called (otherwise missing_tool covers it)
+      if (shopcartSet.has(outcome.tool)) {
+        routingGaps.push({
+          kind: "wrong_argument",
+          severity: "medium",
+          scenarioId: scenario.id,
+          mode,
+          expectedTools: [outcome.tool],
+          actualTools: allToolsCalled,
+          summary: msg
+        });
+      }
     }
   }
 
@@ -362,9 +651,17 @@ export function gradeScenarioRun(
       const inOrder = hasOrderedSubsequence(shopcartToolNamesCalled, scenario.orderedSequence);
       if (!inOrder) {
         multiStepCompleted = false;
-        failureReasons.push(
-          `Multi-step sequence incomplete or out of order: expected [${scenario.orderedSequence.join(" -> ")}], got [${shopcartToolNamesCalled.join(" -> ") || "none"}]`
-        );
+        const msg = `Multi-step sequence incomplete or out of order: expected [${scenario.orderedSequence.join(" -> ")}], got [${shopcartToolNamesCalled.join(" -> ") || "none"}]`;
+        failureReasons.push(msg);
+        routingGaps.push({
+          kind: "incomplete_multistep",
+          severity: "high",
+          scenarioId: scenario.id,
+          mode,
+          expectedTools: scenario.orderedSequence,
+          actualTools: allToolsCalled,
+          summary: msg
+        });
       }
       const terminalTool = scenario.orderedSequence[scenario.orderedSequence.length - 1]!;
       const terminalSuccess = shopcartCalls.some(
@@ -380,9 +677,17 @@ export function gradeScenarioRun(
       );
       if (!allRequiredSucceeded) {
         multiStepCompleted = false;
-        failureReasons.push(
-          `Combo multi-step tools did not all succeed: expected [${scenario.requiredTools.join(", ")}]`
-        );
+        const msg = `Combo multi-step tools did not all succeed: expected [${scenario.requiredTools.join(", ")}]`;
+        failureReasons.push(msg);
+        routingGaps.push({
+          kind: "incomplete_multistep",
+          severity: "high",
+          scenarioId: scenario.id,
+          mode,
+          expectedTools: scenario.requiredTools,
+          actualTools: allToolsCalled,
+          summary: msg
+        });
       }
     }
   }
@@ -394,7 +699,6 @@ export function gradeScenarioRun(
 
   const allToolUrls = new Set<string>();
   const allToolHosts = new Set<string>();
-  const allToolPrices = new Set<number>();
 
   for (const call of toolCalls) {
     for (const u of call.returnedUrls) {
@@ -405,12 +709,8 @@ export function gradeScenarioRun(
         // ignore
       }
     }
-    for (const p of call.returnedPrices) {
-      allToolPrices.add(p);
-    }
   }
 
-  // Also collect domain names explicitly mentioned by the user (e.g., allbirds.com)
   const promptDomains = new Set<string>();
   for (const m of scenario.userPrompt.matchAll(/\b([a-z0-9-]+\.(?:com|de|at|ch|co\.uk|eu|coffee))\b/gi)) {
     promptDomains.add(m[1]!.toLowerCase().replace(/^www\./, ""));
@@ -423,7 +723,6 @@ export function gradeScenarioRun(
       const norm = normalizeUrlForComparison(respUrl);
       if (allToolUrls.has(norm)) continue;
 
-      // Allow bare homepage links if the exact domain was in tool outputs or user prompt
       let isAllowedBareOrigin = false;
       try {
         const parsed = new URL(respUrl);
@@ -462,7 +761,9 @@ export function gradeScenarioRun(
     );
     if (!responseHasToolUrl) {
       groundingPassed = false;
-      failureReasons.push("Final response did not include any verified URL returned by ShopCart tools");
+      failureReasons.push(
+        "Final response did not include any verified URL returned by ShopCart tools"
+      );
     }
   }
 
@@ -476,7 +777,6 @@ export function gradeScenarioRun(
     if (shopcartPrices.size > 0) {
       const mentionedPrices = extractPricesFromText(finalResponse);
       for (const item of mentionedPrices) {
-        // Allow exact match (within 0.01) or integer multiple (qty 1..10)
         const matched = Array.from(shopcartPrices).some((tp) => {
           if (Math.abs(tp - item.amount) <= 0.015) return true;
           for (let qty = 2; qty <= 10; qty += 1) {
@@ -519,6 +819,22 @@ export function gradeScenarioRun(
   }
 
   const groundingAndSafetyPassed = groundingPassed && safetyPassed;
+  if (!groundingAndSafetyPassed) {
+    routingGaps.push({
+      kind: "grounding_or_safety",
+      severity: "high",
+      scenarioId: scenario.id,
+      mode,
+      expectedTools: expectedToolList,
+      actualTools: allToolsCalled,
+      summary: failureReasons
+        .filter((r) => /ungrounded|safety|verified URL/i.test(r))
+        .join("; ")
+    });
+  }
+
+  // 7. Product Gaps (real capability limits, distinct from routing gaps)
+  const productGaps = detectProductGaps(scenario, toolCalls);
 
   const overallPassed =
     toolSelectionPassed &&
@@ -530,6 +846,8 @@ export function gradeScenarioRun(
 
   return {
     toolSelectionPassed,
+    proactiveScenario,
+    proactiveTriggered,
     webSearchEscaped,
     falsePositive,
     argumentAccuracy,
@@ -544,7 +862,9 @@ export function gradeScenarioRun(
     overallPassed,
     failureReasons,
     ungroundedUrls,
-    ungroundedPrices
+    ungroundedPrices,
+    routingGaps,
+    productGaps
   };
 }
 
@@ -612,6 +932,64 @@ export function estimateCostUsd(model: string, usage: TokenUsage): number {
   return Math.round(cost * 1_000_000) / 1_000_000;
 }
 
+const SEVERITY_RANK: Record<GapSeverity, number> = {
+  high: 3,
+  medium: 2,
+  low: 1
+};
+
+export function aggregateProductGaps(results: ScenarioRunResult[]): ProductGapAggregate[] {
+  const byCategory = new Map<
+    ProductGapCategory,
+    {
+      severity: GapSeverity;
+      scenarios: Set<string>;
+      tools: Set<string>;
+      behaviors: Set<string>;
+      candidateFeature: string;
+    }
+  >();
+
+  for (const res of results) {
+    for (const gap of res.grade.productGaps) {
+      let entry = byCategory.get(gap.category);
+      if (!entry) {
+        entry = {
+          severity: gap.severity,
+          scenarios: new Set<string>(),
+          tools: new Set<string>(),
+          behaviors: new Set<string>(),
+          candidateFeature: gap.candidateFeature
+        };
+        byCategory.set(gap.category, entry);
+      }
+      if (SEVERITY_RANK[gap.severity] > SEVERITY_RANK[entry.severity]) {
+        entry.severity = gap.severity;
+      }
+      entry.scenarios.add(gap.scenarioId);
+      for (const t of gap.affectedTools) entry.tools.add(t);
+      entry.behaviors.add(gap.observedBehavior);
+    }
+  }
+
+  return Array.from(byCategory.entries())
+    .map(([category, data]) => ({
+      category,
+      severity: data.severity,
+      occurrences: data.scenarios.size,
+      affectedScenarios: Array.from(data.scenarios).sort(),
+      affectedTools: Array.from(data.tools).sort(),
+      observedBehaviors: Array.from(data.behaviors),
+      candidateFeature: data.candidateFeature
+    }))
+    .sort((a, b) => {
+      const sevDiff = SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity];
+      if (sevDiff !== 0) return sevDiff;
+      if (b.occurrences !== a.occurrences) return b.occurrences - a.occurrences;
+      return a.category.localeCompare(b.category);
+    });
+}
+
 export function aggregateModeMetrics(
   mode: EvalMode,
   results: ScenarioRunResult[],
@@ -621,6 +999,9 @@ export function aggregateModeMetrics(
   const totalScenarios = modeResults.length;
   const passedScenarios = modeResults.filter((r) => r.grade.overallPassed).length;
   const toolSelectionPassed = modeResults.filter((r) => r.grade.toolSelectionPassed).length;
+
+  const proactiveResults = modeResults.filter((r) => r.grade.proactiveScenario);
+  const proactiveTriggeredCount = proactiveResults.filter((r) => r.grade.proactiveTriggered).length;
 
   const shoppingResults = modeResults.filter((r) => {
     const sc = scenariosById.get(r.scenarioId);
@@ -643,6 +1024,9 @@ export function aggregateModeMetrics(
   const groundingAndSafetyPassed = modeResults.filter(
     (r) => r.grade.groundingAndSafetyPassed
   ).length;
+
+  const routingGapsCount = modeResults.reduce((acc, r) => acc + r.grade.routingGaps.length, 0);
+  const productGapsCount = modeResults.reduce((acc, r) => acc + r.grade.productGaps.length, 0);
 
   const usage: TokenUsage = {
     input_tokens: modeResults.reduce((acc, r) => acc + r.usage.input_tokens, 0),
@@ -668,6 +1052,10 @@ export function aggregateModeMetrics(
     passedScenarios,
     overallPassRate: totalScenarios === 0 ? 0 : passedScenarios / totalScenarios,
     toolSelectionAccuracy: totalScenarios === 0 ? 0 : toolSelectionPassed / totalScenarios,
+    proactiveScenariosCount: proactiveResults.length,
+    proactiveTriggeredCount,
+    proactiveTriggerRate:
+      proactiveResults.length === 0 ? 1 : proactiveTriggeredCount / proactiveResults.length,
     shoppingScenariosCount: shoppingResults.length,
     webSearchEscapeCount,
     webSearchEscapeRate:
@@ -686,6 +1074,8 @@ export function aggregateModeMetrics(
     groundingAndSafetyPassed,
     groundingAndSafetyRate:
       totalScenarios === 0 ? 0 : groundingAndSafetyPassed / totalScenarios,
+    routingGapsCount,
+    productGapsCount,
     usage,
     estimatedCostUsd,
     durationMs

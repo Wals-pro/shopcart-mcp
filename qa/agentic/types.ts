@@ -17,6 +17,59 @@ export type ScenarioCategory =
   | "safety"
   | "negative";
 
+export type GapSeverity = "high" | "medium" | "low";
+
+export type RoutingGapKind =
+  | "missed_proactive_trigger"
+  | "web_search_escape"
+  | "missing_tool"
+  | "wrong_argument"
+  | "incomplete_multistep"
+  | "false_positive"
+  | "grounding_or_safety";
+
+export interface RoutingGap {
+  kind: RoutingGapKind;
+  severity: GapSeverity;
+  scenarioId: string;
+  mode: EvalMode;
+  expectedTools: string[];
+  actualTools: string[];
+  summary: string;
+}
+
+export type ProductGapCategory =
+  | "live_price_data"
+  | "shipping_and_total_cost"
+  | "secondhand_live_listings"
+  | "catalog_variant_filter"
+  | "directory_coverage"
+  | "multi_store_cart"
+  | "visual_discovery"
+  | "delivery_and_reviews"
+  | "storefront_waf_resilience";
+
+export interface ProductGap {
+  id: string;
+  category: ProductGapCategory;
+  severity: GapSeverity;
+  scenarioId: string;
+  journey: string;
+  affectedTools: string[];
+  observedBehavior: string;
+  candidateFeature: string;
+}
+
+export interface ProductGapAggregate {
+  category: ProductGapCategory;
+  severity: GapSeverity;
+  occurrences: number;
+  affectedScenarios: string[];
+  affectedTools: string[];
+  observedBehaviors: string[];
+  candidateFeature: string;
+}
+
 export interface ArgAssertion {
   /** Tool name whose call arguments should be checked. */
   tool: string;
@@ -46,7 +99,7 @@ export interface GroundingExpectation {
   checkUrlsAgainstToolOutputs: boolean;
   /** Verify numeric prices mentioned in final response appear in tool outputs when products/carts were returned. */
   checkPricesAgainstToolOutputs: boolean;
-  /** Optional list of substrings expected in final response when relevant tools succeeded (e.g. cart URL prefix or portal domain). */
+  /** Require at least one verified tool URL in final response when ShopCart returned URLs. */
   requireAtLeastOneToolUrlInResponse?: boolean;
 }
 
@@ -56,9 +109,15 @@ export interface AgenticScenario {
   category: ScenarioCategory;
   lang: ScenarioLang;
   userPrompt: string;
+  /**
+   * True when this scenario is a natural everyday "Ohne-Zuruf" buying prompt
+   * (no explicit "mach einen Preisvergleich", "gib mir Preisvergleichs-Links", etc.),
+   * used to compute `proactive_trigger_rate`.
+   */
+  proactiveNoPromptCue?: boolean;
   /** Every tool in this list MUST be called at least once (for single-tool or combo flows). */
   requiredTools: string[];
-  /** Optional: at least one of these tools must be called (useful e.g. for safety scenario where price compare or cart link is optional). */
+  /** Optional: at least one of these tools must be called. */
   anyOfTools?: string[];
   /** Optional ordered subsequence that must occur in order (e.g. ["search_products", "get_product", "create_cart_link"]). */
   orderedSequence?: string[];
@@ -96,6 +155,18 @@ export interface ToolCallTrace {
   returnedUrls: string[];
   /** Extracted numeric price amounts returned by this tool call. */
   returnedPrices: number[];
+  /** Structured capability signals extracted from raw JSON payload for product-gap analysis. */
+  payloadSignals?: {
+    liveOffersCount?: number;
+    liveVouchersCount?: number;
+    liveDealsCount?: number;
+    directoryMatchesCount?: number;
+    visualMatchesCount?: number;
+    wafRestricted?: boolean;
+    liveApiConfigured?: boolean;
+    handoffTier?: string;
+    hasShippingCost?: boolean;
+  };
 }
 
 export interface ArgCheckOutcome {
@@ -109,6 +180,8 @@ export interface ArgCheckOutcome {
 
 export interface ScenarioGrade {
   toolSelectionPassed: boolean;
+  proactiveScenario: boolean;
+  proactiveTriggered: boolean;
   webSearchEscaped: boolean;
   falsePositive: boolean;
   argumentAccuracy: number;
@@ -124,6 +197,8 @@ export interface ScenarioGrade {
   failureReasons: string[];
   ungroundedUrls: string[];
   ungroundedPrices: string[];
+  routingGaps: RoutingGap[];
+  productGaps: ProductGap[];
 }
 
 export interface ScenarioRunResult {
@@ -132,6 +207,7 @@ export interface ScenarioRunResult {
   category: ScenarioCategory;
   lang: ScenarioLang;
   mode: EvalMode;
+  proactiveNoPromptCue: boolean;
   userPrompt: string;
   turns: number;
   stopReason: string;
@@ -150,6 +226,9 @@ export interface ModeSummaryMetrics {
   passedScenarios: number;
   overallPassRate: number;
   toolSelectionAccuracy: number;
+  proactiveScenariosCount: number;
+  proactiveTriggeredCount: number;
+  proactiveTriggerRate: number;
   shoppingScenariosCount: number;
   webSearchEscapeCount: number;
   webSearchEscapeRate: number;
@@ -164,13 +243,15 @@ export interface ModeSummaryMetrics {
   multiStepCompletionRate: number;
   groundingAndSafetyPassed: number;
   groundingAndSafetyRate: number;
+  routingGapsCount: number;
+  productGapsCount: number;
   usage: TokenUsage;
   estimatedCostUsd: number;
   durationMs: number;
 }
 
 export interface SuiteReport {
-  schemaVersion: "1.0.0";
+  schemaVersion: "1.1.0";
   generatedAt: string;
   label: string;
   model: string;
@@ -184,6 +265,8 @@ export interface SuiteReport {
     promptCount: number;
   };
   modes: Record<EvalMode, ModeSummaryMetrics | undefined>;
+  routingGaps: RoutingGap[];
+  productGapsSummary: ProductGapAggregate[];
   results: ScenarioRunResult[];
 }
 

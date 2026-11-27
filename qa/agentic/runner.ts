@@ -3,6 +3,7 @@ import { callAnthropicMessages, redactSecrets } from "./anthropic-client.js";
 import { createMcpTestSession, type McpTestSession } from "./fixtures.js";
 import {
   aggregateModeMetrics,
+  aggregateProductGaps,
   estimateCostUsd,
   extractToolOutputFacts,
   gradeScenarioRun
@@ -131,7 +132,6 @@ export function createDryRunDriver(model: string): LlmDriver {
     const latestResults = getLatestToolResults(req.messages);
     const parsedResults = latestResults.map((r) => parseJsonSafe(r.content));
 
-    // Multi-step cart flows (3 turns of tool calls + final grounded answer)
     if (scenario.id === "multistep-cart-de") {
       if (turn === 1) {
         return mkToolUse([
@@ -209,12 +209,11 @@ export function createDryRunDriver(model: string): LlmDriver {
       );
     }
 
-    // Turn 1 dispatches for all other scenarios
     if (turn === 1) {
       switch (scenario.id) {
         case "price-compare-de":
           return mkToolUse([
-            { name: "compare_prices", input: { query: "Sony WH-1000XM5", country: "DE" } }
+            { name: "compare_prices", input: { query: "Stapelsteine", country: "DE" } }
           ]);
         case "price-compare-en":
           return mkToolUse([
@@ -222,7 +221,7 @@ export function createDryRunDriver(model: string): LlmDriver {
           ]);
         case "price-compare-at":
           return mkToolUse([
-            { name: "compare_prices", input: { query: "Dyson V15 Detect", country: "AT" } }
+            { name: "compare_prices", input: { query: "Sony WH-1000XM5", country: "AT" } }
           ]);
         case "secondhand-at-willhaben":
           return mkToolUse([
@@ -272,7 +271,7 @@ export function createDryRunDriver(model: string): LlmDriver {
           ]);
         case "discover-stores-de":
           return mkToolUse([
-            { name: "discover_stores", input: { query: "nachhaltige sneaker", country: "EU" } }
+            { name: "discover_stores", input: { query: "sneaker socken", country: "DE" } }
           ]);
         case "discover-stores-en":
           return mkToolUse([
@@ -312,10 +311,10 @@ export function createDryRunDriver(model: string): LlmDriver {
           ]);
         case "combo-new-vs-used-de":
           return mkToolUse([
-            { name: "compare_prices", input: { query: "Nintendo Switch OLED", country: "DE" } },
+            { name: "compare_prices", input: { query: "MacBook Air M3", country: "DE" } },
             {
               name: "search_secondhand_marketplaces",
-              input: { query: "Nintendo Switch OLED", region: "DE" }
+              input: { query: "MacBook Air M3", region: "DE" }
             }
           ]);
         case "safety-readonly-order":
@@ -331,7 +330,6 @@ export function createDryRunDriver(model: string): LlmDriver {
       }
     }
 
-    // Turn 2 grounded final responses using URLs directly extracted from tool results
     const returnedUrls = latestResults.flatMap((r) => extractToolOutputFacts(r.content).urls);
     const primaryUrl = returnedUrls[0] ?? "";
     const secondUrl = returnedUrls[1] ?? "";
@@ -367,7 +365,7 @@ export function createDryRunDriver(model: string): LlmDriver {
         );
       case "combo-new-vs-used-de":
         return mkFinalText(
-          `Hier ist der Vergleich für die Nintendo Switch OLED in Deutschland — Neupreise: ${primaryUrl} — Gebraucht & Refurbished: ${secondUrl || primaryUrl}`
+          `Hier ist der Vergleich für das MacBook Air M3 — Neupreise: ${primaryUrl} — Gebraucht & Refurbished: ${secondUrl || primaryUrl}`
         );
       default:
         return mkFinalText(
@@ -486,7 +484,8 @@ export async function runSingleScenario(opts: {
               ? `${resultText.slice(0, RESULT_PREVIEW_LIMIT)}...`
               : resultText,
           returnedUrls: facts.urls,
-          returnedPrices: facts.prices
+          returnedPrices: facts.prices,
+          payloadSignals: facts.payloadSignals
         });
 
         toolResultBlocks.push({
@@ -508,7 +507,7 @@ export async function runSingleScenario(opts: {
     stopReason = "error";
   }
 
-  const grade = gradeScenarioRun(scenario, toolCalls, finalResponse);
+  const grade = gradeScenarioRun(scenario, toolCalls, finalResponse, mode);
   if (fatalError) {
     grade.overallPassed = false;
     grade.failureReasons.push(`Execution error: ${fatalError}`);
@@ -520,6 +519,7 @@ export async function runSingleScenario(opts: {
     category: scenario.category,
     lang: scenario.lang,
     mode,
+    proactiveNoPromptCue: Boolean(scenario.proactiveNoPromptCue),
     userPrompt: scenario.userPrompt,
     turns,
     stopReason,
@@ -620,8 +620,11 @@ export async function runAgenticSuite(opts: RunSuiteOptions): Promise<SuiteRepor
         : undefined
     };
 
+    const routingGaps = results.flatMap((r) => r.grade.routingGaps);
+    const productGapsSummary = aggregateProductGaps(results);
+
     return {
-      schemaVersion: "1.0.0",
+      schemaVersion: "1.1.0",
       generatedAt: new Date().toISOString(),
       label: opts.label,
       model: opts.model,
@@ -635,6 +638,8 @@ export async function runAgenticSuite(opts: RunSuiteOptions): Promise<SuiteRepor
         promptCount: session.prompts.length
       },
       modes: modesSummary,
+      routingGaps,
+      productGapsSummary,
       results
     };
   } finally {

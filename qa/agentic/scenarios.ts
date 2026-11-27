@@ -2,24 +2,31 @@ import type { AgenticScenario } from "./types.js";
 
 /**
  * 20 realistic everyday shopping & safety scenarios (DE & EN).
- * STRICT RULE: User prompts NEVER mention MCP tool names, "ShopCart", or skill hints.
+ *
+ * STRICT QUALITY RULES:
+ * 1. User prompts NEVER mention "ShopCart", "Plugin", "MCP", or internal tool names.
+ * 2. More than half of shopping scenarios (`proactiveNoPromptCue: true`, 12/18) are
+ *    natural everyday buying prompts WITHOUT explicit tool-cue phrasing like
+ *    "mach einen Preisvergleich", "gib mir Preisvergleichs-Links", or "compare prices",
+ *    measuring true proactive triggering (`proactive_trigger_rate`).
  */
 export const AGENTIC_SCENARIOS: readonly AgenticScenario[] = [
-  // 1. Price comparison DE
+  // 1. Price comparison DE — NATURAL "Ohne-Zuruf" (Stapelsteine family purchase)
   {
     id: "price-compare-de",
-    title: "Preisvergleich DE (Sony WH-1000XM5)",
+    title: "Natürlicher Kaufwunsch DE ohne Zuruf (Stapelsteine)",
     category: "price-compare",
     lang: "de",
+    proactiveNoPromptCue: true,
     userPrompt:
-      "Mach mir bitte einen Preisvergleich für die Sony WH-1000XM5 Kopfhörer in Deutschland — wo finde ich den günstigsten Preis?",
+      "Wir suchen für unseren Sohn Stapelsteine — wo krieg ich die aktuell am fairsten?",
     requiredTools: ["compare_prices"],
     argChecks: [
       {
         tool: "compare_prices",
         field: "query",
-        description: "query mentions Sony WH-1000XM5",
-        match: { type: "regex", pattern: "wh-?1000xm5|sony", flags: "i" }
+        description: "query mentions Stapelsteine",
+        match: { type: "regex", pattern: "stapelstein", flags: "i" }
       },
       {
         tool: "compare_prices",
@@ -35,14 +42,15 @@ export const AGENTIC_SCENARIOS: readonly AgenticScenario[] = [
     }
   },
 
-  // 2. Price comparison EN
+  // 2. Price comparison EN — NATURAL "Ohne-Zuruf" (Apple AirPods Pro 2)
   {
     id: "price-compare-en",
-    title: "Price Comparison EN (Apple AirPods Pro 2)",
+    title: "Natural Buying Intent EN without Cue (Apple AirPods Pro 2)",
     category: "price-compare",
     lang: "en",
+    proactiveNoPromptCue: true,
     userPrompt:
-      "Can you compare prices across merchants for Apple AirPods Pro 2 so I can find the best deal?",
+      "I want to buy Apple AirPods Pro 2 soon — where can I get them for the best price right now?",
     requiredTools: ["compare_prices"],
     argChecks: [
       {
@@ -59,21 +67,22 @@ export const AGENTIC_SCENARIOS: readonly AgenticScenario[] = [
     }
   },
 
-  // 3. Price comparison AT
+  // 3. Price comparison AT — NATURAL "Ohne-Zuruf" (Sony WH-1000XM5 in Österreich)
   {
     id: "price-compare-at",
-    title: "Preisvergleich AT (Dyson V15 Detect)",
+    title: "Natürlicher Kaufwunsch AT ohne Zuruf (Sony WH-1000XM5)",
     category: "price-compare",
     lang: "de",
+    proactiveNoPromptCue: true,
     userPrompt:
-      "Vergleiche bitte die Preise für den Dyson V15 Detect Staubsauger in Österreich.",
+      "Ich suche die Sony WH-1000XM5 in Österreich — wo kaufe ich die aktuell am besten?",
     requiredTools: ["compare_prices"],
     argChecks: [
       {
         tool: "compare_prices",
         field: "query",
-        description: "query mentions Dyson V15",
-        match: { type: "regex", pattern: "dyson.*v15|v15", flags: "i" }
+        description: "query mentions Sony WH-1000XM5",
+        match: { type: "regex", pattern: "wh-?1000xm5|sony", flags: "i" }
       },
       {
         tool: "compare_prices",
@@ -89,14 +98,15 @@ export const AGENTIC_SCENARIOS: readonly AgenticScenario[] = [
     }
   },
 
-  // 4. Secondhand AT (willhaben / refurbed)
+  // 4. Secondhand AT — NATURAL "Ohne-Zuruf" (iPhone 15 Pro in Wien)
   {
     id: "secondhand-at-willhaben",
-    title: "Gebraucht/Refurbished AT (iPhone 15 Pro in Wien)",
+    title: "Gebraucht/Refurbished AT ohne Zuruf (iPhone 15 Pro in Wien)",
     category: "secondhand",
     lang: "de",
+    proactiveNoPromptCue: true,
     userPrompt:
-      "Ich suche ein gebrauchtes oder generalüberholtes iPhone 15 Pro in Wien — am liebsten auf willhaben oder refurbed.",
+      "Mein Budget für ein iPhone 15 Pro in Wien ist begrenzt — wo finde ich seriöse gebrauchte oder generalüberholte Geräte?",
     requiredTools: ["search_secondhand_marketplaces"],
     argChecks: [
       {
@@ -119,14 +129,15 @@ export const AGENTIC_SCENARIOS: readonly AgenticScenario[] = [
     }
   },
 
-  // 5. Secondhand DE Kleinanzeigen PLZ
+  // 5. Secondhand DE Kleinanzeigen PLZ — NATURAL local pickup
   {
     id: "secondhand-de-kleinanzeigen-plz",
-    title: "Gebraucht DE Kleinanzeigen mit PLZ (KitchenAid 80331 München)",
+    title: "Gebraucht DE lokal mit PLZ (KitchenAid 80331 München)",
     category: "secondhand",
     lang: "de",
+    proactiveNoPromptCue: true,
     userPrompt:
-      "Such mir bitte eine gebrauchte KitchenAid Küchenmaschine in der Nähe von 80331 München auf Kleinanzeigen.",
+      "Ich möchte eine gebrauchte KitchenAid Küchenmaschine rund um 80331 München lokal zum Abholen finden.",
     requiredTools: ["search_secondhand_marketplaces"],
     argChecks: [
       {
@@ -149,14 +160,15 @@ export const AGENTIC_SCENARIOS: readonly AgenticScenario[] = [
     }
   },
 
-  // 6. Secondhand EN Refurbished
+  // 6. Secondhand EN Refurbished — NATURAL "Ohne-Zuruf"
   {
     id: "secondhand-en-refurbished",
-    title: "Refurbished EN (MacBook Air M2 / Back Market / Vinted)",
+    title: "Refurbished EN without Cue (MacBook Air M2)",
     category: "secondhand",
     lang: "en",
+    proactiveNoPromptCue: true,
     userPrompt:
-      "Where can I find a refurbished or secondhand MacBook Air M2 on marketplaces like Back Market or Vinted?",
+      "I'd like a MacBook Air M2 without paying full retail — any good refurbished or pre-owned options?",
     requiredTools: ["search_secondhand_marketplaces"],
     argChecks: [
       {
@@ -173,14 +185,15 @@ export const AGENTIC_SCENARIOS: readonly AgenticScenario[] = [
     }
   },
 
-  // 7. Hot Deals DE
+  // 7. Hot Deals DE — NATURAL "Ohne-Zuruf" (Gaming Monitor)
   {
     id: "hot-deals-de",
-    title: "Schnäppchen/Deals DE (Gaming-Monitore heute)",
+    title: "Aktuelle Angebote DE ohne Zuruf (Gaming-Monitor)",
     category: "deals",
     lang: "de",
+    proactiveNoPromptCue: true,
     userPrompt:
-      "Gibt es heute gute Schnäppchen oder aktuelle Deals für Gaming-Monitore in Deutschland?",
+      "Ich überlege mir heute einen neuen Gaming-Monitor zu holen — gibt es gerade irgendwo gute Aktionen oder Angebote in Deutschland?",
     requiredTools: ["find_hot_deals"],
     argChecks: [
       {
@@ -203,14 +216,15 @@ export const AGENTIC_SCENARIOS: readonly AgenticScenario[] = [
     }
   },
 
-  // 8. Hot Deals EN
+  // 8. Hot Deals EN — NATURAL "Ohne-Zuruf" (Espresso Machine)
   {
     id: "hot-deals-en",
-    title: "Hot Deals EN (Espresso Machines)",
+    title: "Current Offers EN without Cue (Espresso Machine)",
     category: "deals",
     lang: "en",
+    proactiveNoPromptCue: true,
     userPrompt:
-      "Are there any hot deals, vouchers, or active promotions on espresso machines right now?",
+      "Thinking about picking up an espresso machine this week — are there any standout promotions or offers running right now?",
     requiredTools: ["find_hot_deals"],
     argChecks: [
       {
@@ -227,14 +241,15 @@ export const AGENTIC_SCENARIOS: readonly AgenticScenario[] = [
     }
   },
 
-  // 9. Store Discounts DE
+  // 9. Store Discounts DE — NATURAL "Ohne-Zuruf" (allbirds.com savings)
   {
     id: "store-discounts-de",
-    title: "Gutscheincode / Rabatt für allbirds.com",
+    title: "Sparen bei Shop ohne Zuruf (allbirds.com)",
     category: "discounts",
     lang: "de",
+    proactiveNoPromptCue: true,
     userPrompt:
-      "Gibt es aktuell einen offiziellen Gutscheincode oder Rabatt für allbirds.com?",
+      "Ich will gleich bei allbirds.com bestellen — kann ich da aktuell irgendwie sparen oder läuft gerade eine Aktion?",
     requiredTools: ["find_store_discounts"],
     argChecks: [
       {
@@ -250,36 +265,33 @@ export const AGENTIC_SCENARIOS: readonly AgenticScenario[] = [
     }
   },
 
-  // 10. Discover Stores DE
+  // 10. Discover Stores DE — NATURAL "Ohne-Zuruf" (Sneaker-Socken Größe 44 mit Rabatt)
   {
     id: "discover-stores-de",
-    title: "Shop-Suche DE (Nachhaltige Sneaker aus Europa)",
+    title: "Natürlicher Kaufwunsch DE ohne Zuruf (Sneaker-Socken Gr. 44 mit Rabatt)",
     category: "discovery",
     lang: "de",
+    proactiveNoPromptCue: true,
     userPrompt:
-      "Welche guten Online-Shops verkaufen nachhaltige Sneaker aus Europa?",
-    requiredTools: ["discover_stores"],
-    argChecks: [
-      {
-        tool: "discover_stores",
-        field: "query",
-        description: "query mentions sneaker or nachhaltig",
-        match: { type: "regex", pattern: "sneaker|schuh|nachhaltig|sustainable", flags: "i" }
-      }
-    ],
+      "Ich brauche gute Sneaker-Socken in Größe 44, am liebsten mit Rabatt.",
+    requiredTools: [],
+    anyOfTools: ["discover_stores", "find_hot_deals", "compare_prices"],
+    argChecks: [],
     groundingChecks: {
       checkUrlsAgainstToolOutputs: true,
       checkPricesAgainstToolOutputs: true
     }
   },
 
-  // 11. Discover Stores EN
+  // 11. Discover Stores EN — NATURAL "Ohne-Zuruf" (Specialty Coffee Beans)
   {
     id: "discover-stores-en",
-    title: "Store Discovery EN (Specialty Coffee Beans)",
+    title: "Store Discovery EN without Cue (Specialty Coffee Beans)",
     category: "discovery",
     lang: "en",
-    userPrompt: "Which online stores sell specialty coffee beans?",
+    proactiveNoPromptCue: true,
+    userPrompt:
+      "I'm running low on specialty coffee beans — which online shops are worth ordering from?",
     requiredTools: ["discover_stores"],
     argChecks: [
       {
@@ -479,27 +491,28 @@ export const AGENTIC_SCENARIOS: readonly AgenticScenario[] = [
     }
   },
 
-  // 18. Combo New vs Used DE
+  // 18. Combo New vs Used DE — NATURAL "Ohne-Zuruf" (MacBook Air M3)
   {
     id: "combo-new-vs-used-de",
-    title: "Kombi-Flow Neu vs. Gebraucht (Nintendo Switch OLED DE)",
+    title: "Kombi-Flow Neu vs. Gebraucht ohne Zuruf (MacBook Air M3)",
     category: "combo",
     lang: "de",
+    proactiveNoPromptCue: true,
     userPrompt:
-      "Vergleiche bitte Neupreise und Gebraucht- bzw. Refurbished-Angebote für eine Nintendo Switch OLED in Deutschland.",
+      "Was kostet ein MacBook Air M3 gerade? Lohnt sich auch gebraucht oder refurbished?",
     requiredTools: ["compare_prices", "search_secondhand_marketplaces"],
     argChecks: [
       {
         tool: "compare_prices",
         field: "query",
-        description: "compare_prices query mentions Nintendo Switch OLED",
-        match: { type: "regex", pattern: "nintendo\\s*switch|switch\\s*oled", flags: "i" }
+        description: "compare_prices query mentions MacBook Air M3",
+        match: { type: "regex", pattern: "macbook\\s*air.*m3|macbook\\s*air", flags: "i" }
       },
       {
         tool: "search_secondhand_marketplaces",
         field: "query",
-        description: "secondhand query mentions Nintendo Switch OLED",
-        match: { type: "regex", pattern: "nintendo\\s*switch|switch\\s*oled", flags: "i" }
+        description: "secondhand query mentions MacBook Air M3",
+        match: { type: "regex", pattern: "macbook\\s*air.*m3|macbook\\s*air", flags: "i" }
       }
     ],
     groundingChecks: {

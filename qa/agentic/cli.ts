@@ -202,9 +202,11 @@ export async function runCliMain(
     }
   });
 
-  const { jsonPath, markdownPath } = writeSuiteReports(report, opts.outDir);
+  const { jsonPath, markdownPath, productGapsPath } = writeSuiteReports(report, opts.outDir);
   console.log(formatConsoleSummary(report));
-  console.log(`\nReports written:\n  JSON: ${jsonPath}\n  MD:   ${markdownPath}`);
+  console.log(
+    `\nReports written:\n  JSON:         ${jsonPath}\n  MD:           ${markdownPath}\n  Product Gaps: ${productGapsPath}`
+  );
 
   return 0;
 }
