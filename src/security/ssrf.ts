@@ -483,8 +483,10 @@ function acquireSlots(
   };
 }
 
-function createPinnedAgent(pinned: DnsAddress): Agent {
+export function createPinnedAgent(pinned: DnsAddress): Agent {
   return new Agent({
+    // Keep HTTP/1.1-only against untrusted storefronts (undici 8 defaults allowH2=true)
+    allowH2: false,
     connect: {
       lookup: (
         _hostname: string,
@@ -505,13 +507,21 @@ function createPinnedAgent(pinned: DnsAddress): Agent {
   });
 }
 
+async function cancelResponseBody(body: unknown): Promise<void> {
+  if (!body || typeof body !== "object") return;
+  const cancelFn = (body as { cancel?: () => Promise<unknown> | unknown }).cancel;
+  if (typeof cancelFn === "function") {
+    await Promise.resolve(cancelFn.call(body)).catch(() => undefined);
+  }
+}
+
 async function readBoundedBody(
   res: { body: AsyncIterable<Uint8Array> | null; arrayBuffer?: () => Promise<ArrayBuffer> },
   maxBytes: number,
   truncateOnMaxBytes = false,
   signal?: AbortSignal,
   timeoutMs = 6000
-): Promise<Buffer> {
+): Promise<{ buffer: Buffer; truncated: boolean }> {
   if (signal?.aborted) {
     throw makeAbortSsrfError(signal, timeoutMs);
   }
@@ -523,16 +533,17 @@ async function readBoundedBody(
       }
       if (ab.byteLength > maxBytes) {
         if (truncateOnMaxBytes) {
-          return Buffer.from(ab, 0, maxBytes);
+          return { buffer: Buffer.from(ab, 0, maxBytes), truncated: true };
         }
         throw new SsrfError("BODY_TOO_LARGE", `Upstream response exceeded ${maxBytes} bytes`);
       }
-      return Buffer.from(ab);
+      return { buffer: Buffer.from(ab), truncated: false };
     }
-    return Buffer.alloc(0);
+    return { buffer: Buffer.alloc(0), truncated: false };
   }
   const chunks: Buffer[] = [];
   let total = 0;
+  let truncated = false;
   for await (const chunk of res.body) {
     if (signal?.aborted) {
       throw makeAbortSsrfError(signal, timeoutMs);
@@ -545,6 +556,7 @@ async function readBoundedBody(
           chunks.push(Buffer.from(chunk.subarray(0, remaining)));
           total += remaining;
         }
+        truncated = true;
         break;
       }
       throw new SsrfError("BODY_TOO_LARGE", `Upstream response exceeded ${maxBytes} bytes`);
@@ -552,7 +564,7 @@ async function readBoundedBody(
     total = nextTotal;
     chunks.push(Buffer.from(chunk));
   }
-  return Buffer.concat(chunks, total);
+  return { buffer: Buffer.concat(chunks, total), truncated };
 }
 
 export async function safeFetch(
@@ -623,6 +635,7 @@ export async function safeFetch(
       // Prefer IPv4 when available for better compatibility on Cloud Run / Shopify
       const pinned = addresses.find((a) => a.family === 4) ?? addresses[0]!;
       const agent = options.fetchImpl ? undefined : createPinnedAgent(pinned);
+      let responseBody: unknown = null;
 
       try {
         const init: UndiciRequestInit = {
@@ -637,6 +650,7 @@ export async function safeFetch(
         const res = options.fetchImpl
           ? await options.fetchImpl(currentUrl.toString(), init)
           : await undiciFetch(currentUrl.toString(), init);
+        responseBody = res.body;
 
         const location = res.headers.get("location");
         if (
@@ -647,6 +661,8 @@ export async function safeFetch(
             res.status === 307 ||
             res.status === 308)
         ) {
+          await cancelResponseBody(res.body);
+          responseBody = null;
           if (hop >= maxRedirects) {
             throw new SsrfError(
               "TOO_MANY_REDIRECTS",
@@ -665,16 +681,25 @@ export async function safeFetch(
           continue;
         }
 
-        const bodyBuffer =
-          method === "HEAD"
-            ? Buffer.alloc(0)
-            : await readBoundedBody(
-                res,
-                maxBytes,
-                Boolean(options.truncateOnMaxBytes),
-                effectiveSignal,
-                timeoutMs
-              );
+        let bodyBuffer: Buffer;
+        if (method === "HEAD") {
+          await cancelResponseBody(res.body);
+          responseBody = null;
+          bodyBuffer = Buffer.alloc(0);
+        } else {
+          const { buffer, truncated } = await readBoundedBody(
+            res,
+            maxBytes,
+            Boolean(options.truncateOnMaxBytes),
+            effectiveSignal,
+            timeoutMs
+          );
+          bodyBuffer = buffer;
+          if (truncated) {
+            await cancelResponseBody(res.body);
+          }
+          responseBody = null;
+        }
         const contentType = res.headers.get("content-type") ?? "";
         const selectedHeaders: Record<string, string> = {};
         for (const key of [
@@ -701,6 +726,8 @@ export async function safeFetch(
           bodyText: bodyBuffer.toString("utf8")
         };
       } catch (err) {
+        await cancelResponseBody(responseBody);
+        responseBody = null;
         if (err instanceof SsrfError) throw err;
         if (callerSignal?.aborted) {
           throw makeAbortSsrfError(callerSignal, timeoutMs);
@@ -714,8 +741,10 @@ export async function safeFetch(
         throw err;
       } finally {
         if (agent) {
-          const teardown = effectiveSignal.aborted ? agent.destroy() : agent.close();
-          await teardown.catch(() => undefined);
+          // Each hop allocates an ephemeral, single-use pinned Agent; always destroy it
+          // immediately so lingering null-body responses (e.g. HTTP 205 with chunked TE)
+          // can never stall teardown waiting on undici's bodyTimeout.
+          await agent.destroy().catch(() => undefined);
         }
       }
     }

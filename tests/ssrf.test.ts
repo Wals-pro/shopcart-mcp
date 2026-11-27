@@ -1,8 +1,15 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
+import net, { type AddressInfo } from "node:net";
+import os from "node:os";
 import path from "node:path";
+import tls from "node:tls";
 import { fileURLToPath } from "node:url";
+import { fetch as undiciFetch, type RequestInit as UndiciRequestInit } from "undici";
 import { describe, expect, it } from "vitest";
 import {
+  createPinnedAgent,
   getInFlightSlotCount,
   isBlockedIp,
   normalizeStoreOrigin,
@@ -223,5 +230,264 @@ describe("SSRF guardrails", () => {
     expect(getInFlightSlotCount("selfcheck:203.0.113.1")).toBe(0);
     expect(getInFlightSlotCount("selfcheck:2001:db8:abcd:12::/64")).toBe(0);
     expect(getInFlightSlotCount(customGlobalKey)).toBe(0);
+  });
+
+  it("cancels unconsumed 302 redirect bodies and destroys per-hop Agent promptly without stalling under undici 8", async () => {
+    const timers: Array<ReturnType<typeof setTimeout>> = [];
+    const server = http.createServer((req, res) => {
+      if (req.url === "/stalling-redirect") {
+        res.writeHead(302, {
+          Location: "https://public-shop.example/final",
+          "Content-Type": "text/plain"
+        });
+        res.write("partial redirect body chunk");
+        // Keep the redirect response body open for 4s (tarpit simulation)
+        timers.push(setTimeout(() => res.end("late tail"), 4000));
+        return;
+      }
+      if (req.url === "/final") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, step: "final" }));
+        return;
+      }
+      res.writeHead(404);
+      res.end("not found");
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+
+    const hopAgents: Array<ReturnType<typeof createPinnedAgent>> = [];
+    try {
+      const lookupFn = async () => [{ address: "23.227.38.65", family: 4 as const }];
+      const destroyedAgents: boolean[] = [];
+
+      // Route safeFetch's https://public-shop.example/... requests onto the local loopback server
+      // using real undici@8 fetch + createPinnedAgent so real ReadableStream cancel + destroy behavior is tested.
+      const loopbackFetchImpl = async (url: string, init: UndiciRequestInit) => {
+        const parsed = new URL(url);
+        const hopAgent = createPinnedAgent({ address: "127.0.0.1", family: 4 });
+        hopAgents.push(hopAgent);
+        const origDestroy = hopAgent.destroy.bind(hopAgent);
+        hopAgent.destroy = (...args: Parameters<typeof origDestroy>) => {
+          destroyedAgents.push(true);
+          return origDestroy(...args);
+        };
+        const res = await undiciFetch(`http://pinned-loopback.invalid:${port}${parsed.pathname}`, {
+          method: init.method,
+          headers: init.headers,
+          body: init.body,
+          redirect: "manual",
+          signal: init.signal,
+          dispatcher: hopAgent
+        });
+        // Wrap body.cancel so we can verify safeFetch triggers cancellation + immediate teardown
+        const rawBody = res.body;
+        if (rawBody) {
+          const origCancel = rawBody.cancel.bind(rawBody);
+          rawBody.cancel = async (reason?: unknown) => {
+            const out = await origCancel(reason);
+            await hopAgent.destroy().catch(() => undefined);
+            return out;
+          };
+        }
+        return res;
+      };
+
+      const start = Date.now();
+      const result = await safeFetch("https://public-shop.example/stalling-redirect", {
+        lookupFn,
+        fetchImpl: loopbackFetchImpl,
+        timeoutMs: 3000,
+        maxRedirects: 2,
+        concurrencyKey: "test:undici8-redirect-teardown"
+      });
+      const elapsedMs = Date.now() - start;
+
+      expect(result.status).toBe(200);
+      expect(result.url).toBe("https://public-shop.example/final");
+      expect(JSON.parse(result.bodyText)).toEqual({ ok: true, step: "final" });
+      expect(destroyedAgents.length).toBeGreaterThanOrEqual(1);
+      // Must NOT wait for the 4000ms stalling redirect body
+      expect(elapsedMs).toBeLessThan(1000);
+      expect(getInFlightSlotCount("test:undici8-redirect-teardown")).toBe(0);
+    } finally {
+      for (const t of timers) clearTimeout(t);
+      await Promise.all(hopAgents.map((a) => a.destroy().catch(() => undefined)));
+      server.close();
+      server.closeAllConnections();
+    }
+  });
+
+  it("disables HTTP/2 (allowH2: false) on createPinnedAgent while preserving DNS IP pinning and maps undici 8 TimeoutError/AbortError cleanly", async () => {
+    // 1. Wire-level TLS ALPN check: createPinnedAgent connects via pinned IP and offers HTTP/1.1 only (never h2)
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "shopcart-alpn-"));
+    const keyPath = path.join(tmpDir, "key.pem");
+    const certPath = path.join(tmpDir, "cert.pem");
+    execFileSync(
+      "openssl",
+      [
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-keyout",
+        keyPath,
+        "-out",
+        certPath,
+        "-days",
+        "1",
+        "-subj",
+        "/CN=pinned-alpn.invalid"
+      ],
+      { stdio: "ignore" }
+    );
+
+    let advertisedAlpn: string[] = [];
+    const tlsServer = tls.createServer({
+      key: fs.readFileSync(keyPath),
+      cert: fs.readFileSync(certPath),
+      ALPNCallback: ({ protocols }) => {
+        advertisedAlpn = [...protocols];
+        return protocols[0];
+      }
+    });
+    await new Promise<void>((resolve) => tlsServer.listen(0, "127.0.0.1", resolve));
+    const tlsPort = (tlsServer.address() as AddressInfo).port;
+
+    const pinnedAgent = createPinnedAgent({ address: "127.0.0.1", family: 4 });
+    try {
+      // Self-signed cert is intentionally rejected by TLS verification, but ClientHello ALPN is observed first
+      await expect(
+        undiciFetch(`https://pinned-alpn.invalid:${tlsPort}/`, {
+          redirect: "manual",
+          dispatcher: pinnedAgent
+        })
+      ).rejects.toThrow();
+
+      expect(advertisedAlpn).toEqual(["http/1.1"]);
+      expect(advertisedAlpn).not.toContain("h2");
+    } finally {
+      await pinnedAgent.destroy().catch(() => undefined);
+      tlsServer.close();
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+
+    // 2. Real undici 8 TimeoutError and AbortError mapping through safeFetch
+    const slowServer = http.createServer((_req, _res) => {
+      // Intentionally never respond
+    });
+    await new Promise<void>((resolve) => slowServer.listen(0, "127.0.0.1", resolve));
+    const slowPort = (slowServer.address() as AddressInfo).port;
+
+    try {
+      const lookupFn = async () => [{ address: "23.227.38.65", family: 4 as const }];
+      const slowFetchImpl = async (_url: string, init: UndiciRequestInit) => {
+        const a = createPinnedAgent({ address: "127.0.0.1", family: 4 });
+        try {
+          return await undiciFetch(`http://pinned-slow.invalid:${slowPort}/hang`, {
+            redirect: "manual",
+            signal: init.signal,
+            dispatcher: a
+          });
+        } catch (err) {
+          await a.destroy().catch(() => undefined);
+          throw err;
+        }
+      };
+
+      await expect(
+        safeFetch("https://public-shop.example/hang", {
+          lookupFn,
+          fetchImpl: slowFetchImpl,
+          timeoutMs: 120,
+          concurrencyKey: "test:undici8-timeout"
+        })
+      ).rejects.toMatchObject({ code: "TIMEOUT" });
+      expect(getInFlightSlotCount("test:undici8-timeout")).toBe(0);
+
+      const ac = new AbortController();
+      setTimeout(() => ac.abort(new Error("caller_cancelled")), 40);
+      await expect(
+        safeFetch("https://public-shop.example/hang", {
+          lookupFn,
+          fetchImpl: slowFetchImpl,
+          timeoutMs: 3000,
+          signal: ac.signal,
+          concurrencyKey: "test:undici8-abort"
+        })
+      ).rejects.toMatchObject({ code: "ABORTED" });
+      expect(getInFlightSlotCount("test:undici8-abort")).toBe(0);
+    } finally {
+      slowServer.close();
+      slowServer.closeAllConnections();
+    }
+  });
+
+  it("unconditionally destroys per-hop pinned Agent so HTTP 205 Reset Content with lingering chunked TE never stalls teardown", async () => {
+    // Guard against reintroducing conditional agent.close() in safeFetch's finally block
+    const ssrfSource = fs.readFileSync(path.join(REPO_ROOT, "src", "security", "ssrf.ts"), "utf8");
+    expect(ssrfSource).not.toMatch(/\bagent\.close\s*\(/);
+    expect(ssrfSource).toMatch(/await\s+agent\.destroy\(\)\.catch\(/);
+
+    const openSockets = new Set<net.Socket>();
+    const rawServer = net.createServer((socket) => {
+      openSockets.add(socket);
+      socket.on("close", () => openSockets.delete(socket));
+      socket.once("data", () => {
+        // Send HTTP 205 Reset Content with Transfer-Encoding: chunked and NO chunk terminator,
+        // keeping the TCP socket open (fetch yields res.body === null while llhttp holds the socket).
+        socket.write("HTTP/1.1 205 Reset Content\r\nTransfer-Encoding: chunked\r\n\r\n");
+      });
+    });
+
+    await new Promise<void>((resolve) => rawServer.listen(0, "127.0.0.1", resolve));
+    const { port } = rawServer.address() as AddressInfo;
+
+    try {
+      // 1. Direct real-agent check: createPinnedAgent + undiciFetch + unconditional agent.destroy()
+      const directAgent = createPinnedAgent({ address: "127.0.0.1", family: 4 });
+      const directStart = Date.now();
+      const directRes = await undiciFetch(`http://pinned-205.invalid:${port}/reset`, {
+        redirect: "manual",
+        dispatcher: directAgent
+      });
+      expect(directRes.status).toBe(205);
+      expect(directRes.body).toBeNull();
+      await directAgent.destroy();
+      expect(Date.now() - directStart).toBeLessThan(1000);
+
+      // 2. End-to-end safeFetch() check against the same raw 205 chunked socket
+      const lookupFn = async () => [{ address: "23.227.38.65", family: 4 as const }];
+      const hopAgents: Array<ReturnType<typeof createPinnedAgent>> = [];
+      const start = Date.now();
+      const res = await safeFetch("https://public-shop.example/reset", {
+        lookupFn,
+        timeoutMs: 3000,
+        concurrencyKey: "test:undici8-205-teardown",
+        fetchImpl: async (_url, init) => {
+          const hopAgent = createPinnedAgent({ address: "127.0.0.1", family: 4 });
+          hopAgents.push(hopAgent);
+          return undiciFetch(`http://pinned-205.invalid:${port}/reset`, {
+            method: init.method,
+            headers: init.headers,
+            redirect: "manual",
+            signal: init.signal,
+            dispatcher: hopAgent
+          });
+        }
+      });
+      await Promise.all(hopAgents.map((a) => a.destroy().catch(() => undefined)));
+      const elapsedMs = Date.now() - start;
+
+      expect(res.status).toBe(205);
+      expect(res.bodyText).toBe("");
+      expect(elapsedMs).toBeLessThan(1000);
+      expect(getInFlightSlotCount("test:undici8-205-teardown")).toBe(0);
+    } finally {
+      for (const s of openSockets) s.destroy();
+      await new Promise<void>((resolve) => rawServer.close(() => resolve()));
+    }
   });
 });

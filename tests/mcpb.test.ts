@@ -24,7 +24,8 @@ const EXPECTED_TOOLS = [
   "create_cart_link",
   "compare_prices",
   "find_hot_deals",
-  "match_visual_product"
+  "match_visual_product",
+  "search_secondhand_marketplaces"
 ];
 
 /**
@@ -192,7 +193,7 @@ describe("Claude Desktop 1-click Extension (.mcpb)", () => {
       claude_desktop: ">=0.10.0",
       platforms: ["darwin", "win32", "linux"],
       runtimes: {
-        node: ">=20.0.0"
+        node: ">=22.19.0"
       }
     });
   });
