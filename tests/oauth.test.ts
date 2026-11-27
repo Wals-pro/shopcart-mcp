@@ -1074,4 +1074,78 @@ describe("OAuth 2.1 compliance & MCP auth", () => {
       .expect(400);
     expect(dupTokJsonObj.body.error).toBe("invalid_target");
   });
+
+  it("enforces atomic refresh rotation against family revocation and refuses to stub deleted clients on activateOAuthClient", async () => {
+    const { app, store } = makeTestApp();
+
+    // 1. activateOAuthClient on a non-existent/deleted client MUST NOT create a stub
+    await store.activateOAuthClient("dcr_nonexistent", new Date(Date.now() + 3600 * 1000));
+    expect(await store.getOAuthClient("dcr_nonexistent")).toBeNull();
+
+    // 2. Register client & seed an active refresh token in family fam_race_1
+    const reg = await request(app)
+      .post("/oauth/register")
+      .send({
+        client_name: "Atomic Rotation Test",
+        redirect_uris: ["http://127.0.0.1/callback"]
+      })
+      .expect(201);
+    const clientId = reg.body.client_id as string;
+
+    const now = new Date();
+    const exp = new Date(now.getTime() + 3600 * 1000);
+    const userId = "user_atomic_rot";
+    await store.createUser({
+      id: userId,
+      email: "atomic@example.com",
+      passwordHash: "",
+      passwordSalt: "",
+      plan: "free",
+      status: "active",
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+      currentPeriodEnd: null,
+      createdAt: now,
+      updatedAt: now
+    });
+
+    const rt1 = "sc_rt_atomic_initial_token_0123456789";
+    await store.saveOAuthToken({
+      tokenHash: (await import("../src/auth/crypto.js")).sha256Hex(rt1),
+      type: "refresh",
+      familyId: "fam_race_1",
+      userId,
+      clientId,
+      resource: "https://shopcart.wals.pro/mcp",
+      scopes: ["mcp:read"],
+      rotatedAt: null,
+      revoked: false,
+      createdAt: now,
+      expiresAt: exp
+    });
+
+    // Rotate once -> succeeds
+    const rot1 = await request(app)
+      .post("/oauth/token")
+      .type("form")
+      .send({ grant_type: "refresh_token", client_id: clientId, refresh_token: rt1 })
+      .expect(200);
+    const at2 = rot1.body.access_token as string;
+    const rt2 = rot1.body.refresh_token as string;
+
+    // Revoke family -> neither at2 nor rt2 can survive or rotate
+    await store.revokeTokenFamily("fam_race_1");
+
+    await request(app)
+      .post("/mcp")
+      .set("Authorization", `Bearer ${at2}`)
+      .send({ jsonrpc: "2.0", id: 1, method: "tools/list" })
+      .expect(401);
+
+    await request(app)
+      .post("/oauth/token")
+      .type("form")
+      .send({ grant_type: "refresh_token", client_id: clientId, refresh_token: rt2 })
+      .expect(400);
+  });
 });

@@ -6,6 +6,7 @@ import type {
   OAuthCodeRecord,
   OAuthTokenRecord,
   RefreshRotationResult,
+  RotateRefreshTokenParams,
   StorageBackend,
   UserRecord,
   WebSessionRecord
@@ -16,6 +17,7 @@ export class MemoryStore implements StorageBackend {
   private readonly clients = new Map<string, OAuthClientRecord>();
   private readonly codes = new Map<string, OAuthCodeRecord>();
   private readonly tokens = new Map<string, OAuthTokenRecord>();
+  private readonly revokedFamilies = new Set<string>();
   private readonly sessions = new Map<string, WebSessionRecord>();
   private readonly emailChallenges = new Map<string, EmailAuthChallengeRecord>();
   private readonly usage = new Map<string, number>();
@@ -99,20 +101,61 @@ export class MemoryStore implements StorageBackend {
   async getOAuthToken(tokenHash: string): Promise<OAuthTokenRecord | null> {
     const rec = this.tokens.get(tokenHash);
     if (!rec) return null;
-    return { ...rec };
+    const revoked = rec.revoked || this.revokedFamilies.has(rec.familyId);
+    return { ...rec, revoked };
   }
 
-  async rotateRefreshToken(tokenHash: string): Promise<RefreshRotationResult> {
-    const rec = this.tokens.get(tokenHash);
-    if (!rec || rec.type !== "refresh" || rec.revoked || rec.expiresAt.getTime() <= Date.now()) {
+  async rotateRefreshToken(params: RotateRefreshTokenParams): Promise<RefreshRotationResult> {
+    const now = params.now ?? new Date();
+    const rec = this.tokens.get(params.tokenHash);
+    if (!rec || rec.type !== "refresh" || rec.expiresAt.getTime() <= now.getTime()) {
+      return { status: "invalid" };
+    }
+    if (rec.revoked || this.revokedFamilies.has(rec.familyId)) {
       return { status: "invalid" };
     }
     if (rec.rotatedAt !== null) {
       await this.revokeTokenFamily(rec.familyId);
       return { status: "replayed", familyId: rec.familyId };
     }
-    rec.rotatedAt = new Date();
-    return { status: "ok", record: { ...rec } };
+    if (rec.clientId !== params.expectedClientId) {
+      await this.revokeTokenFamily(rec.familyId);
+      return { status: "client_mismatch", familyId: rec.familyId };
+    }
+    if (params.requestedResource !== undefined && params.requestedResource !== rec.resource) {
+      return { status: "resource_mismatch" };
+    }
+
+    rec.rotatedAt = now;
+    const accessToken: OAuthTokenRecord = {
+      tokenHash: params.nextAccessTokenHash,
+      type: "access",
+      familyId: rec.familyId,
+      userId: rec.userId,
+      clientId: rec.clientId,
+      resource: rec.resource,
+      scopes: [...rec.scopes],
+      rotatedAt: null,
+      revoked: false,
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + params.accessTtlSeconds * 1000)
+    };
+    const refreshToken: OAuthTokenRecord = {
+      tokenHash: params.nextRefreshTokenHash,
+      type: "refresh",
+      familyId: rec.familyId,
+      userId: rec.userId,
+      clientId: rec.clientId,
+      resource: rec.resource,
+      scopes: [...rec.scopes],
+      rotatedAt: null,
+      revoked: false,
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + params.refreshTtlSeconds * 1000)
+    };
+    this.tokens.set(accessToken.tokenHash, { ...accessToken });
+    this.tokens.set(refreshToken.tokenHash, { ...refreshToken });
+    return { status: "ok", record: { ...rec }, accessToken, refreshToken };
   }
 
   async revokeToken(tokenHash: string): Promise<void> {
@@ -126,6 +169,7 @@ export class MemoryStore implements StorageBackend {
   }
 
   async revokeTokenFamily(familyId: string): Promise<void> {
+    this.revokedFamilies.add(familyId);
     for (const rec of this.tokens.values()) {
       if (rec.familyId === familyId) {
         rec.revoked = true;
@@ -267,5 +311,9 @@ export class MemoryStore implements StorageBackend {
     if (this.stripeEvents.has(eventId)) return false;
     this.stripeEvents.add(eventId);
     return true;
+  }
+
+  async releaseStripeEvent(eventId: string): Promise<void> {
+    this.stripeEvents.delete(eventId);
   }
 }
