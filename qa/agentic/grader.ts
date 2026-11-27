@@ -15,7 +15,7 @@ import type {
   ToolCallTrace
 } from "./types.js";
 
-const URL_RE = /https:\/\/[^\s<>)"'`\]]+/gi;
+const URL_RE = /https:\/\/[^\s<>)"'`\]*]+/gi;
 
 const CURRENCY_BEFORE_RE = /(?:€|\$|EUR|USD|CHF|GBP)\s*(\d{1,5}(?:[.,]\d{1,2})?)/gi;
 const CURRENCY_AFTER_RE = /(\d{1,5}(?:[.,]\d{1,2})?)\s*(?:€|\$|EUR|USD|CHF|GBP|Euro)\b/gi;
@@ -28,7 +28,7 @@ const SCHEMA_DEFAULTS: Record<string, Record<string, string>> = {
 };
 
 export function normalizeUrlForComparison(raw: string): string {
-  const trimmed = raw.trim().replace(/[.,;:!?]+$/, "");
+  const trimmed = raw.trim().replace(/[.,;:!?*_~]+$/, "");
   try {
     const u = new URL(trimmed);
     const host = u.hostname.toLowerCase().replace(/^www\./, "");
@@ -49,7 +49,7 @@ export function normalizeUrlForComparison(raw: string): string {
 export function extractUrlsFromText(text: string): string[] {
   const found = new Set<string>();
   for (const match of text.matchAll(URL_RE)) {
-    const cleaned = match[0].replace(/[.,;:!?]+$/, "");
+    const cleaned = match[0].replace(/[.,;:!?*_~]+$/, "");
     if (cleaned.startsWith("https://")) {
       found.add(cleaned);
     }

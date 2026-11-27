@@ -1,5 +1,5 @@
-export type EvalMode = "pure-mcp" | "with-skill";
-export type CliMode = EvalMode | "both";
+export type EvalMode = "pure-mcp" | "with-skill" | "claude-web-harsh";
+export type CliMode = EvalMode | "both" | "all";
 export type ScenarioLang = "de" | "en";
 
 export type ScenarioCategory =

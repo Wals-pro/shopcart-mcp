@@ -1244,7 +1244,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
           ...(disclosureNote ? { disclosure_note: disclosureNote } : {}),
           notices,
           agent_guidance:
-            "Present the verified comparison_links (and any live_offers) immediately with every URL copied VERBATIM (do not strip query parameters or rewrite links) — no extra web_search or unrelated store lookups needed. EAN bridge: pass an EAN/GTIN from get_product for exact matching (match_mode='ean_exact'). If the user chooses a store, call inspect_store -> find_store_discounts -> get_product -> create_cart_link."
+            "Present the verified comparison_links (and any live_offers) immediately with every URL copied VERBATIM (do not strip query parameters or rewrite links) — no extra web_search or unrelated store lookups needed. Strictly read-only: if the user asked you to order or pay, state clearly in your reply that you cannot place orders or process payments and that checkout happens in their browser. EAN bridge: pass an EAN/GTIN from get_product for exact matching (match_mode='ean_exact'). If the user chooses a store, call inspect_store -> find_store_discounts -> get_product -> create_cart_link."
         };
       })
   );
@@ -1374,7 +1374,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Match Visual Product",
       description:
-        "Use proactively whenever the user uploads a product photo OR describes visual appearance/attributes of an item from a photo (type, color, material, style, brand, barcode) to find matching products across public online stores with ranked confidence scores.",
+        "Use proactively whenever the user uploads a product photo OR describes visual appearance attributes in text (type, color, material, style, size, brand, barcode) — works directly from text attributes WITHOUT needing an uploaded photo file (call immediately instead of asking the user to upload an image). Matches across public online stores with ranked confidence scores.",
       inputSchema: {
         product_type: z
           .string()

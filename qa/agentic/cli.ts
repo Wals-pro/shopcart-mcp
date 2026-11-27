@@ -58,8 +58,16 @@ export function parseCliArgs(
 
     if (arg === "--mode") {
       const val = requireValue("--mode");
-      if (val !== "pure-mcp" && val !== "with-skill" && val !== "both") {
-        throw new Error(`Invalid --mode '${val}'. Expected: pure-mcp | with-skill | both`);
+      if (
+        val !== "pure-mcp" &&
+        val !== "with-skill" &&
+        val !== "claude-web-harsh" &&
+        val !== "both" &&
+        val !== "all"
+      ) {
+        throw new Error(
+          `Invalid --mode '${val}'. Expected: pure-mcp | with-skill | claude-web-harsh | both | all`
+        );
       }
       mode = val;
     } else if (arg === "--scenario") {
@@ -126,7 +134,7 @@ export function renderHelpText(): string {
     "  pnpm run qa:agentic -- [options]",
     "",
     "Options:",
-    "  --mode <pure-mcp|with-skill|both>  Evaluation mode (default: pure-mcp)",
+    "  --mode <pure-mcp|with-skill|claude-web-harsh|both|all>  Evaluation mode (default: pure-mcp)",
     "  --scenario <id[,id2,...]>          Run specific scenario ID(s) only",
     `  --model <model-id>                 Anthropic model (default: ${DEFAULT_AGENTIC_MODEL}, or AGENTIC_MODEL env)`,
     "  --label <name>                     Report label (e.g. cycle-0-baseline)",
@@ -174,7 +182,11 @@ export async function runCliMain(
   }
 
   const modes: EvalMode[] =
-    opts.mode === "both" ? ["pure-mcp", "with-skill"] : [opts.mode];
+    opts.mode === "both"
+      ? ["pure-mcp", "with-skill"]
+      : opts.mode === "all"
+        ? ["pure-mcp", "with-skill", "claude-web-harsh"]
+        : [opts.mode];
 
   let apiKey: string | undefined;
   if (!opts.dryRun) {

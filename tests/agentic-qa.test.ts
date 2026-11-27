@@ -17,6 +17,7 @@ import {
   aggregateProductGaps,
   estimateCostUsd,
   extractToolOutputFacts,
+  extractUrlsFromText,
   gradeScenarioRun
 } from "../qa/agentic/grader.js";
 import { buildSystemPrompt } from "../qa/agentic/prompts.js";
@@ -158,14 +159,18 @@ describe("Fixture MCP Server over InMemoryTransport", () => {
     }
   });
 
-  it("composes Mode A (pure-mcp) without Skill text and Mode B (with-skill) with Skill text", () => {
+  it("composes Mode A (pure-mcp), Mode B (with-skill), and Mode C (claude-web-harsh without server.instructions)", () => {
     const pure = buildSystemPrompt("pure-mcp", SERVER_INSTRUCTIONS);
     const withSkill = buildSystemPrompt("with-skill", SERVER_INSTRUCTIONS);
+    const harsh = buildSystemPrompt("claude-web-harsh", SERVER_INSTRUCTIONS);
 
     expect(pure).toContain(SERVER_INSTRUCTIONS);
     expect(pure).not.toContain("Active Shopping Skill");
     expect(withSkill).toContain(SERVER_INSTRUCTIONS);
     expect(withSkill).toContain("Active Shopping Skill");
+    expect(harsh).not.toContain(SERVER_INSTRUCTIONS);
+    expect(harsh).not.toContain("Active Shopping Skill");
+    expect(harsh).toContain("Use web_search for current prices");
   });
 });
 
@@ -369,6 +374,13 @@ describe("Automated Grader, Proactive Triggering & Gap Separation", () => {
     expect(facts.prices).toContain(119.45);
     expect(facts.payloadSignals.hasShippingCost).toBe(false);
 
+    // Markdown bold/italic punctuation around verbatim URLs must be stripped cleanly
+    expect(
+      extractUrlsFromText(
+        "Link: **https://allbirds.com/cart/42001002:1?storefront=true&discount=WOOL15**."
+      )
+    ).toEqual(["https://allbirds.com/cart/42001002:1?storefront=true&discount=WOOL15"]);
+
     const cost = estimateCostUsd("claude-haiku-4-5-20251001", {
       input_tokens: 1_000_000,
       output_tokens: 200_000,
@@ -533,7 +545,7 @@ describe("Full Offline --dry-run Pipeline, Product Gaps Export & CLI", () => {
     expect(fs.existsSync(productGapsPath)).toBe(true);
 
     const md = renderMarkdownReport(report);
-    expect(md).toContain("Mode A (`pure-mcp`) vs. Mode B (`with-skill`) Comparison");
+    expect(md).toContain("## Mode Comparison");
     expect(md).toContain("Proactive Trigger Rate (ohne Zuruf)");
     expect(md).toContain("## Routing Gaps");
     expect(md).toContain("## Product Gaps (Capability Limits for Idea Validator)");

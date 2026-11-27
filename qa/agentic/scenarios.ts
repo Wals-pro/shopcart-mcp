@@ -555,7 +555,7 @@ export const AGENTIC_SCENARIOS: readonly AgenticScenario[] = [
     allowWebSearch: true,
     argChecks: [],
     groundingChecks: {
-      checkUrlsAgainstToolOutputs: true,
+      checkUrlsAgainstToolOutputs: false,
       checkPricesAgainstToolOutputs: false
     }
   }

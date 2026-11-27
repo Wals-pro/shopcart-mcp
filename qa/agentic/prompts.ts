@@ -13,6 +13,21 @@ export const CLAUDE_AI_BASE_SYSTEM_PROMPT = [
 ].join("\n");
 
 /**
+ * Harsh realistic Claude.ai Web/Mobile stress-test system prompt:
+ * 1. Actively pushes built-in `web_search` for current prices, products, availability, and shopping questions.
+ * 2. Deliberately OMITS MCP `server.instructions` completely, forcing the 12 tool `description`s alone
+ *    to trigger proactively against a strongly favored `web_search`.
+ */
+export const CLAUDE_WEB_HARSH_SYSTEM_PROMPT = [
+  "You are Claude, a helpful, honest, and concise AI assistant.",
+  "Today's date is 2026-11-27.",
+  "Answer in the same language as the user (German for German prompts, English for English prompts).",
+  "Use web_search for current prices, products, deals, availability, shopping questions, news, and weather whenever you need fresh information from the web.",
+  "Additional third-party connector tools are also attached in your tool list if they are clearly better suited for a task.",
+  "Always be transparent about what you verified from tool outputs and never fabricate URLs, prices, stock availability, coupon codes, or completed purchases."
+].join("\n");
+
+/**
  * Compact Shopping Skill block used exclusively in Mode B (`with-skill`)
  * to measure the A/B delta between pure MCP (`pure-mcp`) and MCP + Skill (`with-skill`).
  */
@@ -31,8 +46,8 @@ For ANY shopping, product search, price comparison, deal/voucher, secondhand/ref
 8. **Store collections / categories / Sale sections** → \`list_collections(store_url, deals_only?)\`.
 9. **Store shipping & return policies** → \`get_store_policies(store_url, topic?, question?)\`.
 10. **Buy / Cart link for a specific store & item** → \`search_products(store_url, query)\` → \`get_product(store_url, handle_or_url)\` (get exact \`variant_id\`, live price & stock) → \`create_cart_link(store_url, items, verify_handles)\`.
-11. **Visual product description / photo attributes** → \`match_visual_product(product_type, brand?, color?, material?, style_keywords?, target_stores?)\`.
-12. **Strict Read-Only Safety**: ShopCart NEVER places orders or processes payments. If asked to buy/pay immediately, you MUST state clearly upfront that you cannot place orders or charge payment methods, and only then offer verified price comparison or cart links for browser checkout.
+11. **Visual product description / photo attributes** → call \`match_visual_product(product_type, brand?, color?, material?, style_keywords?, target_stores?)\` immediately even from text-described visual attributes (no image upload required).
+12. **Strict Read-Only Safety**: ShopCart NEVER places orders or processes payments. If asked to buy/pay immediately, you MUST state explicitly in your final answer that you cannot place orders or charge payment methods (read-only), and only then offer verified price comparison or cart links for browser checkout.
 13. **Verbatim URLs**: Always copy returned URLs verbatim without stripping query parameters or rewriting links.
 14. **Non-shopping queries** (weather, transit, general knowledge): Do NOT call any ShopCart MCP tool.
 `.trim();
@@ -41,8 +56,13 @@ For ANY shopping, product search, price comparison, deal/voucher, secondhand/ref
  * Composes the exact system prompt sent to the Anthropic Messages API.
  * - `pure-mcp`: neutral Claude.ai system prompt + exact `server.instructions` from MCP `initialize`.
  * - `with-skill`: `pure-mcp` + compact Shopping Skill block.
+ * - `claude-web-harsh`: strong `web_search`-biased Claude.ai prompt WITHOUT `server.instructions`.
  */
 export function buildSystemPrompt(mode: EvalMode, mcpServerInstructions: string | undefined): string {
+  if (mode === "claude-web-harsh") {
+    return CLAUDE_WEB_HARSH_SYSTEM_PROMPT;
+  }
+
   const parts: string[] = [CLAUDE_AI_BASE_SYSTEM_PROMPT];
 
   if (mcpServerInstructions && mcpServerInstructions.trim().length > 0) {

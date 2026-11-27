@@ -403,6 +403,7 @@ export async function runSingleScenario(opts: {
 
   let turns = 0;
   let stopReason = "unknown";
+  const visibleAssistantTexts: string[] = [];
   let finalResponse = "";
   let fatalError: string | undefined;
 
@@ -424,6 +425,11 @@ export async function runSingleScenario(opts: {
       addUsage(usage, response.usage);
       stopReason = response.stop_reason;
 
+      const turnText = extractTextFromResponse(response);
+      if (turnText) {
+        visibleAssistantTexts.push(turnText);
+      }
+
       const assistantBlocks: AnthropicContentBlock[] = response.content.map((block) =>
         block.type === "text"
           ? { type: "text", text: block.text }
@@ -442,7 +448,7 @@ export async function runSingleScenario(opts: {
       );
 
       if (response.stop_reason !== "tool_use" || toolUses.length === 0) {
-        finalResponse = extractTextFromResponse(response);
+        finalResponse = visibleAssistantTexts.join("\n\n").trim();
         break;
       }
 
@@ -617,6 +623,9 @@ export async function runAgenticSuite(opts: RunSuiteOptions): Promise<SuiteRepor
         : undefined,
       "with-skill": opts.modes.includes("with-skill")
         ? aggregateModeMetrics("with-skill", results, scenariosById)
+        : undefined,
+      "claude-web-harsh": opts.modes.includes("claude-web-harsh")
+        ? aggregateModeMetrics("claude-web-harsh", results, scenariosById)
         : undefined
     };
 

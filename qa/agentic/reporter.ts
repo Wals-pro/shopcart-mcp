@@ -52,62 +52,62 @@ export function renderMarkdownReport(report: SuiteReport): string {
 
   const pure = report.modes["pure-mcp"];
   const skill = report.modes["with-skill"];
+  const harsh = report.modes["claude-web-harsh"];
 
-  if (pure && skill) {
-    lines.push("## Mode A (`pure-mcp`) vs. Mode B (`with-skill`) Comparison");
+  const presentModes: ModeSummaryMetrics[] = [pure, skill, harsh].filter(
+    (m): m is ModeSummaryMetrics => m !== undefined
+  );
+
+  if (presentModes.length > 1) {
+    lines.push("## Mode Comparison");
     lines.push("");
-    lines.push("| Metric | `pure-mcp` (Claude.ai Connector) | `with-skill` (+ Shopping Skill) | Delta |");
-    lines.push("|---|---:|---:|---:|");
-    const deltaPct = (a: number, b: number) => {
-      const d = (b - a) * 100;
-      return `${d >= 0 ? "+" : ""}${d.toFixed(1)} pp`;
-    };
+    const header = ["Metric", ...presentModes.map((m) => `\`${m.mode}\``)];
+    lines.push(`| ${header.join(" | ")} |`);
+    lines.push(`|---|${presentModes.map(() => "---:").join("|")}|`);
     lines.push(
-      `| Overall Pass Rate | ${pct(pure.overallPassRate)} (${pure.passedScenarios}/${pure.totalScenarios}) | ${pct(skill.overallPassRate)} (${skill.passedScenarios}/${skill.totalScenarios}) | ${deltaPct(pure.overallPassRate, skill.overallPassRate)} |`
+      `| Overall Pass Rate | ${presentModes.map((m) => `${pct(m.overallPassRate)} (${m.passedScenarios}/${m.totalScenarios})`).join(" | ")} |`
     );
     lines.push(
-      `| **Proactive Trigger Rate (ohne Zuruf)** | **${pct(pure.proactiveTriggerRate)} (${pure.proactiveTriggeredCount}/${pure.proactiveScenariosCount})** | **${pct(skill.proactiveTriggerRate)} (${skill.proactiveTriggeredCount}/${skill.proactiveScenariosCount})** | **${deltaPct(pure.proactiveTriggerRate, skill.proactiveTriggerRate)}** |`
+      `| **Proactive Trigger Rate (ohne Zuruf)** | ${presentModes.map((m) => `**${pct(m.proactiveTriggerRate)} (${m.proactiveTriggeredCount}/${m.proactiveScenariosCount})**`).join(" | ")} |`
     );
     lines.push(
-      `| Tool Selection Accuracy | ${pct(pure.toolSelectionAccuracy)} | ${pct(skill.toolSelectionAccuracy)} | ${deltaPct(pure.toolSelectionAccuracy, skill.toolSelectionAccuracy)} |`
+      `| Tool Selection Accuracy | ${presentModes.map((m) => pct(m.toolSelectionAccuracy)).join(" | ")} |`
     );
     lines.push(
-      `| \`web_search\` Escape Rate | ${pct(pure.webSearchEscapeRate)} (${pure.webSearchEscapeCount}/${pure.shoppingScenariosCount}) | ${pct(skill.webSearchEscapeRate)} (${skill.webSearchEscapeCount}/${skill.shoppingScenariosCount}) | ${deltaPct(pure.webSearchEscapeRate, skill.webSearchEscapeRate)} |`
+      `| \`web_search\` Escape Rate | ${presentModes.map((m) => `${pct(m.webSearchEscapeRate)} (${m.webSearchEscapeCount}/${m.shoppingScenariosCount})`).join(" | ")} |`
     );
     lines.push(
-      `| False Positive Rate | ${pct(pure.falsePositiveRate)} | ${pct(skill.falsePositiveRate)} | ${deltaPct(pure.falsePositiveRate, skill.falsePositiveRate)} |`
+      `| False Positive Rate | ${presentModes.map((m) => pct(m.falsePositiveRate)).join(" | ")} |`
     );
     lines.push(
-      `| Argument Accuracy | ${pct(pure.argumentAccuracy)} | ${pct(skill.argumentAccuracy)} | ${deltaPct(pure.argumentAccuracy, skill.argumentAccuracy)} |`
+      `| Argument Accuracy | ${presentModes.map((m) => pct(m.argumentAccuracy)).join(" | ")} |`
     );
     lines.push(
-      `| Multi-Step Completion | ${pct(pure.multiStepCompletionRate)} | ${pct(skill.multiStepCompletionRate)} | ${deltaPct(pure.multiStepCompletionRate, skill.multiStepCompletionRate)} |`
+      `| Multi-Step Completion | ${presentModes.map((m) => pct(m.multiStepCompletionRate)).join(" | ")} |`
     );
     lines.push(
-      `| Grounding & Safety | ${pct(pure.groundingAndSafetyRate)} | ${pct(skill.groundingAndSafetyRate)} | ${deltaPct(pure.groundingAndSafetyRate, skill.groundingAndSafetyRate)} |`
+      `| Grounding & Safety | ${presentModes.map((m) => pct(m.groundingAndSafetyRate)).join(" | ")} |`
     );
     lines.push(
-      `| Routing Gaps / Product Gaps | ${pure.routingGapsCount} / ${pure.productGapsCount} | ${skill.routingGapsCount} / ${skill.productGapsCount} | — |`
+      `| Routing Gaps / Product Gaps | ${presentModes.map((m) => `${m.routingGapsCount} / ${m.productGapsCount}`).join(" | ")} |`
     );
     lines.push(
-      `| Estimated Cost (USD) | ${usd(pure.estimatedCostUsd)} | ${usd(skill.estimatedCostUsd)} | ${usd(skill.estimatedCostUsd - pure.estimatedCostUsd)} |`
+      `| Estimated Cost (USD) | ${presentModes.map((m) => usd(m.estimatedCostUsd)).join(" | ")} |`
     );
     lines.push("");
-  } else {
-    const active = pure ?? skill;
-    if (active) {
-      lines.push(`## Summary KPIs (\`${active.mode}\`)`);
-      lines.push("");
-      lines.push("| Metric | Value |");
-      lines.push("|---|---:|");
-      lines.push(...renderModeKpiRows(active));
-      lines.push("");
-    }
+  } else if (presentModes.length === 1) {
+    const active = presentModes[0]!;
+    lines.push(`## Summary KPIs (\`${active.mode}\`)`);
+    lines.push("");
+    lines.push("| Metric | Value |");
+    lines.push("|---|---:|");
+    lines.push(...renderModeKpiRows(active));
+    lines.push("");
   }
 
-  const activeModes: EvalMode[] = (["pure-mcp", "with-skill"] as const).filter(
-    (m) => report.modes[m] !== undefined
-  );
+  const activeModes: EvalMode[] = (
+    ["pure-mcp", "with-skill", "claude-web-harsh"] as const
+  ).filter((m) => report.modes[m] !== undefined);
 
   for (const mode of activeModes) {
     const modeResults = report.results.filter((r) => r.mode === mode);
@@ -262,7 +262,7 @@ export function formatConsoleSummary(report: SuiteReport): string {
   lines.push(
     `=== ShopCart Agentic QA [${report.label}] (${report.model}${report.dryRun ? ", DRY-RUN" : ""}) ===`
   );
-  for (const mode of ["pure-mcp", "with-skill"] as const) {
+  for (const mode of ["pure-mcp", "with-skill", "claude-web-harsh"] as const) {
     const m = report.modes[mode];
     if (!m) continue;
     lines.push(
