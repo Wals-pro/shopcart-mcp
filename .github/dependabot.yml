@@ -9,6 +9,12 @@ updates:
       time: "05:00"
       timezone: "Europe/Berlin"
     open-pull-requests-limit: 5
+    # CI runs Node 22 (engines.node >=22) and Cloud Run runs Node 24;
+    # pin @types/node to 22.x so TypeScript cannot admit Node 24/26-only APIs (closed PR #19).
+    ignore:
+      - dependency-name: "@types/node"
+        update-types:
+          - "version-update:semver-major"
     groups:
       production-minor-patch:
         dependency-type: "production"
