@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
-import type { AddressInfo } from "node:net";
+import net, { type AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import tls from "node:tls";
@@ -422,6 +422,72 @@ describe("SSRF guardrails", () => {
     } finally {
       slowServer.close();
       slowServer.closeAllConnections();
+    }
+  });
+
+  it("unconditionally destroys per-hop pinned Agent so HTTP 205 Reset Content with lingering chunked TE never stalls teardown", async () => {
+    // Guard against reintroducing conditional agent.close() in safeFetch's finally block
+    const ssrfSource = fs.readFileSync(path.join(REPO_ROOT, "src", "security", "ssrf.ts"), "utf8");
+    expect(ssrfSource).not.toMatch(/\bagent\.close\s*\(/);
+    expect(ssrfSource).toMatch(/await\s+agent\.destroy\(\)\.catch\(/);
+
+    const openSockets = new Set<net.Socket>();
+    const rawServer = net.createServer((socket) => {
+      openSockets.add(socket);
+      socket.on("close", () => openSockets.delete(socket));
+      socket.once("data", () => {
+        // Send HTTP 205 Reset Content with Transfer-Encoding: chunked and NO chunk terminator,
+        // keeping the TCP socket open (fetch yields res.body === null while llhttp holds the socket).
+        socket.write("HTTP/1.1 205 Reset Content\r\nTransfer-Encoding: chunked\r\n\r\n");
+      });
+    });
+
+    await new Promise<void>((resolve) => rawServer.listen(0, "127.0.0.1", resolve));
+    const { port } = rawServer.address() as AddressInfo;
+
+    try {
+      // 1. Direct real-agent check: createPinnedAgent + undiciFetch + unconditional agent.destroy()
+      const directAgent = createPinnedAgent({ address: "127.0.0.1", family: 4 });
+      const directStart = Date.now();
+      const directRes = await undiciFetch(`http://pinned-205.invalid:${port}/reset`, {
+        redirect: "manual",
+        dispatcher: directAgent
+      });
+      expect(directRes.status).toBe(205);
+      expect(directRes.body).toBeNull();
+      await directAgent.destroy();
+      expect(Date.now() - directStart).toBeLessThan(1000);
+
+      // 2. End-to-end safeFetch() check against the same raw 205 chunked socket
+      const lookupFn = async () => [{ address: "23.227.38.65", family: 4 as const }];
+      const hopAgents: Array<ReturnType<typeof createPinnedAgent>> = [];
+      const start = Date.now();
+      const res = await safeFetch("https://public-shop.example/reset", {
+        lookupFn,
+        timeoutMs: 3000,
+        concurrencyKey: "test:undici8-205-teardown",
+        fetchImpl: async (_url, init) => {
+          const hopAgent = createPinnedAgent({ address: "127.0.0.1", family: 4 });
+          hopAgents.push(hopAgent);
+          return undiciFetch(`http://pinned-205.invalid:${port}/reset`, {
+            method: init.method,
+            headers: init.headers,
+            redirect: "manual",
+            signal: init.signal,
+            dispatcher: hopAgent
+          });
+        }
+      });
+      await Promise.all(hopAgents.map((a) => a.destroy().catch(() => undefined)));
+      const elapsedMs = Date.now() - start;
+
+      expect(res.status).toBe(205);
+      expect(res.bodyText).toBe("");
+      expect(elapsedMs).toBeLessThan(1000);
+      expect(getInFlightSlotCount("test:undici8-205-teardown")).toBe(0);
+    } finally {
+      for (const s of openSockets) s.destroy();
+      await new Promise<void>((resolve) => rawServer.close(() => resolve()));
     }
   });
 });

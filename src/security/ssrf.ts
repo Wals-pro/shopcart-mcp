@@ -635,7 +635,6 @@ export async function safeFetch(
       // Prefer IPv4 when available for better compatibility on Cloud Run / Shopify
       const pinned = addresses.find((a) => a.family === 4) ?? addresses[0]!;
       const agent = options.fetchImpl ? undefined : createPinnedAgent(pinned);
-      let forceDestroyAgent = false;
       let responseBody: unknown = null;
 
       try {
@@ -662,9 +661,6 @@ export async function safeFetch(
             res.status === 307 ||
             res.status === 308)
         ) {
-          // Cancel any unconsumed redirect body and destroy the per-hop Agent so
-          // a tarpit storefront cannot stall agent.close() past hopTimeoutSignal.
-          forceDestroyAgent = true;
           await cancelResponseBody(res.body);
           responseBody = null;
           if (hop >= maxRedirects) {
@@ -700,7 +696,6 @@ export async function safeFetch(
           );
           bodyBuffer = buffer;
           if (truncated) {
-            forceDestroyAgent = true;
             await cancelResponseBody(res.body);
           }
           responseBody = null;
@@ -731,7 +726,6 @@ export async function safeFetch(
           bodyText: bodyBuffer.toString("utf8")
         };
       } catch (err) {
-        forceDestroyAgent = true;
         await cancelResponseBody(responseBody);
         responseBody = null;
         if (err instanceof SsrfError) throw err;
@@ -747,9 +741,10 @@ export async function safeFetch(
         throw err;
       } finally {
         if (agent) {
-          const teardown =
-            forceDestroyAgent || effectiveSignal.aborted ? agent.destroy() : agent.close();
-          await teardown.catch(() => undefined);
+          // Each hop allocates an ephemeral, single-use pinned Agent; always destroy it
+          // immediately so lingering null-body responses (e.g. HTTP 205 with chunked TE)
+          // can never stall teardown waiting on undici's bodyTimeout.
+          await agent.destroy().catch(() => undefined);
         }
       }
     }
