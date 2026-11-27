@@ -47,7 +47,7 @@ What the shopper gets differs by platform, and ShopCart MCP says so honestly in 
 
 ### Tools & Native MCP Prompts
 
-All 12 core tools are strictly read-only (`readOnlyHint: true, destructiveHint: false, idempotentHint: true`), complemented by 5 native MCP Prompts (`compare-prices`, `find-secondhand`, `hunt-deals`, `shop-and-build-cart`, `discover-shopping-stores`) surfaced via `prompts/list`:
+11 core tools are strictly read-only (`readOnlyHint: true, destructiveHint: false, idempotentHint: true`), plus `create_cart_link` (`readOnlyHint: false, destructiveHint: false, idempotentHint: false` because on UCP stores it may initiate a temporary checkout handoff session via `POST /checkout-sessions`; on Shopify, WooCommerce, BigCommerce, Amazon, Shopware 6, Magento 2, and JSON-LD it generates pure browser cart/product permalinks — and NEVER places orders or processes payments), complemented by 5 native MCP Prompts (`compare-prices`, `find-secondhand`, `hunt-deals`, `shop-and-build-cart`, `discover-shopping-stores`) surfaced via `prompts/list`:
 
 0. **`discover_stores`** — Instant in-memory search across ShopCart's curated, live-verified global store directory (12 categories, DACH + US/UK/EU, multi-platform) whenever the user has not named a specific store domain.
 1. **`inspect_store`** — Detects the platform (Shopify, WooCommerce, BigCommerce, Amazon, Secondhand, Shopware 6, Magento 2, UCP, or Universal JSON-LD), resolves currency/country, WAF restrictions, and catalog capabilities including Shopify Storefront MCP and UCP endpoints.

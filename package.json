@@ -40,6 +40,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "build:mcpb": "node scripts/build-mcpb.mjs",
+    "build:mcpb:check": "node scripts/build-mcpb.mjs --check",
     "dev:stdio": "tsx src/cli.ts",
     "dev:server": "tsx src/server.ts",
     "prepublishOnly": "npm run build",

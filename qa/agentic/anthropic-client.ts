@@ -12,18 +12,28 @@ export const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 export const ANTHROPIC_VERSION = "2023-06-01";
 
 const OP_REF_RE = /^op:\/\/[A-Za-z0-9._\-\/ ]{3,200}$/;
-const OP_ACCOUNT_RE = /^[A-Za-z0-9._-]{2,120}$/;
+const OP_ACCOUNT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{1,119}$/;
 const OP_READ_TIMEOUT_MS = 90_000;
 const ANTHROPIC_KEY_RE = /sk-ant-[A-Za-z0-9_-]{8,}/g;
+const OP_URI_IN_MSG_RE = /op:\/\/[^\s'"`]+(?:\s+[^\s'"`]+)*/g;
 
 /**
- * Redacts any Anthropic API key pattern or explicit secret from diagnostic strings.
+ * Redacts any Anthropic API key pattern, `op://` secret reference, or explicit secret from diagnostic strings.
  */
 export function redactSecrets(text: string, secret?: string): string {
   let out = text.replace(ANTHROPIC_KEY_RE, "[REDACTED_API_KEY]");
   if (secret && secret.length >= 8) {
     out = out.split(secret).join("[REDACTED_API_KEY]");
   }
+  return out;
+}
+
+function redactOpReferences(text: string, rawRef?: string): string {
+  let out = text;
+  if (rawRef) {
+    out = out.split(rawRef).join("[REDACTED_OP_REF]");
+  }
+  out = out.replace(OP_URI_IN_MSG_RE, "[REDACTED_OP_REF]");
   return out;
 }
 
@@ -41,10 +51,23 @@ export function validateOpAccount(account: string): string {
   const trimmed = account.trim();
   if (!OP_ACCOUNT_RE.test(trimmed) || trimmed.includes("..")) {
     throw new Error(
-      "Invalid 1Password account: must contain only letters, digits, dots, hyphens, or underscores."
+      "Invalid 1Password account: must start with an alphanumeric character and contain only letters, digits, dots, hyphens, or underscores."
     );
   }
   return trimmed;
+}
+
+export function validateAnthropicApiUrl(rawUrl: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error("Invalid Anthropic API URL.");
+  }
+  if (parsed.protocol !== "https:") {
+    throw new Error("Anthropic API URL must use the 'https:' protocol.");
+  }
+  return parsed.toString();
 }
 
 /**
@@ -75,7 +98,9 @@ export async function resolveAnthropicApiKey(opts: {
     const reader =
       opts.opReader ??
       (async (ref: string, account?: string) => {
-        const args = account ? ["read", "--account", account, ref] : ["read", ref];
+        const args = account
+          ? ["read", `--account=${account}`, "--", ref]
+          : ["read", "--", ref];
         const { stdout } = await execFileAsync("op", args, {
           timeout: OP_READ_TIMEOUT_MS,
           maxBuffer: 16 * 1024
@@ -87,7 +112,10 @@ export async function resolveAnthropicApiKey(opts: {
     try {
       value = (await reader(safeRef, safeAccount)).trim();
     } catch (err) {
-      const msg = err instanceof Error ? redactSecrets(err.message) : "op read failed";
+      const msg =
+        err instanceof Error
+          ? redactSecrets(redactOpReferences(err.message, safeRef))
+          : "op read failed";
       throw new Error(`Failed to read Anthropic API key from 1Password reference: ${msg}`);
     }
 
@@ -142,7 +170,7 @@ export async function callAnthropicMessages(
   apiKey: string,
   opts: AnthropicClientOptions = {}
 ): Promise<AnthropicMessagesResponse> {
-  const apiUrl = opts.apiUrl ?? ANTHROPIC_API_URL;
+  const apiUrl = validateAnthropicApiUrl(opts.apiUrl ?? ANTHROPIC_API_URL);
   const maxRetries = opts.maxRetries ?? 5;
   const baseDelayMs = opts.baseDelayMs ?? 800;
   const timeoutMs = opts.timeoutMs ?? 60_000;
@@ -164,6 +192,7 @@ export async function callAnthropicMessages(
           "anthropic-version": ANTHROPIC_VERSION
         },
         body: JSON.stringify(requestBody),
+        redirect: "error",
         signal: controller.signal
       });
 
@@ -175,7 +204,7 @@ export async function callAnthropicMessages(
       }
 
       const rawErrText = await response.text().catch(() => "");
-      const safeErrText = redactSecrets(rawErrText.slice(0, 500), apiKey);
+      const safeErrText = redactSecrets(rawErrText, apiKey).slice(0, 500);
 
       if (isRetryableStatus(response.status) && attempt < maxRetries) {
         const retryAfter = parseRetryAfterMs(response.headers.get("retry-after"));

@@ -834,7 +834,7 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
     {
       title: "Create Store Cart Link",
       description:
-        "Build a verified, strictly read-only browser cart link (or direct product link) from exact variant_ids returned by get_product so the user can review and pay in their own browser — never places orders or mutates server state. Automatically applies verified storefront promo codes on Shopify when available.",
+        "Build a verified browser cart link (Shopify, WooCommerce, BigCommerce, Amazon) or direct product link (Shopware 6, Magento 2, JSON-LD) from exact variant_ids returned by get_product so the user can review and pay in their own browser. On UCP stores, may initiate a temporary checkout handoff session, but NEVER places orders or processes payments. Automatically applies verified storefront promo codes on Shopify when available.",
       inputSchema: {
         store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL"),
         items: z
@@ -881,7 +881,10 @@ export function registerShoppingTools(server: McpServer, ctx: ToolRuntimeContext
             "Recommended: product handles/slugs/paths, IDs, SKUs, ASINs, or full product URLs whose variants should be verified live for stock and price"
           )
       },
-      annotations: makeAnnotations("Create Store Cart Link")
+      annotations: makeAnnotations("Create Store Cart Link", {
+        readOnlyHint: false,
+        idempotentHint: false
+      })
     },
     async ({ store_url, items, mode, discount_code, auto_apply_discount, verify_handles }) =>
       runGuardedTool(ctx, "create_cart_link", async () => {

@@ -7,6 +7,7 @@ import {
   callAnthropicMessages,
   redactSecrets,
   resolveAnthropicApiKey,
+  validateAnthropicApiUrl,
   validateOpAccount,
   validateOpReference
 } from "../qa/agentic/anthropic-client.js";
@@ -154,6 +155,16 @@ describe("Fixture MCP Server over InMemoryTransport", () => {
       });
       expect(visualRes.isError).toBe(false);
       expect(visualRes.text).toContain("38.75");
+      // Verify native MCP prompts sanitize free-text inputs cleanly
+      const promptRes = await session.client.getPrompt({
+        name: "compare-prices",
+        arguments: { product: "Sony\u0000 <b>XM5</b>\u200B", country: "AT" }
+      });
+      const promptText = (promptRes.messages[0]?.content as { text: string }).text;
+      expect(promptText).not.toContain("\u0000");
+      expect(promptText).not.toContain("\u200B");
+      expect(promptText).toContain("Sony");
+      expect(promptText).toContain("AT");
     } finally {
       await session.close();
     }
@@ -412,6 +423,12 @@ describe("Secret Hygiene & Anthropic Client (Zero Network)", () => {
 
     expect(validateOpAccount("walspro.1password.com")).toBe("walspro.1password.com");
     expect(() => validateOpAccount("bad;account")).toThrow();
+    expect(() => validateOpAccount("-leading-dash")).toThrow();
+
+    expect(validateAnthropicApiUrl("https://api.anthropic.com/v1/messages")).toBe(
+      "https://api.anthropic.com/v1/messages"
+    );
+    expect(() => validateAnthropicApiUrl("http://api.anthropic.com/v1/messages")).toThrow();
 
     const fromOp = await resolveAnthropicApiKey({
       env: {},
@@ -423,6 +440,16 @@ describe("Secret Hygiene & Anthropic Client (Zero Network)", () => {
       }
     });
     expect(fromOp).toBe(fakeKey);
+
+    await expect(
+      resolveAnthropicApiKey({
+        env: {},
+        opRef: "op://Private/Anthropic/api-key",
+        opReader: async () => {
+          throw new Error("Command failed: op read op://Private/Anthropic/api-key");
+        }
+      })
+    ).rejects.toThrow("[REDACTED_OP_REF]");
 
     await expect(resolveAnthropicApiKey({ env: {} })).rejects.toThrow("Missing Anthropic API key");
   });

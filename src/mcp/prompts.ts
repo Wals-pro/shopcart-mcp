@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { sanitizeText } from "../security/sanitize.js";
 
 /**
  * Native MCP Prompts (`prompts/list`) surfaced directly in Claude.ai, Claude Desktop,
@@ -21,17 +22,20 @@ export function registerShoppingPrompts(server: McpServer): void {
           .describe("Target country (DE, AT, CH, UK, FR, US)")
       }
     },
-    ({ product, country }) => ({
-      messages: [
-        {
-          role: "user" as const,
-          content: {
-            type: "text" as const,
-            text: `Compare prices for "${product}"${country ? ` in ${country}` : ""} using ShopCart's compare_prices tool. Present every verified comparison link verbatim (do not strip query parameters) and summarize the best next steps without placing any order.`
+    ({ product, country }) => {
+      const safeProduct = sanitizeText(product, 200);
+      return {
+        messages: [
+          {
+            role: "user" as const,
+            content: {
+              type: "text" as const,
+              text: `Compare prices for "${safeProduct}"${country ? ` in ${country}` : ""} using ShopCart's compare_prices tool. Present every verified comparison link verbatim (do not strip query parameters) and summarize the best next steps without placing any order.`
+            }
           }
-        }
-      ]
-    })
+        ]
+      };
+    }
   );
 
   server.registerPrompt(
@@ -53,17 +57,21 @@ export function registerShoppingPrompts(server: McpServer): void {
           .describe("Optional postal code (e.g. 5-digit German PLZ for local Kleinanzeigen radius)")
       }
     },
-    ({ product, region, postal_code }) => ({
-      messages: [
-        {
-          role: "user" as const,
-          content: {
-            type: "text" as const,
-            text: `Find secondhand or refurbished options for "${product}"${region ? ` in region ${region}` : ""}${postal_code ? ` near postal code ${postal_code}` : ""} using search_secondhand_marketplaces. Copy all returned marketplace links verbatim.`
+    ({ product, region, postal_code }) => {
+      const safeProduct = sanitizeText(product, 200);
+      const safePostal = postal_code ? sanitizeText(postal_code, 12) : "";
+      return {
+        messages: [
+          {
+            role: "user" as const,
+            content: {
+              type: "text" as const,
+              text: `Find secondhand or refurbished options for "${safeProduct}"${region ? ` in region ${region}` : ""}${safePostal ? ` near postal code ${safePostal}` : ""} using search_secondhand_marketplaces. Copy all returned marketplace links verbatim.`
+            }
           }
-        }
-      ]
-    })
+        ]
+      };
+    }
   );
 
   server.registerPrompt(
@@ -80,17 +88,20 @@ export function registerShoppingPrompts(server: McpServer): void {
           .describe("Target region (default DE)")
       }
     },
-    ({ topic, region }) => ({
-      messages: [
-        {
-          role: "user" as const,
-          content: {
-            type: "text" as const,
-            text: `Find current hot deals, vouchers, and active promotions for "${topic}"${region ? ` in ${region}` : ""} using find_hot_deals. Copy all returned deal links verbatim and never invent coupon codes.`
+    ({ topic, region }) => {
+      const safeTopic = sanitizeText(topic, 200);
+      return {
+        messages: [
+          {
+            role: "user" as const,
+            content: {
+              type: "text" as const,
+              text: `Find current hot deals, vouchers, and active promotions for "${safeTopic}"${region ? ` in ${region}` : ""} using find_hot_deals. Copy all returned deal links verbatim and never invent coupon codes.`
+            }
           }
-        }
-      ]
-    })
+        ]
+      };
+    }
   );
 
   server.registerPrompt(
@@ -98,23 +109,27 @@ export function registerShoppingPrompts(server: McpServer): void {
     {
       title: "Search Store & Build Verified Cart Link",
       description:
-        "Search a specific online store, verify live variants, sizes, prices, and stock, check discounts, and build a read-only browser cart link.",
+        "Search a specific online store, verify live variants, sizes, prices, and stock, check discounts, and build a verified browser cart link (never places orders or processes payments).",
       argsSchema: {
         store_url: z.string().min(3).max(256).describe("Store domain or HTTPS URL (e.g. allbirds.com)"),
         item: z.string().min(1).max(200).describe("Product, size/color, and quantity you want")
       }
     },
-    ({ store_url, item }) => ({
-      messages: [
-        {
-          role: "user" as const,
-          content: {
-            type: "text" as const,
-            text: `Search "${store_url}" for "${item}" using search_products, verify exact variant IDs, live price, and stock via get_product, and generate a verified read-only cart link via create_cart_link with verify_handles. Remind me to review and complete checkout in my browser.`
+    ({ store_url, item }) => {
+      const safeStore = sanitizeText(store_url, 256);
+      const safeItem = sanitizeText(item, 200);
+      return {
+        messages: [
+          {
+            role: "user" as const,
+            content: {
+              type: "text" as const,
+              text: `Search "${safeStore}" for "${safeItem}" using search_products, verify exact variant IDs, live price, and stock via get_product, and generate a verified browser cart link via create_cart_link with verify_handles. Remind me to review and complete checkout in my browser.`
+            }
           }
-        }
-      ]
-    })
+        ]
+      };
+    }
   );
 
   server.registerPrompt(
@@ -132,16 +147,20 @@ export function registerShoppingPrompts(server: McpServer): void {
           .describe("Optional country/region filter (DE, AT, CH, DACH, EU, UK, US)")
       }
     },
-    ({ query, country }) => ({
-      messages: [
-        {
-          role: "user" as const,
-          content: {
-            type: "text" as const,
-            text: `Find verified online stores for "${query}"${country ? ` in ${country}` : ""} using discover_stores and summarize the best matching shops with their URLs.`
+    ({ query, country }) => {
+      const safeQuery = sanitizeText(query, 200);
+      const safeCountry = country ? sanitizeText(country, 32) : "";
+      return {
+        messages: [
+          {
+            role: "user" as const,
+            content: {
+              type: "text" as const,
+              text: `Find verified online stores for "${safeQuery}"${safeCountry ? ` in ${safeCountry}` : ""} using discover_stores and summarize the best matching shops with their URLs.`
+            }
           }
-        }
-      ]
-    })
+        ]
+      };
+    }
   );
 }

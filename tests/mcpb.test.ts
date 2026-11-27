@@ -328,4 +328,23 @@ describe("Claude Desktop 1-click Extension (.mcpb)", () => {
     expect(body.length).toBe(diskBytes.length);
     expect(body.equals(diskBytes)).toBe(true);
   });
+
+  it("rebuilds reproducibly from source with exact SHA-256 byte identity against public/downloads/shopcart-mcp.mcpb", async () => {
+    const mod = (await import("../scripts/build-mcpb.mjs")) as {
+      verifyMcpb: (targetPath?: string) => Promise<{
+        ok: boolean;
+        archiveExactMatch: boolean;
+        expectedSha256: string | null;
+        actualSha256: string | null;
+        mismatchedEntries: string[];
+        reason: string | null;
+      }>;
+    };
+    const res = await mod.verifyMcpb(MCPB_PATH);
+    expect(res.reason).toBeNull();
+    expect(res.mismatchedEntries).toEqual([]);
+    expect(res.archiveExactMatch).toBe(true);
+    expect(res.ok).toBe(true);
+    expect(res.actualSha256).toBe(res.expectedSha256);
+  });
 });

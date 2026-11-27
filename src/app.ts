@@ -283,11 +283,13 @@ export function createApp(deps: CreateAppDeps): Express {
 
   app.get("/.well-known/security.txt", (_req, res) => {
     res.setHeader("Cache-Control", "public, max-age=3600");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.status(200).type("text/plain; charset=utf-8").send(renderSecurityTxt(config));
   });
 
   app.get("/.well-known/mcp.json", (_req, res) => {
     res.setHeader("Cache-Control", "public, max-age=300");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.status(200).json({
       name: "io.github.Wals-pro/shopcart-mcp",
       title: "ShopCart MCP",

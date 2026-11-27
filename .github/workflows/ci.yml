@@ -47,3 +47,6 @@ jobs:
 
       - name: Build
         run: pnpm run build
+
+      - name: Verify MCPB archive integrity
+        run: pnpm run build:mcpb:check

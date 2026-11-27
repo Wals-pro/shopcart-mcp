@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,11 +27,12 @@ const FIXED_DOS_DATE = ((2026 - 1980) << 9) | (1 << 5) | 1;
  * @returns {Buffer}
  */
 export function createZipBuffer(entries) {
+  const sortedEntries = [...entries].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const localParts = [];
   const centralParts = [];
   let offset = 0;
 
-  for (const entry of entries) {
+  for (const entry of sortedEntries) {
     const nameBuf = Buffer.from(entry.name, "utf8");
     const rawData = entry.data;
     const crc = zlib.crc32(rawData) >>> 0;
@@ -214,7 +216,7 @@ export function createMcpbManifest(version) {
       {
         name: "create_cart_link",
         description:
-          "Build a verified, strictly read-only browser cart link (or direct product link) from exact variant IDs so the user can review and pay in their own browser — never places orders."
+          "Build a verified browser cart link (Shopify, WooCommerce, BigCommerce, Amazon) or direct product link (Shopware 6, Magento 2, JSON-LD) from exact variant IDs so the user can review and pay in their own browser. On UCP stores, may initiate a temporary checkout handoff session, but never places orders or processes payments."
       },
       {
         name: "compare_prices",
@@ -248,12 +250,77 @@ export function createMcpbManifest(version) {
   };
 }
 
-export async function buildMcpb(outputPath = OUTPUT_PATH) {
+function sha256Hex(buf) {
+  return crypto.createHash("sha256").update(buf).digest("hex");
+}
+
+/**
+ * Pure-Node ZIP reader used by `--check` to inspect entry-level SHA-256 equality
+ * alongside exact whole-archive byte equivalence.
+ *
+ * @param {Buffer} zipBuf
+ * @returns {Map<string, Buffer>}
+ */
+export function extractZipEntries(zipBuf) {
+  let eocdOffset = -1;
+  for (let i = zipBuf.length - 22; i >= Math.max(0, zipBuf.length - 65557); i -= 1) {
+    if (zipBuf.readUInt32LE(i) === 0x06054b50) {
+      eocdOffset = i;
+      break;
+    }
+  }
+  if (eocdOffset === -1) {
+    throw new Error("Invalid ZIP archive: EOCD record not found");
+  }
+
+  const totalEntries = zipBuf.readUInt16LE(eocdOffset + 10);
+  const centralDirOffset = zipBuf.readUInt32LE(eocdOffset + 16);
+  const entries = new Map();
+  let cursor = centralDirOffset;
+
+  for (let i = 0; i < totalEntries; i += 1) {
+    if (zipBuf.readUInt32LE(cursor) !== 0x02014b50) {
+      throw new Error("Invalid ZIP central directory header");
+    }
+    const method = zipBuf.readUInt16LE(cursor + 10);
+    const compressedSize = zipBuf.readUInt32LE(cursor + 20);
+    const nameLen = zipBuf.readUInt16LE(cursor + 28);
+    const extraLen = zipBuf.readUInt16LE(cursor + 30);
+    const commentLen = zipBuf.readUInt16LE(cursor + 32);
+    const localHeaderOffset = zipBuf.readUInt32LE(cursor + 42);
+
+    const name = zipBuf.subarray(cursor + 46, cursor + 46 + nameLen).toString("utf8");
+    cursor += 46 + nameLen + extraLen + commentLen;
+
+    const localNameLen = zipBuf.readUInt16LE(localHeaderOffset + 26);
+    const localExtraLen = zipBuf.readUInt16LE(localHeaderOffset + 28);
+    const dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
+    const compressedData = zipBuf.subarray(dataStart, dataStart + compressedSize);
+    const data =
+      method === 0
+        ? Buffer.from(compressedData)
+        : method === 8
+          ? zlib.inflateRawSync(compressedData)
+          : (() => {
+              throw new Error(`Unsupported ZIP compression method: ${method}`);
+            })();
+
+    entries.set(name, data);
+  }
+
+  return entries;
+}
+
+/**
+ * Builds the deterministic `.mcpb` archive purely in memory (without touching disk).
+ */
+export async function buildMcpbBuffer() {
   const pkg = JSON.parse(fs.readFileSync(PACKAGE_JSON_PATH, "utf8"));
   const version = typeof pkg.version === "string" && pkg.version ? pkg.version : "0.1.0";
 
   // Bundle src/cli.ts into a single self-contained ESM file with CJS require shim for undici
   const result = await esbuild.build({
+    absWorkingDir: ROOT_DIR,
     entryPoints: [ENTRY_POINT],
     bundle: true,
     platform: "node",
@@ -289,34 +356,128 @@ export async function buildMcpb(outputPath = OUTPUT_PATH) {
   const iconBuf = fs.readFileSync(ICON_PATH);
   const licenseBuf = fs.readFileSync(LICENSE_PATH);
 
-  const zipBuf = createZipBuffer([
-    { name: "manifest.json", data: manifestBuf, mode: 0o100644 },
-    { name: "icon.png", data: iconBuf, mode: 0o100644 },
+  const rawEntries = [
     { name: "LICENSE", data: licenseBuf, mode: 0o100644 },
+    { name: "icon.png", data: iconBuf, mode: 0o100644 },
+    { name: "manifest.json", data: manifestBuf, mode: 0o100644 },
     { name: "server/index.mjs", data: serverBundle, mode: 0o100755 }
-  ]);
+  ];
 
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  fs.writeFileSync(outputPath, zipBuf);
-
+  const zipBuf = createZipBuffer(rawEntries);
   return {
-    outputPath,
+    zipBuf,
+    archiveSha256: sha256Hex(zipBuf),
     archiveBytes: zipBuf.length,
     bundleBytes: serverBundle.length,
+    entries: new Map(rawEntries.map((e) => [e.name, e.data])),
     version
   };
 }
 
+export async function buildMcpb(outputPath = OUTPUT_PATH) {
+  const built = await buildMcpbBuffer();
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, built.zipBuf);
+
+  return {
+    outputPath,
+    archiveBytes: built.archiveBytes,
+    archiveSha256: built.archiveSha256,
+    bundleBytes: built.bundleBytes,
+    version: built.version
+  };
+}
+
+/**
+ * Rebuilds the `.mcpb` archive in memory from source and verifies byte-for-byte
+ * SHA-256 identity (and per-entry SHA-256 identity) against the committed archive on disk.
+ */
+export async function verifyMcpb(targetPath = OUTPUT_PATH) {
+  if (!fs.existsSync(targetPath)) {
+    return {
+      ok: false,
+      reason: `Archive not found at ${path.relative(ROOT_DIR, targetPath)}`,
+      expectedSha256: null,
+      actualSha256: null,
+      mismatchedEntries: []
+    };
+  }
+
+  const built = await buildMcpbBuffer();
+  const diskBuf = fs.readFileSync(targetPath);
+  const actualSha256 = sha256Hex(diskBuf);
+
+  const diskEntries = extractZipEntries(diskBuf);
+  const expectedNames = Array.from(built.entries.keys()).sort();
+  const actualNames = Array.from(diskEntries.keys()).sort();
+  const mismatchedEntries = [];
+
+  if (expectedNames.join(",") !== actualNames.join(",")) {
+    mismatchedEntries.push(
+      `entry-list mismatch (expected [${expectedNames.join(", ")}], actual [${actualNames.join(", ")}])`
+    );
+  } else {
+    for (const name of expectedNames) {
+      const expBuf = built.entries.get(name);
+      const actBuf = diskEntries.get(name);
+      if (!expBuf || !actBuf || !expBuf.equals(actBuf)) {
+        mismatchedEntries.push(
+          `${name} (expected sha256=${sha256Hex(expBuf ?? Buffer.alloc(0)).slice(0, 12)}, actual sha256=${sha256Hex(actBuf ?? Buffer.alloc(0)).slice(0, 12)})`
+        );
+      }
+    }
+  }
+
+  const archiveExactMatch = built.zipBuf.equals(diskBuf);
+  const ok = archiveExactMatch && mismatchedEntries.length === 0;
+
+  return {
+    ok,
+    archiveExactMatch,
+    expectedSha256: built.archiveSha256,
+    actualSha256,
+    archiveBytes: built.archiveBytes,
+    diskBytes: diskBuf.length,
+    mismatchedEntries,
+    reason: ok
+      ? null
+      : mismatchedEntries.length > 0
+        ? `Entry content drift detected: ${mismatchedEntries.join("; ")}`
+        : `Archive SHA-256 mismatch (expected ${built.archiveSha256}, actual ${actualSha256})`
+  };
+}
+
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
-  buildMcpb()
-    .then(({ outputPath, archiveBytes, bundleBytes, version }) => {
-      const rel = path.relative(ROOT_DIR, outputPath);
-      console.log(
-        `Built ${rel} (v${version}) — archive: ${(archiveBytes / 1024).toFixed(1)} KB (${archiveBytes} B), server/index.mjs: ${(bundleBytes / 1024).toFixed(1)} KB`
-      );
-    })
-    .catch((err) => {
-      console.error("[build-mcpb] Failed:", err);
-      process.exit(1);
-    });
+  const isCheck = process.argv.includes("--check");
+  if (isCheck) {
+    verifyMcpb()
+      .then((res) => {
+        const rel = path.relative(ROOT_DIR, OUTPUT_PATH);
+        if (!res.ok) {
+          console.error(
+            `[build-mcpb --check] FAILED for ${rel}: ${res.reason}. Run 'pnpm run build:mcpb' to regenerate.`
+          );
+          process.exit(1);
+        }
+        console.log(
+          `[build-mcpb --check] OK ${rel} — exact SHA-256 match (${res.actualSha256}, ${res.archiveBytes} B)`
+        );
+      })
+      .catch((err) => {
+        console.error("[build-mcpb --check] Failed:", err);
+        process.exit(1);
+      });
+  } else {
+    buildMcpb()
+      .then(({ outputPath, archiveBytes, archiveSha256, bundleBytes, version }) => {
+        const rel = path.relative(ROOT_DIR, outputPath);
+        console.log(
+          `Built ${rel} (v${version}) — archive: ${(archiveBytes / 1024).toFixed(1)} KB (${archiveBytes} B, sha256=${archiveSha256.slice(0, 16)}…), server/index.mjs: ${(bundleBytes / 1024).toFixed(1)} KB`
+        );
+      })
+      .catch((err) => {
+        console.error("[build-mcpb] Failed:", err);
+        process.exit(1);
+      });
+  }
 }
