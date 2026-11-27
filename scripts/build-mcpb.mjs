@@ -130,6 +130,7 @@ export function createMcpbManifest(version) {
       "- `compare_prices` — Compare product prices across merchants by keyword or EAN/GTIN barcode with optional live partner offers and 1-click regional comparison portal links.",
       "- `find_hot_deals` — Discover active partner promotions and vouchers alongside 1-click regional deal community search links.",
       "- `match_visual_product` — Match a product seen in a user-uploaded photo across up to 5 public online stores in parallel using structured visual attributes and deterministic scoring.",
+      "- `search_secondhand_marketplaces` — Generate verified, pre-filtered search deep-links across up to 16 second-hand, classifieds, vintage, and refurbished marketplaces in a single call with zero scraping.",
       "",
       "Includes built-in SSRF protection and prompt-injection sanitization. Independent open-source project by wals.pro, not affiliated with or endorsed by Shopify, WooCommerce (Automattic), Amazon, BigCommerce, Shopware, or Adobe (Magento)."
     ].join("\n"),
@@ -229,6 +230,11 @@ export function createMcpbManifest(version) {
         name: "match_visual_product",
         description:
           "Match a product seen in a user-uploaded photo across up to 5 public online stores in parallel (plus configured partner feeds and exact EAN lookup) using structured visual attributes extracted by your vision model."
+      },
+      {
+        name: "search_secondhand_marketplaces",
+        description:
+          "Generate verified, pre-filtered search deep-links across up to 16 major second-hand, classifieds, vintage, and refurbished marketplaces in a single tool call with zero scraping."
       }
     ],
     tools_generated: false,
@@ -236,7 +242,7 @@ export function createMcpbManifest(version) {
       claude_desktop: ">=0.10.0",
       platforms: ["darwin", "win32", "linux"],
       runtimes: {
-        node: ">=20.0.0"
+        node: ">=22.19.0"
       }
     }
   };
@@ -251,7 +257,7 @@ export async function buildMcpb(outputPath = OUTPUT_PATH) {
     entryPoints: [ENTRY_POINT],
     bundle: true,
     platform: "node",
-    target: "node20",
+    target: "node22",
     format: "esm",
     minify: true,
     sourcemap: false,
