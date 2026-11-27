@@ -2516,6 +2516,10 @@ export function createGuidesRouter(config: AppConfig): Router {
     sendGuideHtml(res, renderGuidesOverviewPage(config, lang), guidesCsp);
   });
 
+  router.get("/en/guides", (_req: Request, res: Response) => {
+    sendGuideHtml(res, renderGuidesOverviewPage(config, "en"), guidesCsp);
+  });
+
   for (const guide of GUIDE_DEFINITIONS) {
     router.get(guide.path, (_req: Request, res: Response) => {
       sendGuideHtml(res, renderGuidePage(config, guide), guidesCsp);

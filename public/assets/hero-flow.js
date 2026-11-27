@@ -1,9 +1,8 @@
 /* ShopCart landing page behaviour (strict CSP: script-src 'self', no inline scripts).
  * 1. Hero silk wave (Canvas 2D) with drifting shopping moments
- * 2. "Let my AI set this up" launcher: wish chips, AI deeplinks, 1-click copy
- * 3. Copy buttons
- * 4. Accessible tabs (developer section)
- * 5. Demo showcase: consumer live-shopping simulation + video aspect toggle
+ * 2. Clipboard helper + accessible copy buttons
+ * 3. Accessible WAI-ARIA tabs (hero/demo client switcher + developer section)
+ * 4. Demo showcase: consumer live-shopping simulation + video aspect toggle
  */
 (() => {
   "use strict";
@@ -525,13 +524,25 @@
     return copyTextSync(text);
   };
 
+  const announceCopy = (button, label) => {
+    const scope = button.closest("[data-connect-switcher]") || document;
+    const live = scope.querySelector("[data-copy-live]");
+    if (!(live instanceof HTMLElement)) return;
+    live.textContent = "";
+    window.requestAnimationFrame(() => {
+      live.textContent = label;
+    });
+  };
+
   const flashCopied = (button) => {
     const labelEl = button.querySelector("span") || button;
     if (!button.dataset.originalLabel) {
       button.dataset.originalLabel = labelEl.textContent || "";
     }
-    labelEl.textContent = button.dataset.copiedLabel || "Copied ✓";
+    const copiedText = button.dataset.copiedLabel || "Copied ✓";
+    labelEl.textContent = copiedText;
     button.setAttribute("data-copied", "true");
+    announceCopy(button, copiedText);
     window.clearTimeout(Number(button.dataset.copyTimer || 0));
     button.dataset.copyTimer = String(
       window.setTimeout(() => {
@@ -563,89 +574,7 @@
   };
 
   // =========================================================================
-  // 3. Launcher: wish chips make the start prompt concrete, deeplinks follow
-  // =========================================================================
-  const initLaunchers = () => {
-    document.querySelectorAll("[data-launcher]").forEach((root) => {
-      if (!(root instanceof HTMLElement)) return;
-      const head = root.dataset.promptHead || "";
-      const defaultTail = root.dataset.defaultTail || "";
-      const chips = Array.from(root.querySelectorAll("[data-wish-tail]"));
-      const links = Array.from(root.querySelectorAll("[data-ai-link]"));
-      const preview = root.querySelector("[data-prompt-preview]");
-      const copyBtn = root.querySelector("[data-copy-prompt]");
-      const connectStatus = root.querySelector("[data-connect-status]");
-
-      // "Mit Claude/ChatGPT verbinden": copy the connector URL, then let the link open the
-      // AI's connector settings in a new tab. No site can install a custom connector via URL,
-      // so this is the honest shortest path (copy + open + paste).
-      root.querySelectorAll("[data-connect]").forEach((link) => {
-        link.addEventListener("click", () => {
-          const url = link.getAttribute("data-connect-url") || "";
-          if (!url) return;
-          // Synchronous copy first: it completes before the new tab takes focus.
-          let ok = copyTextSync(url);
-          try {
-            if (navigator.clipboard && window.isSecureContext) {
-              navigator.clipboard.writeText(url).catch(() => {});
-              ok = true;
-            }
-          } catch {
-            // keep the synchronous result
-          }
-          if (connectStatus) {
-            connectStatus.textContent =
-              (ok ? link.getAttribute("data-connect-hint") : link.getAttribute("data-connect-failed")) || "";
-            connectStatus.setAttribute("data-state", ok ? "copied" : "failed");
-          }
-        });
-      });
-
-      const currentPrompt = () => {
-        const active = chips.find((chip) => chip.getAttribute("aria-pressed") === "true");
-        const tail = (active && active.getAttribute("data-wish-tail")) || defaultTail;
-        return `${head} ${tail}`.trim();
-      };
-
-      const sync = () => {
-        const prompt = currentPrompt();
-        // Same strict RFC 3986 encoding as the server-rendered links
-        const encoded = encodeURIComponent(prompt).replace(
-          /[!'()*]/g,
-          (ch) => "%" + ch.charCodeAt(0).toString(16).toUpperCase()
-        );
-        links.forEach((link) => {
-          const base = link.getAttribute("data-ai-base");
-          if (base) link.setAttribute("href", base + encoded);
-        });
-        if (preview) preview.textContent = prompt;
-      };
-
-      chips.forEach((chip) => {
-        chip.addEventListener("click", () => {
-          const wasActive = chip.getAttribute("aria-pressed") === "true";
-          chips.forEach((other) => other.setAttribute("aria-pressed", "false"));
-          chip.setAttribute("aria-pressed", String(!wasActive));
-          sync();
-        });
-      });
-
-      if (copyBtn instanceof HTMLButtonElement) {
-        copyBtn.addEventListener("click", async () => {
-          const ok = await copyText(currentPrompt());
-          if (ok) {
-            flashCopied(copyBtn);
-          } else {
-            const peek = root.querySelector(".prompt-peek");
-            if (peek instanceof HTMLDetailsElement) peek.open = true;
-          }
-        });
-      }
-    });
-  };
-
-  // =========================================================================
-  // 4. Accessible tabs (developer section)
+  // 3. Accessible tabs (connect client switcher + developer section)
   // =========================================================================
   const initTabs = () => {
     const tablists = document.querySelectorAll('[role="tablist"]');
@@ -1007,7 +936,6 @@
 
   initHeroFlow();
   initCopyButtons();
-  initLaunchers();
   initTabs();
   initDemoShowcase();
 })();

@@ -151,7 +151,10 @@ export function buildStartPrompt(config: AppConfig, lang: Lang, tail?: string): 
   return `${startPromptHead(config, lang)} ${tail ?? defaultPromptTail(lang)}`;
 }
 
-/** Where "Mit Claude/ChatGPT/Gemini verbinden" sends people after copying the connector URL. */
+/** Official Claude Directory 1-click connect URL. */
+export const CLAUDE_DIRECTORY_URL = "https://claude.ai/directory/shopcart-mcp";
+
+/** Where manual/custom connector links send people. */
 export const CONNECT_SETTINGS_URLS = {
   claude: "https://claude.ai/settings/connectors",
   chatgpt: "https://chatgpt.com/#settings/Connectors",
@@ -274,11 +277,11 @@ export function getHowTo(lang: Lang): HowToContent {
       steps: [
         {
           name: "Einmal verbinden",
-          text: "Tippe auf „Mit Claude verbinden“, „Mit ChatGPT verbinden“ oder „Mit Gemini verbinden“. Dein ShopCart-Link wird kopiert und die Einstellungen deiner KI öffnen sich: einfügen, kostenlos anmelden, fertig."
+          text: "Wähle deinen KI-Client: In Claude verbindest du ShopCart mit 1 Klick über das Claude Directory (danach auch in der Claude Mobile App). Für ChatGPT, Cursor, Claude Code oder andere MCP-Clients kopierst du einfach die Endpoint-URL bzw. den CLI-Befehl."
         },
         {
           name: "Chat starten",
-          text: "Tippe auf „In Claude starten“ oder „In ChatGPT starten“ – oder kopiere den Startprompt direkt für Google Gemini und jede andere KI."
+          text: "Öffne einen neuen Chat in Claude, ChatGPT, Google Gemini oder deiner CLI und beschreibe kurz, wonach du suchst."
         },
         {
           name: "Wunsch sagen",
@@ -298,11 +301,11 @@ export function getHowTo(lang: Lang): HowToContent {
     steps: [
       {
         name: "Connect once",
-        text: "Tap “Connect to Claude”, “Connect to ChatGPT”, or “Connect to Gemini”. Your ShopCart link is copied and your AI's settings open: paste it, sign in for free, done."
+        text: "Pick your AI client: in Claude, connect ShopCart in 1 click via the Claude Directory (it works in the Claude mobile app too). For ChatGPT, Cursor, Claude Code, or other MCP clients, copy the endpoint URL or CLI command."
       },
       {
         name: "Start a chat",
-        text: "Tap “Start in Claude” or “Start in ChatGPT” — or copy the start prompt for Google Gemini and any other AI."
+        text: "Open a new chat in Claude, ChatGPT, Google Gemini, or your CLI and describe what you are looking for."
       },
       {
         name: "Say what you want",
@@ -335,7 +338,7 @@ export function getFaq(config: AppConfig, lang: Lang): FaqItem[] {
       },
       {
         q: "Wie richte ich ShopCart in Claude oder ChatGPT ein?",
-        a: `Tippe auf „Mit Claude verbinden“ oder „Mit ChatGPT verbinden“: Dein ShopCart-Link ${mcpUrl} wird kopiert und die Connector-Einstellungen deiner KI öffnen sich. Dort fügst du den Link als eigenen Connector ein und meldest dich einmalig kostenlos an. Aus Sicherheitsgründen lässt sich ein Connector nicht vollautomatisch von einer Website installieren, deshalb sind es zwei Klicks statt einem. Danach tippst du auf „In Claude starten“ oder „In ChatGPT starten“ und lässt dir sofort deinen ersten Warenkorb mit Claude oder ChatGPT bauen.`
+        a: `In Claude verbindest du ShopCart mit einem Klick direkt über das Claude Directory (${CLAUDE_DIRECTORY_URL}) – nach einmaligem Web-Connect funktioniert ShopCart auch automatisch in der Claude Mobile App (alternativ lokal per .mcpb-Erweiterung für Claude Desktop). In ChatGPT kopierst du die Endpoint-URL ${mcpUrl} und fügst sie unter Einstellungen → Apps / Connectors als Custom MCP (OAuth) hinzu (der OpenAI-Directory-Eintrag ist aktuell in Review).`
       },
       {
         q: "Funktioniert ShopCart MCP mit Google Gemini?",
@@ -379,7 +382,7 @@ export function getFaq(config: AppConfig, lang: Lang): FaqItem[] {
     },
     {
       q: "How do I connect ShopCart to Claude or ChatGPT?",
-      a: `Tap “Connect to Claude” or “Connect to ChatGPT”: your ShopCart link ${mcpUrl} is copied and your AI's connector settings open. Paste the link there as a custom connector and sign in once for free. For security reasons, a website cannot install a connector fully automatically, so it takes two clicks instead of one. After that, tap “Start in Claude” or “Start in ChatGPT” and your Claude shopping cart or ChatGPT shopping session is one sentence away.`
+      a: `In Claude, connect ShopCart in one click directly via the Claude Directory (${CLAUDE_DIRECTORY_URL}) — after connecting once on web, it also works automatically in the Claude mobile app (or download the .mcpb extension for Claude Desktop). In ChatGPT, copy the endpoint URL ${mcpUrl} and add it as a Custom MCP (OAuth) under Settings → Apps / Connectors (the OpenAI Directory listing is currently in review).`
     },
     {
       q: "Does ShopCart MCP work with Google Gemini?",
