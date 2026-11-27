@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import request from "supertest";
-import type Stripe from "stripe";
+import Stripe from "stripe";
 import { createApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import {
@@ -398,5 +398,102 @@ describe("Stripe checkout polish (locale + allow_promotion_codes)", () => {
 
     expect(createSession).not.toHaveBeenCalled();
     expect(createPortalSession).not.toHaveBeenCalled();
+  });
+
+  it("releases stripe_events claim on transient storage failure so webhook retry applies downgrade, returns 500 without leaking internals, and deduplicates subsequent deliveries", async () => {
+    const webhookSecret = "whsec_test_retry_hardening_secret_123";
+    const config = loadConfig({
+      APP_ORIGIN: "https://shopcart.wals.pro",
+      SESSION_SECRET: "d".repeat(40),
+      STRIPE_SECRET_KEY: "sk_test_dummy",
+      STRIPE_WEBHOOK_SECRET: webhookSecret,
+      STRIPE_PRO_PRICE_ID: "price_pro_eur_9"
+    });
+    const store = new MemoryStore();
+    const user = makeUser({
+      id: "user_retry_1",
+      email: "pro@example.de",
+      plan: "pro",
+      status: "active",
+      stripeCustomerId: "cus_retry_1",
+      stripeSubscriptionId: "sub_retry_1"
+    });
+    await store.createUser(user);
+
+    const origUpdateUser = store.updateUser.bind(store);
+    let failOnce = true;
+    store.updateUser = async (userId, patch) => {
+      if (failOnce) {
+        failOnce = false;
+        throw new Error("Simulated Firestore DEADLINE_EXCEEDED internal detail");
+      }
+      return origUpdateUser(userId, patch);
+    };
+
+    const app = createApp({ config, store });
+    const stripeHelper = new Stripe("sk_test_dummy");
+    const payload = JSON.stringify({
+      id: "evt_sub_deleted_retry_1",
+      object: "event",
+      type: "customer.subscription.deleted",
+      data: {
+        object: {
+          id: "sub_retry_1",
+          object: "subscription",
+          customer: "cus_retry_1",
+          status: "canceled",
+          metadata: { user_id: "user_retry_1" }
+        }
+      }
+    });
+    const validSig = stripeHelper.webhooks.generateTestHeaderString({
+      payload,
+      secret: webhookSecret
+    });
+
+    // Invalid signature -> 400 webhook_error
+    await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", "t=123,v1=invalid")
+      .send(payload)
+      .expect(400);
+
+    // Attempt 1: transient storage failure -> 500 (triggers Stripe retry), no raw internal error leaked, claim released
+    const res1 = await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", validSig)
+      .send(payload)
+      .expect(500);
+    expect(res1.body.error).toBe("webhook_processing_error");
+    expect(JSON.stringify(res1.body)).not.toContain("DEADLINE_EXCEEDED");
+    expect((await store.getUserById(user.id))?.plan).toBe("pro");
+
+    // Attempt 2 (Stripe retry of exact same event): claim was released, so downgrade is cleanly applied
+    const res2 = await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", validSig)
+      .send(payload)
+      .expect(200);
+    expect(res2.body).toEqual({ received: true, type: "customer.subscription.deleted" });
+    const downgraded = await store.getUserById(user.id);
+    expect(downgraded?.plan).toBe("free");
+    expect(downgraded?.status).toBe("canceled");
+    expect(downgraded?.stripeSubscriptionId).toBeNull();
+
+    // Attempt 3 (true duplicate delivery): returns duplicate: true
+    const res3 = await request(app)
+      .post("/webhooks/stripe")
+      .set("Content-Type", "application/json")
+      .set("Stripe-Signature", validSig)
+      .send(payload)
+      .expect(200);
+    expect(res3.body).toEqual({
+      received: true,
+      duplicate: true,
+      type: "customer.subscription.deleted"
+    });
   });
 });

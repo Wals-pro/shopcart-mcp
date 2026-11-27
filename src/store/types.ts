@@ -101,9 +101,27 @@ export type EmailChallengeVerifyResult =
   | { status: "not_found" }
   | { status: "browser_mismatch"; challenge: EmailAuthChallengeRecord };
 
+export interface RotateRefreshTokenParams {
+  tokenHash: string;
+  expectedClientId: string;
+  requestedResource?: string;
+  nextAccessTokenHash: string;
+  nextRefreshTokenHash: string;
+  accessTtlSeconds: number;
+  refreshTtlSeconds: number;
+  now?: Date;
+}
+
 export type RefreshRotationResult =
-  | { status: "ok"; record: OAuthTokenRecord }
+  | {
+      status: "ok";
+      record: OAuthTokenRecord;
+      accessToken: OAuthTokenRecord;
+      refreshToken: OAuthTokenRecord;
+    }
   | { status: "replayed"; familyId: string }
+  | { status: "client_mismatch"; familyId: string }
+  | { status: "resource_mismatch" }
   | { status: "invalid" };
 
 export interface StorageBackend {
@@ -128,7 +146,7 @@ export interface StorageBackend {
   // Tokens (Access & Refresh)
   saveOAuthToken(token: OAuthTokenRecord): Promise<void>;
   getOAuthToken(tokenHash: string): Promise<OAuthTokenRecord | null>;
-  rotateRefreshToken(tokenHash: string): Promise<RefreshRotationResult>;
+  rotateRefreshToken(params: RotateRefreshTokenParams): Promise<RefreshRotationResult>;
   revokeToken(tokenHash: string): Promise<void>;
   revokeTokenFamily(familyId: string): Promise<void>;
 
@@ -162,4 +180,5 @@ export interface StorageBackend {
 
   // Stripe Webhook Idempotency
   claimStripeEvent(eventId: string, type: string): Promise<boolean>;
+  releaseStripeEvent(eventId: string): Promise<void>;
 }

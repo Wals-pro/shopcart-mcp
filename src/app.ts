@@ -19,6 +19,7 @@ import { consumeUserToolQuota } from "./billing/quota.js";
 import {
   isStripeWebhookConfigured,
   processStripeWebhook,
+  StripeWebhookSignatureError,
   type BillingStripeClient
 } from "./billing/stripe.js";
 import type { AppConfig } from "./config.js";
@@ -175,9 +176,16 @@ export function createApp(deps: CreateAppDeps): Express {
         const result = await processStripeWebhook(rawBody, signature, config, store);
         res.status(200).json(result);
       } catch (err) {
-        res.status(400).json({
-          error: "webhook_error",
-          message: err instanceof Error ? err.message : "Invalid webhook payload"
+        if (err instanceof StripeWebhookSignatureError) {
+          res.status(400).json({
+            error: "webhook_error",
+            message: "Invalid webhook signature or payload"
+          });
+          return;
+        }
+        res.status(500).json({
+          error: "webhook_processing_error",
+          message: "Temporary webhook processing error"
         });
       }
     }

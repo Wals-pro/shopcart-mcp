@@ -8,10 +8,48 @@ import type {
   OAuthCodeRecord,
   OAuthTokenRecord,
   RefreshRotationResult,
+  RotateRefreshTokenParams,
   StorageBackend,
   UserRecord,
   WebSessionRecord
 } from "./types.js";
+
+const GRPC_NOT_FOUND = 5;
+const GRPC_ALREADY_EXISTS = 6;
+const FAMILY_REVOCATION_TTL_MS = 95 * 24 * 3600 * 1000;
+const MAX_BATCH_WRITES = 400;
+
+function isGrpcErrorCode(err: unknown, expectedCode: number): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code: unknown }).code === expectedCode
+  );
+}
+
+function isSafeFirestoreDocId(id: string): boolean {
+  if (!id || id.length > 512) return false;
+  if (id === "." || id === "..") return false;
+  if (id.includes("/") || id.includes("..")) return false;
+  if (id.startsWith("__") && id.endsWith("__")) return false;
+  return true;
+}
+
+function toFirestoreTokenDoc(token: OAuthTokenRecord): Record<string, unknown> {
+  return {
+    type: token.type,
+    familyId: token.familyId,
+    userId: token.userId,
+    clientId: token.clientId,
+    resource: token.resource,
+    scopes: token.scopes,
+    rotatedAt: token.rotatedAt ? Timestamp.fromDate(token.rotatedAt) : null,
+    revoked: token.revoked,
+    createdAt: Timestamp.fromDate(token.createdAt),
+    expiresAt: Timestamp.fromDate(token.expiresAt)
+  };
+}
 
 function toDate(val: unknown): Date {
   if (val instanceof Date) return val;
@@ -28,11 +66,13 @@ function toNullableDate(val: unknown): Date | null {
 export class FirestoreStore implements StorageBackend {
   private readonly db: Firestore;
 
-  constructor(projectId?: string) {
-    this.db = new Firestore({
-      projectId,
-      ignoreUndefinedProperties: true
-    });
+  constructor(projectId?: string, db?: Firestore) {
+    this.db =
+      db ??
+      new Firestore({
+        projectId,
+        ignoreUndefinedProperties: true
+      });
   }
 
   async ping(): Promise<boolean> {
@@ -132,21 +172,49 @@ export class FirestoreStore implements StorageBackend {
   }
 
   async getOAuthClient(clientId: string): Promise<OAuthClientRecord | null> {
+    if (!isSafeFirestoreDocId(clientId)) return null;
     const snap = await this.db.collection("oauth_clients").doc(clientId).get();
     if (!snap.exists) return null;
-    const d = snap.data()!;
+    const d = snap.data();
+    if (!d) return null;
     const expiresAt = toDate(d.expiresAt);
     if (expiresAt.getTime() <= Date.now()) return null;
+
+    // Fail-closed on incomplete or corrupted client records (never downgrade auth method to "none")
+    if (!Array.isArray(d.redirectUris) || d.redirectUris.length === 0) {
+      return null;
+    }
+    const redirectUris: string[] = [];
+    for (const uri of d.redirectUris) {
+      if (typeof uri !== "string" || uri.trim().length === 0) {
+        return null;
+      }
+      redirectUris.push(uri);
+    }
+
+    if (
+      d.tokenEndpointAuthMethod !== "none" &&
+      d.tokenEndpointAuthMethod !== "client_secret_basic" &&
+      d.tokenEndpointAuthMethod !== "client_secret_post"
+    ) {
+      return null;
+    }
+    const tokenEndpointAuthMethod = d.tokenEndpointAuthMethod;
+
+    let clientSecretHash: string | null = null;
+    if (tokenEndpointAuthMethod !== "none") {
+      if (typeof d.clientSecretHash !== "string" || d.clientSecretHash.trim().length === 0) {
+        return null;
+      }
+      clientSecretHash = d.clientSecretHash;
+    }
+
     return {
       clientId: snap.id,
       clientName: String(d.clientName ?? "OAuth Client"),
-      redirectUris: Array.isArray(d.redirectUris) ? d.redirectUris.map(String) : [],
-      tokenEndpointAuthMethod:
-        d.tokenEndpointAuthMethod === "client_secret_basic" ||
-        d.tokenEndpointAuthMethod === "client_secret_post"
-          ? d.tokenEndpointAuthMethod
-          : "none",
-      clientSecretHash: typeof d.clientSecretHash === "string" ? d.clientSecretHash : null,
+      redirectUris,
+      tokenEndpointAuthMethod,
+      clientSecretHash,
       scope: typeof d.scope === "string" ? d.scope : "mcp:read",
       activated: Boolean(d.activated),
       createdAt: toDate(d.createdAt),
@@ -171,16 +239,21 @@ export class FirestoreStore implements StorageBackend {
   }
 
   async activateOAuthClient(clientId: string, newExpiresAt: Date): Promise<void> {
-    await this.db
-      .collection("oauth_clients")
-      .doc(clientId)
-      .set(
-        {
+    if (!isSafeFirestoreDocId(clientId)) return;
+    try {
+      await this.db
+        .collection("oauth_clients")
+        .doc(clientId)
+        .update({
           activated: true,
           expiresAt: Timestamp.fromDate(newExpiresAt)
-        },
-        { merge: true }
-      );
+        });
+    } catch (err) {
+      if (isGrpcErrorCode(err, GRPC_NOT_FOUND)) {
+        return;
+      }
+      throw err;
+    }
   }
 
   async saveOAuthCode(code: OAuthCodeRecord): Promise<void> {
@@ -232,18 +305,7 @@ export class FirestoreStore implements StorageBackend {
     await this.db
       .collection("oauth_tokens")
       .doc(token.tokenHash)
-      .set({
-        type: token.type,
-        familyId: token.familyId,
-        userId: token.userId,
-        clientId: token.clientId,
-        resource: token.resource,
-        scopes: token.scopes,
-        rotatedAt: token.rotatedAt ? Timestamp.fromDate(token.rotatedAt) : null,
-        revoked: token.revoked,
-        createdAt: Timestamp.fromDate(token.createdAt),
-        expiresAt: Timestamp.fromDate(token.expiresAt)
-      });
+      .set(toFirestoreTokenDoc(token));
   }
 
   private mapToken(tokenHash: string, d: FirebaseFirestore.DocumentData): OAuthTokenRecord {
@@ -263,29 +325,109 @@ export class FirestoreStore implements StorageBackend {
   }
 
   async getOAuthToken(tokenHash: string): Promise<OAuthTokenRecord | null> {
+    if (!isSafeFirestoreDocId(tokenHash)) return null;
     const snap = await this.db.collection("oauth_tokens").doc(tokenHash).get();
     if (!snap.exists) return null;
-    return this.mapToken(tokenHash, snap.data()!);
+    const rec = this.mapToken(tokenHash, snap.data()!);
+    if (!rec.revoked && isSafeFirestoreDocId(rec.familyId)) {
+      const familySnap = await this.db.collection("oauth_revoked_families").doc(rec.familyId).get();
+      if (familySnap.exists) {
+        return { ...rec, revoked: true };
+      }
+    }
+    return rec;
   }
 
-  async rotateRefreshToken(tokenHash: string): Promise<RefreshRotationResult> {
-    const ref = this.db.collection("oauth_tokens").doc(tokenHash);
+  async rotateRefreshToken(params: RotateRefreshTokenParams): Promise<RefreshRotationResult> {
+    if (!isSafeFirestoreDocId(params.tokenHash)) return { status: "invalid" };
+    const now = params.now ?? new Date();
+    const nowTs = Timestamp.fromDate(now);
+    const familyRevokeExpiresTs = Timestamp.fromDate(new Date(now.getTime() + FAMILY_REVOCATION_TTL_MS));
+    const refreshRef = this.db.collection("oauth_tokens").doc(params.tokenHash);
+
     const result = await this.db.runTransaction(async (tx): Promise<RefreshRotationResult> => {
-      const snap = await tx.get(ref);
+      const snap = await tx.get(refreshRef);
       if (!snap.exists) return { status: "invalid" };
-      const rec = this.mapToken(tokenHash, snap.data()!);
-      if (rec.type !== "refresh" || rec.revoked || rec.expiresAt.getTime() <= Date.now()) {
+      const rec = this.mapToken(params.tokenHash, snap.data()!);
+      if (rec.type !== "refresh" || rec.expiresAt.getTime() <= now.getTime()) {
         return { status: "invalid" };
       }
+      if (!isSafeFirestoreDocId(rec.familyId)) {
+        return { status: "invalid" };
+      }
+
+      const familyRef = this.db.collection("oauth_revoked_families").doc(rec.familyId);
+      const familySnap = await tx.get(familyRef);
+
+      if (rec.revoked || familySnap.exists) {
+        return { status: "invalid" };
+      }
+
       if (rec.rotatedAt !== null) {
+        tx.set(familyRef, {
+          familyId: rec.familyId,
+          revokedAt: nowTs,
+          expiresAt: familyRevokeExpiresTs
+        });
+        tx.update(refreshRef, { revoked: true });
         return { status: "replayed", familyId: rec.familyId };
       }
-      const now = new Date();
-      tx.update(ref, { rotatedAt: Timestamp.fromDate(now) });
-      return { status: "ok", record: { ...rec, rotatedAt: now } };
+
+      if (rec.clientId !== params.expectedClientId) {
+        tx.set(familyRef, {
+          familyId: rec.familyId,
+          revokedAt: nowTs,
+          expiresAt: familyRevokeExpiresTs
+        });
+        tx.update(refreshRef, { revoked: true });
+        return { status: "client_mismatch", familyId: rec.familyId };
+      }
+
+      if (params.requestedResource !== undefined && params.requestedResource !== rec.resource) {
+        return { status: "resource_mismatch" };
+      }
+
+      const accessToken: OAuthTokenRecord = {
+        tokenHash: params.nextAccessTokenHash,
+        type: "access",
+        familyId: rec.familyId,
+        userId: rec.userId,
+        clientId: rec.clientId,
+        resource: rec.resource,
+        scopes: [...rec.scopes],
+        rotatedAt: null,
+        revoked: false,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + params.accessTtlSeconds * 1000)
+      };
+      const refreshToken: OAuthTokenRecord = {
+        tokenHash: params.nextRefreshTokenHash,
+        type: "refresh",
+        familyId: rec.familyId,
+        userId: rec.userId,
+        clientId: rec.clientId,
+        resource: rec.resource,
+        scopes: [...rec.scopes],
+        rotatedAt: null,
+        revoked: false,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + params.refreshTtlSeconds * 1000)
+      };
+
+      const newAccessRef = this.db.collection("oauth_tokens").doc(accessToken.tokenHash);
+      const newRefreshRef = this.db.collection("oauth_tokens").doc(refreshToken.tokenHash);
+      tx.update(refreshRef, { rotatedAt: nowTs });
+      tx.set(newAccessRef, toFirestoreTokenDoc(accessToken));
+      tx.set(newRefreshRef, toFirestoreTokenDoc(refreshToken));
+      return {
+        status: "ok",
+        record: { ...rec, rotatedAt: now },
+        accessToken,
+        refreshToken
+      };
     });
 
-    if (result.status === "replayed") {
+    if (result.status === "replayed" || result.status === "client_mismatch") {
       await this.revokeTokenFamily(result.familyId);
     }
     return result;
@@ -297,22 +439,62 @@ export class FirestoreStore implements StorageBackend {
     if (rec.type === "refresh") {
       await this.revokeTokenFamily(rec.familyId);
     } else {
-      await this.db.collection("oauth_tokens").doc(tokenHash).update({ revoked: true });
+      try {
+        await this.db.collection("oauth_tokens").doc(tokenHash).update({ revoked: true });
+      } catch (err) {
+        if (!isGrpcErrorCode(err, GRPC_NOT_FOUND)) {
+          throw err;
+        }
+      }
     }
   }
 
   async revokeTokenFamily(familyId: string): Promise<void> {
+    if (!isSafeFirestoreDocId(familyId)) return;
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + FAMILY_REVOCATION_TTL_MS);
+
+    // 1. Persist family revocation marker FIRST so any concurrent read/rotation immediately fails closed.
+    await this.db
+      .collection("oauth_revoked_families")
+      .doc(familyId)
+      .set({
+        familyId,
+        revokedAt: Timestamp.fromDate(now),
+        expiresAt: Timestamp.fromDate(expiresAt)
+      });
+
+    // 2. Sweep individual token docs in bounded batches (<= 400 writes, safely below Firestore's 500 limit).
     const snap = await this.db
       .collection("oauth_tokens")
       .where("familyId", "==", familyId)
       .where("revoked", "==", false)
       .get();
     if (snap.empty) return;
-    const batch = this.db.batch();
-    for (const doc of snap.docs) {
-      batch.update(doc.ref, { revoked: true });
+
+    for (let i = 0; i < snap.docs.length; i += MAX_BATCH_WRITES) {
+      const chunk = snap.docs.slice(i, i + MAX_BATCH_WRITES);
+      const batch = this.db.batch();
+      for (const doc of chunk) {
+        batch.update(doc.ref, { revoked: true });
+      }
+      try {
+        await batch.commit();
+      } catch (err) {
+        if (!isGrpcErrorCode(err, GRPC_NOT_FOUND)) {
+          throw err;
+        }
+        for (const doc of chunk) {
+          try {
+            await doc.ref.update({ revoked: true });
+          } catch (docErr) {
+            if (!isGrpcErrorCode(docErr, GRPC_NOT_FOUND)) {
+              throw docErr;
+            }
+          }
+        }
+      }
     }
-    await batch.commit();
   }
 
   async saveWebSession(session: WebSessionRecord): Promise<void> {
@@ -509,6 +691,9 @@ export class FirestoreStore implements StorageBackend {
   }
 
   async claimStripeEvent(eventId: string, type: string): Promise<boolean> {
+    if (!isSafeFirestoreDocId(eventId)) {
+      throw new Error("Invalid Stripe event ID");
+    }
     try {
       const now = new Date();
       const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
@@ -522,10 +707,21 @@ export class FirestoreStore implements StorageBackend {
         });
       return true;
     } catch (err) {
-      if (typeof err === "object" && err !== null && "code" in err && (err as { code: number }).code === 6) {
+      if (isGrpcErrorCode(err, GRPC_ALREADY_EXISTS)) {
         return false;
       }
       throw err;
+    }
+  }
+
+  async releaseStripeEvent(eventId: string): Promise<void> {
+    if (!isSafeFirestoreDocId(eventId)) return;
+    try {
+      await this.db.collection("stripe_events").doc(eventId).delete();
+    } catch (err) {
+      if (!isGrpcErrorCode(err, GRPC_NOT_FOUND)) {
+        throw err;
+      }
     }
   }
 }

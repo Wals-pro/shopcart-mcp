@@ -121,6 +121,13 @@ function mapStripeSubscriptionState(
   return { plan: "free", status: "canceled" };
 }
 
+export class StripeWebhookSignatureError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StripeWebhookSignatureError";
+  }
+}
+
 export async function processStripeWebhook(
   rawBody: Buffer,
   signature: string | undefined,
@@ -131,92 +138,104 @@ export async function processStripeWebhook(
     throw new Error("Stripe webhook is not configured");
   }
   if (!signature) {
-    throw new Error("Missing Stripe-Signature header");
+    throw new StripeWebhookSignatureError("Missing Stripe-Signature header");
   }
 
   const stripe = getStripeClient(config);
-  const event = stripe.webhooks.constructEvent(rawBody, signature, config.stripeWebhookSecret!);
+  let event: Stripe.Event;
+  try {
+    event = stripe.webhooks.constructEvent(rawBody, signature, config.stripeWebhookSecret!);
+  } catch (err) {
+    throw new StripeWebhookSignatureError(
+      err instanceof Error ? err.message : "Invalid Stripe webhook signature"
+    );
+  }
 
   const claimed = await store.claimStripeEvent(event.id, event.type);
   if (!claimed) {
     return { received: true, duplicate: true, type: event.type };
   }
 
-  switch (event.type) {
-    case "checkout.session.completed": {
-      const session = event.data.object as Stripe.Checkout.Session;
-      const userId = session.client_reference_id ?? session.metadata?.user_id;
-      const customerId = typeof session.customer === "string" ? session.customer : null;
-      const subscriptionId =
-        typeof session.subscription === "string" ? session.subscription : null;
+  try {
+    switch (event.type) {
+      case "checkout.session.completed": {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const userId = session.client_reference_id ?? session.metadata?.user_id;
+        const customerId = typeof session.customer === "string" ? session.customer : null;
+        const subscriptionId =
+          typeof session.subscription === "string" ? session.subscription : null;
 
-      let user = userId ? await store.getUserById(userId) : null;
-      if (!user && customerId) {
-        user = await store.getUserByStripeCustomerId(customerId);
+        let user = userId ? await store.getUserById(userId) : null;
+        if (!user && customerId) {
+          user = await store.getUserByStripeCustomerId(customerId);
+        }
+        if (user) {
+          await store.updateUser(user.id, {
+            plan: "pro",
+            status: "active",
+            stripeCustomerId: customerId ?? user.stripeCustomerId,
+            stripeSubscriptionId: subscriptionId ?? user.stripeSubscriptionId
+          });
+        }
+        break;
       }
-      if (user) {
-        await store.updateUser(user.id, {
-          plan: "pro",
-          status: "active",
-          stripeCustomerId: customerId ?? user.stripeCustomerId,
-          stripeSubscriptionId: subscriptionId ?? user.stripeSubscriptionId
-        });
+
+      case "customer.subscription.updated": {
+        const sub = event.data.object as Stripe.Subscription;
+        const customerId = typeof sub.customer === "string" ? sub.customer : null;
+        const userId = sub.metadata?.user_id;
+        const user =
+          (userId ? await store.getUserById(userId) : null) ??
+          (customerId ? await store.getUserByStripeCustomerId(customerId) : null);
+
+        if (user) {
+          const periodEnd = sub.current_period_end ? new Date(sub.current_period_end * 1000) : null;
+          const mapped = mapStripeSubscriptionState(sub.status, periodEnd);
+          await store.updateUser(user.id, {
+            plan: mapped.plan,
+            status: mapped.status,
+            stripeCustomerId: customerId ?? user.stripeCustomerId,
+            stripeSubscriptionId: sub.id,
+            currentPeriodEnd: periodEnd
+          });
+        }
+        break;
       }
-      break;
+
+      case "customer.subscription.deleted": {
+        const sub = event.data.object as Stripe.Subscription;
+        const customerId = typeof sub.customer === "string" ? sub.customer : null;
+        const userId = sub.metadata?.user_id;
+        const user =
+          (userId ? await store.getUserById(userId) : null) ??
+          (customerId ? await store.getUserByStripeCustomerId(customerId) : null);
+
+        if (user) {
+          await store.updateUser(user.id, {
+            plan: "free",
+            status: "canceled",
+            stripeSubscriptionId: null
+          });
+        }
+        break;
+      }
+
+      case "invoice.payment_failed": {
+        const invoice = event.data.object as Stripe.Invoice;
+        const customerId = typeof invoice.customer === "string" ? invoice.customer : null;
+        const user = customerId ? await store.getUserByStripeCustomerId(customerId) : null;
+        if (user) {
+          await store.updateUser(user.id, { status: "past_due" });
+        }
+        break;
+      }
+
+      default:
+        break;
     }
-
-    case "customer.subscription.updated": {
-      const sub = event.data.object as Stripe.Subscription;
-      const customerId = typeof sub.customer === "string" ? sub.customer : null;
-      const userId = sub.metadata?.user_id;
-      const user =
-        (userId ? await store.getUserById(userId) : null) ??
-        (customerId ? await store.getUserByStripeCustomerId(customerId) : null);
-
-      if (user) {
-        const periodEnd = sub.current_period_end ? new Date(sub.current_period_end * 1000) : null;
-        const mapped = mapStripeSubscriptionState(sub.status, periodEnd);
-        await store.updateUser(user.id, {
-          plan: mapped.plan,
-          status: mapped.status,
-          stripeCustomerId: customerId ?? user.stripeCustomerId,
-          stripeSubscriptionId: sub.id,
-          currentPeriodEnd: periodEnd
-        });
-      }
-      break;
-    }
-
-    case "customer.subscription.deleted": {
-      const sub = event.data.object as Stripe.Subscription;
-      const customerId = typeof sub.customer === "string" ? sub.customer : null;
-      const userId = sub.metadata?.user_id;
-      const user =
-        (userId ? await store.getUserById(userId) : null) ??
-        (customerId ? await store.getUserByStripeCustomerId(customerId) : null);
-
-      if (user) {
-        await store.updateUser(user.id, {
-          plan: "free",
-          status: "canceled",
-          stripeSubscriptionId: null
-        });
-      }
-      break;
-    }
-
-    case "invoice.payment_failed": {
-      const invoice = event.data.object as Stripe.Invoice;
-      const customerId = typeof invoice.customer === "string" ? invoice.customer : null;
-      const user = customerId ? await store.getUserByStripeCustomerId(customerId) : null;
-      if (user) {
-        await store.updateUser(user.id, { status: "past_due" });
-      }
-      break;
-    }
-
-    default:
-      break;
+  } catch (err) {
+    await store.releaseStripeEvent(event.id).catch(() => undefined);
+    throw err;
   }
 
   return { received: true, type: event.type };

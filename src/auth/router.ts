@@ -1018,11 +1018,49 @@ export function createOAuthRouter(
           return;
         }
 
-        const rotation = await store.rotateRefreshToken(sha256Hex(rawRefresh));
+        let requestedResource: string | undefined;
+        if (rawResource) {
+          const resolved = resolveResourceParam(rawResource, canonicalResource);
+          if (!resolved.ok) {
+            res.status(400).json({
+              error: "invalid_target",
+              error_description: "Resource mismatch with token grant"
+            });
+            return;
+          }
+          requestedResource = resolved.resource;
+        }
+
+        const newAccess = `sc_at_${randomToken(32)}`;
+        const newRefresh = `sc_rt_${randomToken(32)}`;
+        const rotation = await store.rotateRefreshToken({
+          tokenHash: sha256Hex(rawRefresh),
+          expectedClientId: client.clientId,
+          requestedResource,
+          nextAccessTokenHash: sha256Hex(newAccess),
+          nextRefreshTokenHash: sha256Hex(newRefresh),
+          accessTtlSeconds: ACCESS_TOKEN_TTL_SECONDS,
+          refreshTtlSeconds: REFRESH_TOKEN_TTL_SECONDS
+        });
+
         if (rotation.status === "replayed") {
           res.status(400).json({
             error: "invalid_grant",
             error_description: "Refresh token replay detected; token family revoked"
+          });
+          return;
+        }
+        if (rotation.status === "client_mismatch") {
+          res.status(400).json({
+            error: "invalid_grant",
+            error_description: "Refresh token client mismatch"
+          });
+          return;
+        }
+        if (rotation.status === "resource_mismatch") {
+          res.status(400).json({
+            error: "invalid_target",
+            error_description: "Resource mismatch with token grant"
           });
           return;
         }
@@ -1034,66 +1072,12 @@ export function createOAuthRouter(
           return;
         }
 
-        const prev = rotation.record;
-        if (prev.clientId !== client.clientId) {
-          await store.revokeTokenFamily(prev.familyId);
-          res.status(400).json({
-            error: "invalid_grant",
-            error_description: "Refresh token client mismatch"
-          });
-          return;
-        }
-
-        if (rawResource) {
-          const resolved = resolveResourceParam(rawResource, canonicalResource);
-          if (!resolved.ok || resolved.resource !== prev.resource) {
-            res.status(400).json({
-              error: "invalid_target",
-              error_description: "Resource mismatch with token grant"
-            });
-            return;
-          }
-        }
-
-        const now = new Date();
-        const newAccess = `sc_at_${randomToken(32)}`;
-        const newRefresh = `sc_rt_${randomToken(32)}`;
-
-        await Promise.all([
-          store.saveOAuthToken({
-            tokenHash: sha256Hex(newAccess),
-            type: "access",
-            familyId: prev.familyId,
-            userId: prev.userId,
-            clientId: prev.clientId,
-            resource: prev.resource,
-            scopes: prev.scopes,
-            rotatedAt: null,
-            revoked: false,
-            createdAt: now,
-            expiresAt: new Date(now.getTime() + ACCESS_TOKEN_TTL_SECONDS * 1000)
-          }),
-          store.saveOAuthToken({
-            tokenHash: sha256Hex(newRefresh),
-            type: "refresh",
-            familyId: prev.familyId,
-            userId: prev.userId,
-            clientId: prev.clientId,
-            resource: prev.resource,
-            scopes: prev.scopes,
-            rotatedAt: null,
-            revoked: false,
-            createdAt: now,
-            expiresAt: new Date(now.getTime() + REFRESH_TOKEN_TTL_SECONDS * 1000)
-          })
-        ]);
-
         res.status(200).json({
           access_token: newAccess,
           token_type: "Bearer",
           expires_in: ACCESS_TOKEN_TTL_SECONDS,
           refresh_token: newRefresh,
-          scope: prev.scopes.join(" ")
+          scope: rotation.record.scopes.join(" ")
         });
         return;
       }
